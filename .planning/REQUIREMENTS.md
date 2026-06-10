@@ -87,31 +87,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PROXY-01 | — | Pending |
-| PROXY-02 | — | Pending |
-| PROXY-03 | — | Pending |
-| PROXY-04 | — | Pending |
-| PROXY-05 | — | Pending |
-| STRM-01 | — | Pending |
-| STRM-02 | — | Pending |
-| STRM-03 | — | Pending |
-| DISC-01 | — | Pending |
-| DISC-02 | — | Pending |
-| DISC-03 | — | Pending |
-| DISC-04 | — | Pending |
-| LBAL-01 | — | Pending |
-| LBAL-02 | — | Pending |
-| RESL-01 | — | Pending |
-| RESL-02 | — | Pending |
-| RESL-03 | — | Pending |
-| RESL-04 | — | Pending |
-| OBSV-01 | — | Pending |
+| PROXY-01 | Phase 3 | Pending |
+| PROXY-02 | Phase 3 | Pending |
+| PROXY-03 | Phase 3 | Pending |
+| PROXY-04 | Phase 3 | Pending |
+| PROXY-05 | Phase 3 | Pending |
+| STRM-01 | Phase 3 | Pending |
+| STRM-02 | Phase 3 | Pending |
+| STRM-03 | Phase 3 | Pending |
+| DISC-01 | Phase 2 | Pending |
+| DISC-02 | Phase 2 | Pending |
+| DISC-03 | Phase 4 | Pending |
+| DISC-04 | Phase 6 | Pending |
+| LBAL-01 | Phase 4 | Pending |
+| LBAL-02 | Phase 4 | Pending |
+| RESL-01 | Phase 5 | Pending |
+| RESL-02 | Phase 5 | Pending |
+| RESL-03 | Phase 5 | Pending |
+| RESL-04 | Phase 5 | Pending |
+| OBSV-01 | Phase 6 | Pending |
 
 **Coverage:**
 - v1 requirements: 19 total
-- Mapped to phases: 0
-- Unmapped: 19 ⚠️
+- Mapped to phases: 19
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-10*
-*Last updated: 2026-06-10 after initial definition*
+*Last updated: 2026-06-10 after roadmap creation*
