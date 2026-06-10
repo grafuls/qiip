@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Phase Details
 
 ### Phase 1: Foundation
-**Goal**: Project builds, runs, and has a working test harness with shared data models
+**Goal**: As a developer, I want to start the gateway and run its test suite, so that I have a buildable, runnable, testable project skeleton for all future phases
 **Mode:** mvp
 **Depends on**: Nothing (first phase)
 **Requirements**: None directly (prerequisite infrastructure)
@@ -30,12 +30,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. Running `uv run pytest` executes the test suite and passes
   2. Running `uv run uvicorn` starts a FastAPI application that responds on a port
   3. Pydantic models for node state, gateway config, and OpenAI request/response schemas exist and validate input
-**Plans**: TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 01-01: TBD
-- [ ] 01-02: TBD
-- [ ] 01-03: TBD
+- [ ] 01-01-PLAN.md -- Project scaffold, FastAPI app factory, and passing smoke test
+- [ ] 01-02-PLAN.md -- Configuration settings and node state model with tests
+- [ ] 01-03-PLAN.md -- OpenAI request/response/streaming/error models with tests
 
 ### Phase 2: Service Discovery
 **Goal**: Gateway discovers and tracks vLLM nodes registered in etcd in real time
@@ -126,7 +126,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/3 | Not started | - |
+| 1. Foundation | 0/3 | Planning complete | - |
 | 2. Service Discovery | 0/3 | Not started | - |
 | 3. Request Proxying and Streaming | 0/4 | Not started | - |
 | 4. Intelligent Routing | 0/3 | Not started | - |
