@@ -163,35 +163,39 @@ class TestCancelCalledInFinally:
         mock_client.prefix = "/nodes/"
 
         cancel_fn = MagicMock()
-        mock_client.watch_prefix.return_value = (iter([]), cancel_fn)
 
-        registry = NodeRegistry()
+        # Return empty iterator once, then set stop on second call
         stop_event = threading.Event()
 
-        # Stop after first iteration
-        def stop_delayed() -> None:
-            while not cancel_fn.called:
-                pass
-            stop_event.set()
+        call_count = 0
 
-        stopper = threading.Thread(target=stop_delayed)
-        stopper.start()
+        def watch_side_effect() -> tuple:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return iter([]), cancel_fn
+            # Second call: signal stop and return another empty iter
+            stop_event.set()
+            return iter([]), MagicMock()
+
+        mock_client.watch_prefix.side_effect = watch_side_effect
+
+        registry = NodeRegistry()
 
         run_watcher(mock_client, registry, stop_event, retry_delay=0.01)
 
-        stopper.join(timeout=2)
         cancel_fn.assert_called_once()
 
-    def test_cancel_called_on_exception(self) -> None:
+    def test_cancel_called_on_iteration_error(self) -> None:
         mock_client = MagicMock(spec=EtcdClient)
         mock_client.prefix = "/nodes/"
 
         cancel_fn = MagicMock()
 
         def make_failing_iter():
-            """Iterator that raises after yielding nothing."""
-            raise ValueError("stream error")
-            yield  # noqa: E275 - make it a generator
+            """Iterator that raises during iteration."""
+            yield {"kv": {"key": "/nodes/n1", "value": b'{"endpoint": "http://x:1"}'}}
+            raise ValueError("stream error mid-iteration")
 
         call_count = 0
 
