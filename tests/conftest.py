@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Generator
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from inference_proxy.config.dependencies import get_settings
+from inference_proxy.config.dependencies import get_proxy_client, get_settings
 from inference_proxy.config.settings import (
     EtcdSettings,
     GatewaySettings,
@@ -17,6 +18,7 @@ from inference_proxy.config.settings import (
 )
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.main import create_app
+from inference_proxy.proxy.client import ProxyClient
 
 
 @pytest.fixture
@@ -36,11 +38,29 @@ def test_registry() -> NodeRegistry:
 
 
 @pytest.fixture
-def app(test_settings: Settings, test_registry: NodeRegistry) -> Generator[FastAPI, None, None]:
-    """Create a FastAPI app with test settings and registry injected."""
+def mock_http_client() -> httpx.AsyncClient:
+    """Return a real httpx.AsyncClient for use with httpx_mock."""
+    return httpx.AsyncClient()
+
+
+@pytest.fixture
+def proxy_client(mock_http_client: httpx.AsyncClient) -> ProxyClient:
+    """Return a ProxyClient wrapping the mock HTTP client."""
+    return ProxyClient(mock_http_client)
+
+
+@pytest.fixture
+def app(
+    test_settings: Settings,
+    test_registry: NodeRegistry,
+    proxy_client: ProxyClient,
+) -> Generator[FastAPI, None, None]:
+    """Create a FastAPI app with test settings, registry, and proxy client injected."""
     application = create_app(settings=test_settings)
     application.dependency_overrides[get_settings] = lambda: test_settings
     application.state.registry = test_registry
+    application.state.proxy_client = proxy_client
+    application.dependency_overrides[get_proxy_client] = lambda: proxy_client
     yield application
     application.dependency_overrides.clear()
     get_settings.cache_clear()
