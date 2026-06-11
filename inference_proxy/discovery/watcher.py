@@ -61,13 +61,21 @@ def run_watcher(
                 for event in events_iter:
                     if stop_event.is_set():
                         break
-                    _handle_event(event, registry, etcd_client.prefix)
+                    try:
+                        _handle_event(event, registry, etcd_client.prefix)
+                    except Exception:
+                        logger.warning(
+                            "failed to handle watch event, skipping",
+                            event=event,
+                            exc_info=True,
+                        )
             finally:
                 cancel()
         except Exception:
             logger.warning(
                 "etcd watch disconnected, reconnecting",
                 retry_delay=retry_delay,
+                exc_info=True,
             )
             if stop_event.wait(timeout=retry_delay):
                 # stop_event was set during the wait -- exit loop
@@ -86,8 +94,14 @@ def _handle_event(event: dict, registry: NodeRegistry, prefix: str) -> None:
         registry: The node registry to update.
         prefix: The configured node key prefix (e.g., ``/nodes/``).
     """
-    kv = event["kv"]
-    key = kv["key"]
+    kv = event.get("kv")
+    if kv is None:
+        logger.debug("skipping event without kv", event_type=event.get("type"))
+        return
+    key = kv.get("key")
+    if key is None:
+        logger.warning("skipping event with missing key")
+        return
 
     # Handle both bytes and str keys (Pitfall 2)
     if isinstance(key, bytes):

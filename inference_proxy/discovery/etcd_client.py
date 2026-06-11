@@ -14,9 +14,12 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import urlparse
 
+import structlog
 from etcd3gw.client import Etcd3Client
 
 from inference_proxy.config.settings import EtcdSettings
+
+logger = structlog.get_logger()
 
 
 class EtcdClient:
@@ -31,11 +34,23 @@ class EtcdClient:
     """
 
     def __init__(self, settings: EtcdSettings) -> None:
-        parsed = urlparse(settings.endpoints[0])
+        if len(settings.endpoints) > 1:
+            logger.warning(
+                "multiple etcd endpoints configured but only the first is used",
+                endpoint=settings.endpoints[0],
+                ignored=settings.endpoints[1:],
+            )
+        endpoint = settings.endpoints[0]
+        parsed = urlparse(endpoint)
+        if not parsed.scheme or not parsed.hostname:
+            raise ValueError(
+                f"Invalid etcd endpoint URL: '{endpoint}'. "
+                f"Must include scheme (e.g., 'http://etcd.internal:2379')"
+            )
         self._client = Etcd3Client(
-            host=parsed.hostname or "localhost",
+            host=parsed.hostname,
             port=parsed.port or 2379,
-            protocol=parsed.scheme or "http",
+            protocol=parsed.scheme,
         )
         self._prefix = settings.node_prefix
 

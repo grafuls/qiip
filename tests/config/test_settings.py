@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 from pydantic_settings import BaseSettings
 
 from inference_proxy.config.settings import (
@@ -66,6 +66,14 @@ class TestSubModelsAreNotBaseSettings:
         assert issubclass(GatewaySettings, BaseModel)
         assert issubclass(EtcdSettings, BaseModel)
         assert issubclass(RoutingSettings, BaseModel)
+
+
+class TestEtcdSettingsEmptyEndpointsRejected:
+    """EtcdSettings rejects an empty endpoints list with a validation error."""
+
+    def test_empty_endpoints_raises_validation_error(self) -> None:
+        with pytest.raises(ValidationError, match="At least one etcd endpoint must be configured"):
+            EtcdSettings(endpoints=[])
 
 
 class TestSettingsIsBaseSettings:

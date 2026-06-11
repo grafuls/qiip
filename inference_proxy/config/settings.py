@@ -5,7 +5,7 @@ nested env var resolution works correctly through the root Settings class.
 Only the root Settings class inherits from BaseSettings.
 """
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +21,14 @@ class EtcdSettings(BaseModel):
 
     endpoints: list[str] = ["http://localhost:2379"]
     node_prefix: str = "/nodes/"
+
+    @field_validator("endpoints")
+    @classmethod
+    def endpoints_must_be_non_empty(cls, v: list[str]) -> list[str]:
+        """Ensure at least one etcd endpoint is configured."""
+        if not v:
+            raise ValueError("At least one etcd endpoint must be configured")
+        return v
 
 
 class RoutingSettings(BaseModel):

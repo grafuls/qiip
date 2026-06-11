@@ -14,7 +14,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class NodeStatus(StrEnum):
@@ -29,12 +29,18 @@ class NodeStatus(StrEnum):
 class NodeCapabilities(BaseModel):
     """Hardware and serving capabilities of a node."""
 
+    model_config = ConfigDict(frozen=True)
+
     max_tokens: int = 4096
     gpu_memory: str = ""
 
 
 class Node(BaseModel):
     """A vLLM inference node registered in etcd.
+
+    Instances are immutable (``frozen=True``) to prevent external
+    mutation of registry entries without acquiring the registry lock.
+    Use ``model_copy(update={...})`` to create modified copies.
 
     Attributes:
         node_id: Unique identifier for the node.
@@ -45,6 +51,8 @@ class Node(BaseModel):
         capabilities: Hardware and serving capabilities.
         active_connections: Number of active inference requests.
     """
+
+    model_config = ConfigDict(frozen=True)
 
     node_id: str
     endpoint: str

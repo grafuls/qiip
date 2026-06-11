@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from inference_proxy.config.settings import EtcdSettings
 from inference_proxy.discovery.etcd_client import EtcdClient
 
@@ -125,4 +127,44 @@ class TestEtcdClientHttpsProtocol:
             host="secure-etcd.internal",
             port=2380,
             protocol="https",
+        )
+
+
+class TestEtcdClientSchemelessEndpointRejected:
+    """EtcdClient.__init__ raises ValueError for endpoint URLs missing a scheme."""
+
+    def test_schemeless_endpoint_raises_value_error(self) -> None:
+        settings = EtcdSettings(
+            endpoints=["etcd.internal:2379"],
+            node_prefix="/nodes/",
+        )
+        with pytest.raises(ValueError, match="Invalid etcd endpoint URL"):
+            EtcdClient(settings)
+
+    def test_hostname_only_endpoint_raises_value_error(self) -> None:
+        settings = EtcdSettings(
+            endpoints=["etcd.internal"],
+            node_prefix="/nodes/",
+        )
+        with pytest.raises(ValueError, match="Invalid etcd endpoint URL"):
+            EtcdClient(settings)
+
+
+class TestEtcdClientMultipleEndpointsWarning:
+    """EtcdClient.__init__ logs warning when multiple endpoints configured."""
+
+    @patch("inference_proxy.discovery.etcd_client.Etcd3Client")
+    @patch("inference_proxy.discovery.etcd_client.logger")
+    def test_multiple_endpoints_logs_warning(
+        self, mock_logger: MagicMock, mock_etcd3_cls: MagicMock
+    ) -> None:
+        settings = EtcdSettings(
+            endpoints=["http://etcd1:2379", "http://etcd2:2379"],
+            node_prefix="/nodes/",
+        )
+        EtcdClient(settings)
+        mock_logger.warning.assert_called_once_with(
+            "multiple etcd endpoints configured but only the first is used",
+            endpoint="http://etcd1:2379",
+            ignored=["http://etcd2:2379"],
         )

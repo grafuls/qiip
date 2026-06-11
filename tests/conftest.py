@@ -38,7 +38,7 @@ def test_registry() -> NodeRegistry:
 @pytest.fixture
 def app(test_settings: Settings, test_registry: NodeRegistry) -> Generator[FastAPI, None, None]:
     """Create a FastAPI app with test settings and registry injected."""
-    application = create_app()
+    application = create_app(settings=test_settings)
     application.dependency_overrides[get_settings] = lambda: test_settings
     application.state.registry = test_registry
     yield application
