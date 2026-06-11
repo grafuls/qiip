@@ -15,6 +15,7 @@ from inference_proxy.config.settings import (
     RoutingSettings,
     Settings,
 )
+from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.main import create_app
 
 
@@ -29,10 +30,17 @@ def test_settings() -> Settings:
 
 
 @pytest.fixture
-def app(test_settings: Settings) -> Generator[FastAPI, None, None]:
-    """Create a FastAPI app with test settings injected."""
+def test_registry() -> NodeRegistry:
+    """Return a fresh empty NodeRegistry for testing."""
+    return NodeRegistry()
+
+
+@pytest.fixture
+def app(test_settings: Settings, test_registry: NodeRegistry) -> Generator[FastAPI, None, None]:
+    """Create a FastAPI app with test settings and registry injected."""
     application = create_app()
     application.dependency_overrides[get_settings] = lambda: test_settings
+    application.state.registry = test_registry
     yield application
     application.dependency_overrides.clear()
 
