@@ -13,7 +13,7 @@ Deliver an OpenAI-compatible gateway that proxies inference requests to vLLM nod
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Foundation** - Project scaffolding, config, data models, and test infrastructure
+- [x] **Phase 1: Foundation** - Project scaffolding, config, data models, and test infrastructure (completed 2026-06-11)
 - [ ] **Phase 2: Service Discovery** - etcd-based node registry with watch-based live updates
 - [ ] **Phase 3: Request Proxying and Streaming** - OpenAI-compatible proxy with SSE streaming to vLLM nodes
 - [ ] **Phase 4: Intelligent Routing** - Least-connections load balancing with model-aware filtering
@@ -34,7 +34,7 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Running `uv run uvicorn` starts a FastAPI application that responds on a port
   3. Pydantic models for node state, gateway config, and OpenAI request/response schemas exist and validate input
 
-**Plans:** 1/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**
@@ -43,8 +43,8 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md -- Configuration settings and node state model with tests
-- [ ] 01-03-PLAN.md -- OpenAI request/response/streaming/error models with tests
+- [x] 01-02-PLAN.md -- Configuration settings and node state model with tests
+- [x] 01-03-PLAN.md -- OpenAI request/response/streaming/error models with tests
 
 ### Phase 2: Service Discovery
 
@@ -155,7 +155,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 1/3 | In Progress|  |
+| 1. Foundation | 3/3 | Complete   | 2026-06-11 |
 | 2. Service Discovery | 0/3 | Not started | - |
 | 3. Request Proxying and Streaming | 0/4 | Not started | - |
 | 4. Intelligent Routing | 0/3 | Not started | - |
