@@ -9,6 +9,7 @@ dependencies = [
     "pydantic>=2.10,<3.0",
     "pydantic-settings>=2.14",
     "structlog>=26.1.0",
+    "etcd3gw>=2.5.0",
 ]
 
 [dependency-groups]
