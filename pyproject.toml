@@ -10,6 +10,8 @@ dependencies = [
     "pydantic-settings>=2.14",
     "structlog>=26.1.0",
     "etcd3gw>=2.5.0",
+    "httpx>=0.28,<1.0",
+    "httpx-sse>=0.4.3",
 ]
 
 [dependency-groups]

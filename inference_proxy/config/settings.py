@@ -40,6 +40,22 @@ class RoutingSettings(BaseModel):
     timeout: int = 30
 
 
+class ProxySettings(BaseModel):
+    """Proxy client configuration for httpx.AsyncClient.
+
+    Timeouts are tuned for LLM inference: ``read_timeout`` defaults to
+    120 s because first-token latency on large prompts can exceed 30 s.
+    """
+
+    connect_timeout: float = 5.0
+    read_timeout: float = 120.0
+    write_timeout: float = 10.0
+    pool_timeout: float = 10.0
+    max_connections: int = 100
+    max_keepalive_connections: int = 20
+    keepalive_expiry: int = 30
+
+
 class LoggingSettings(BaseModel):
     """Logging configuration."""
 
@@ -66,4 +82,5 @@ class Settings(BaseSettings):
     gateway: GatewaySettings = GatewaySettings()
     etcd: EtcdSettings = EtcdSettings()
     routing: RoutingSettings = RoutingSettings()
+    proxy: ProxySettings = ProxySettings()
     logging: LoggingSettings = LoggingSettings()
