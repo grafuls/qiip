@@ -15,7 +15,8 @@ FastAPI's EventSourceResponse for downstream re-emission.
 
 from __future__ import annotations
 
-from typing import AsyncGenerator
+import json
+from typing import Any, AsyncGenerator
 
 import structlog
 from fastapi import APIRouter, Depends
@@ -35,6 +36,32 @@ logger = structlog.get_logger()
 router = APIRouter()
 
 
+async def _proxy_non_streaming(
+    endpoint_path: str,
+    body: dict[str, Any],
+    registry: NodeRegistry,
+    proxy: ProxyClient,
+) -> JSONResponse:
+    """Forward a non-streaming request to a vLLM backend and return JSON."""
+    node = select_node(registry)
+    if node is None:
+        status, error_resp = no_nodes_error()
+        return JSONResponse(content=error_resp.model_dump(), status_code=status)
+
+    url = f"http://{node.endpoint}{endpoint_path}"
+
+    try:
+        response = await proxy.forward("POST", url, body)
+        try:
+            content = response.json()
+        except (json.JSONDecodeError, ValueError):
+            content = {"raw": response.text}
+        return JSONResponse(content=content, status_code=response.status_code)
+    except Exception as exc:
+        status, error_resp = map_proxy_error(exc)
+        return JSONResponse(content=error_resp.model_dump(), status_code=status)
+
+
 @router.post("/v1/chat/completions", response_model=None)
 async def chat_completions(
     request: ChatCompletionRequest,
@@ -46,31 +73,15 @@ async def chat_completions(
     When ``stream`` is true, returns an SSE stream of token chunks.
     Otherwise, returns the full JSON response from the backend.
     """
+    body = request.model_dump(exclude_none=True)
     if request.stream:
         return await _stream_completion(
             endpoint_path="/v1/chat/completions",
-            body=request.model_dump(exclude_none=True),
+            body=body,
             registry=registry,
             proxy=proxy,
         )
-
-    node = select_node(registry)
-    if node is None:
-        status, error_resp = no_nodes_error()
-        return JSONResponse(content=error_resp.model_dump(), status_code=status)
-
-    url = f"http://{node.endpoint}/v1/chat/completions"
-    body = request.model_dump(exclude_none=True)
-
-    try:
-        response = await proxy.forward("POST", url, body)
-        return JSONResponse(
-            content=response.json(),
-            status_code=response.status_code,
-        )
-    except Exception as exc:
-        status, error_resp = map_proxy_error(exc)
-        return JSONResponse(content=error_resp.model_dump(), status_code=status)
+    return await _proxy_non_streaming("/v1/chat/completions", body, registry, proxy)
 
 
 @router.post("/v1/completions", response_model=None)
@@ -84,31 +95,15 @@ async def text_completions(
     When ``stream`` is true, returns an SSE stream of token chunks.
     Otherwise, returns the full JSON response from the backend.
     """
+    body = request.model_dump(exclude_none=True)
     if request.stream:
         return await _stream_completion(
             endpoint_path="/v1/completions",
-            body=request.model_dump(exclude_none=True),
+            body=body,
             registry=registry,
             proxy=proxy,
         )
-
-    node = select_node(registry)
-    if node is None:
-        status, error_resp = no_nodes_error()
-        return JSONResponse(content=error_resp.model_dump(), status_code=status)
-
-    url = f"http://{node.endpoint}/v1/completions"
-    body = request.model_dump(exclude_none=True)
-
-    try:
-        response = await proxy.forward("POST", url, body)
-        return JSONResponse(
-            content=response.json(),
-            status_code=response.status_code,
-        )
-    except Exception as exc:
-        status, error_resp = map_proxy_error(exc)
-        return JSONResponse(content=error_resp.model_dump(), status_code=status)
+    return await _proxy_non_streaming("/v1/completions", body, registry, proxy)
 
 
 @router.get("/v1/models")
@@ -142,7 +137,7 @@ async def list_models(
 
 async def _stream_completion(
     endpoint_path: str,
-    body: dict,  # type: ignore[type-arg]
+    body: dict[str, Any],
     registry: NodeRegistry,
     proxy: ProxyClient,
 ) -> JSONResponse | EventSourceResponse:
@@ -151,18 +146,8 @@ async def _stream_completion(
     Consumes upstream SSE events via ``httpx-sse`` and re-emits them
     using FastAPI's ``EventSourceResponse``.
 
-    Uses ``ServerSentEvent(raw_data=...)`` to avoid double JSON encoding
+    Uses ``format_sse_event(data_str=...)`` to avoid double JSON encoding
     (upstream data is already JSON-serialised by vLLM).
-
-    Args:
-        endpoint_path: The vLLM endpoint path (e.g., ``/v1/chat/completions``).
-        body: The JSON-serialisable request body.
-        registry: The node registry for node selection.
-        proxy: The proxy client wrapping httpx.AsyncClient.
-
-    Returns:
-        An ``EventSourceResponse`` streaming SSE events, or a ``JSONResponse``
-        with an error if no nodes are available.
     """
     node = select_node(registry)
     if node is None:
@@ -180,13 +165,13 @@ async def _stream_completion(
                 async for sse in event_source.aiter_sse():
                     if sse.data == "[DONE]":
                         yield format_sse_event(data_str="[DONE]")
-                        break
+                        return
                     yield format_sse_event(data_str=sse.data)
         except Exception as exc:
-            logger.error(
-                "streaming proxy error",
-                error=str(exc),
-                url=url,
-            )
+            logger.error("streaming proxy error", error=str(exc), url=url)
+            _, error_resp = map_proxy_error(exc)
+            error_json = json.dumps(error_resp.model_dump())
+            yield format_sse_event(data_str=error_json)
+            yield format_sse_event(data_str="[DONE]")
 
     return EventSourceResponse(event_generator())

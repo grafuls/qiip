@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Generator
+from collections.abc import AsyncIterator, Generator
 
 import httpx
 import pytest
@@ -38,9 +38,11 @@ def test_registry() -> NodeRegistry:
 
 
 @pytest.fixture
-def mock_http_client() -> httpx.AsyncClient:
-    """Return a real httpx.AsyncClient for use with httpx_mock."""
-    return httpx.AsyncClient()
+async def mock_http_client() -> AsyncIterator[httpx.AsyncClient]:
+    """Yield a real httpx.AsyncClient for use with httpx_mock."""
+    client = httpx.AsyncClient()
+    yield client
+    await client.aclose()
 
 
 @pytest.fixture

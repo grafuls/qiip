@@ -12,6 +12,8 @@ lifespan, not by this class.
 
 from __future__ import annotations
 
+from typing import Any
+
 import httpx
 import structlog
 
@@ -41,7 +43,7 @@ class ProxyClient:
         self,
         method: str,
         url: str,
-        body: dict,  # type: ignore[type-arg]
+        body: dict[str, Any],
     ) -> httpx.Response:
         """Forward a non-streaming request to a vLLM backend.
 

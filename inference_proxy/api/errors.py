@@ -46,14 +46,16 @@ def map_proxy_error(exc: Exception) -> tuple[int, ErrorResponse]:
 
     if isinstance(exc, httpx.HTTPStatusError):
         status = exc.response.status_code
+        response_text = exc.response.text
         logger.error(
             "backend returned error status",
             status_code=status,
-            response_text=exc.response.text,
+            response_text=response_text,
         )
+        safe_message = response_text[:200] if response_text else ""
         return status, ErrorResponse(
             error=ErrorDetail(
-                message=f"Inference backend returned error: {exc.response.text}",
+                message=f"Inference backend returned error: {safe_message}",
                 type="upstream_error",
                 code=str(status),
             )

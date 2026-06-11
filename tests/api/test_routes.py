@@ -14,7 +14,6 @@ Tests cover all phase 3 requirements:
 from __future__ import annotations
 
 import httpx
-import pytest
 from fastapi.testclient import TestClient
 from pytest_httpx import HTTPXMock, IteratorStream
 
