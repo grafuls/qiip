@@ -34,12 +34,12 @@ Decimal phases appear between their surrounding integers in numeric order.
   2. Running `uv run uvicorn` starts a FastAPI application that responds on a port
   3. Pydantic models for node state, gateway config, and OpenAI request/response schemas exist and validate input
 
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md -- Project scaffold, FastAPI app factory, and passing smoke test
+- [x] 01-01-PLAN.md -- Project scaffold, FastAPI app factory, and passing smoke test
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -155,7 +155,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Foundation | 0/3 | Planning complete | - |
+| 1. Foundation | 1/3 | In Progress|  |
 | 2. Service Discovery | 0/3 | Not started | - |
 | 3. Request Proxying and Streaming | 0/4 | Not started | - |
 | 4. Intelligent Routing | 0/3 | Not started | - |
