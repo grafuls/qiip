@@ -17,10 +17,12 @@ import threading
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import httpx
 import structlog
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from inference_proxy.api.routes import router
 from inference_proxy.config.dependencies import get_settings
 from inference_proxy.config.logging import configure_logging
 from inference_proxy.config.settings import Settings
@@ -28,6 +30,7 @@ from inference_proxy.discovery.etcd_client import EtcdClient
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.discovery.serializer import node_from_etcd
 from inference_proxy.discovery.watcher import run_watcher
+from inference_proxy.proxy.client import ProxyClient
 
 logger = structlog.get_logger()
 
@@ -113,8 +116,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         app.state.registry = registry
 
+        http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                connect=resolved_settings.proxy.connect_timeout,
+                read=resolved_settings.proxy.read_timeout,
+                write=resolved_settings.proxy.write_timeout,
+                pool=resolved_settings.proxy.pool_timeout,
+            ),
+            limits=httpx.Limits(
+                max_connections=resolved_settings.proxy.max_connections,
+                max_keepalive_connections=resolved_settings.proxy.max_keepalive_connections,
+                keepalive_expiry=resolved_settings.proxy.keepalive_expiry,
+            ),
+        )
+        proxy_client = ProxyClient(http_client)
+        app.state.proxy_client = proxy_client
+
         yield
 
+        await http_client.aclose()
         stop_event.set()
         watch_thread.join(timeout=10)
 
@@ -126,8 +146,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @application.get("/health")
     async def health() -> JSONResponse:
-        """Return gateway health status."""
-        return JSONResponse(content={"status": "ok"})
+        """Return gateway health status with registered node count."""
+        registry: NodeRegistry = application.state.registry
+        return JSONResponse(
+            content={
+                "status": "ok",
+                "nodes_registered": len(registry.get_all()),
+            }
+        )
+
+    application.include_router(router)
 
     return application
 
