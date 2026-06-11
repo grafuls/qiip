@@ -58,13 +58,16 @@ Plans:
   2. When a new node is registered in etcd, the gateway detects it within seconds without restart
   3. When a node is removed from etcd, the gateway stops considering it for routing within seconds
 
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
+**Wave 1**
 
-- [ ] 02-01: TBD
-- [ ] 02-02: TBD
-- [ ] 02-03: TBD
+- [ ] 02-01-PLAN.md -- Serializer, registry, and etcd client wrapper (discovery building blocks)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-02-PLAN.md -- Watch thread with reconnection and lifespan integration
 
 ### Phase 3: Request Proxying and Streaming
 
@@ -156,7 +159,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete   | 2026-06-11 |
-| 2. Service Discovery | 0/3 | Not started | - |
+| 2. Service Discovery | 0/2 | Not started | - |
 | 3. Request Proxying and Streaming | 0/4 | Not started | - |
 | 4. Intelligent Routing | 0/3 | Not started | - |
 | 5. Resilience | 0/3 | Not started | - |
