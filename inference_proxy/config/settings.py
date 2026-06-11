@@ -16,6 +16,22 @@ class GatewaySettings(BaseModel):
     port: int = 8080
 
 
+class EtcdSettings(BaseModel):
+    """etcd service discovery configuration."""
+
+    endpoints: list[str] = ["http://localhost:2379"]
+    node_prefix: str = "/nodes/"
+
+
+class RoutingSettings(BaseModel):
+    """Request routing and load balancing configuration."""
+
+    strategy: str = "least_connections"
+    health_check_interval: int = 30
+    max_retries: int = 3
+    timeout: int = 30
+
+
 class Settings(BaseSettings):
     """Root application settings.
 
@@ -33,3 +49,5 @@ class Settings(BaseSettings):
     )
 
     gateway: GatewaySettings = GatewaySettings()
+    etcd: EtcdSettings = EtcdSettings()
+    routing: RoutingSettings = RoutingSettings()

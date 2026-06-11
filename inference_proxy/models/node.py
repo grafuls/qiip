@@ -1,0 +1,55 @@
+"""Node state domain model for vLLM inference nodes.
+
+Represents the state of a vLLM backend node as tracked in etcd.
+NodeStatus is a StrEnum for type-safe status values.
+Node and NodeCapabilities are Pydantic models for validation.
+
+Per D-15: No serialization methods on the model -- serialization
+is a separate concern handled in a future phase.
+Per D-16: The ``model`` field is ``str``, not ``list[str]``.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+
+from pydantic import BaseModel, Field
+
+
+class NodeStatus(StrEnum):
+    """Status of a vLLM inference node."""
+
+    HEALTHY = "healthy"
+    UNHEALTHY = "unhealthy"
+    DRAINING = "draining"
+    UNKNOWN = "unknown"
+
+
+class NodeCapabilities(BaseModel):
+    """Hardware and serving capabilities of a node."""
+
+    max_tokens: int = 4096
+    gpu_memory: str = ""
+
+
+class Node(BaseModel):
+    """A vLLM inference node registered in etcd.
+
+    Attributes:
+        node_id: Unique identifier for the node.
+        endpoint: HTTP endpoint (host:port) for the vLLM server.
+        status: Current health status of the node.
+        model: Name of the model being served.
+        last_heartbeat: Timestamp of the last health check response.
+        capabilities: Hardware and serving capabilities.
+        active_connections: Number of active inference requests.
+    """
+
+    node_id: str
+    endpoint: str
+    status: NodeStatus = NodeStatus.UNKNOWN
+    model: str = ""
+    last_heartbeat: datetime | None = None
+    capabilities: NodeCapabilities = Field(default_factory=NodeCapabilities)
+    active_connections: int = 0
