@@ -83,7 +83,7 @@ Plans:
   4. Client calls `/health` and gets a status indicating gateway availability
   5. When a proxied request fails, the gateway returns an OpenAI-compatible error response with proper HTTP status code and error schema
 
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 
 Plans:
 **Wave 1**
@@ -92,7 +92,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-02-PLAN.md -- API routes, lifespan integration, and integration tests for all endpoints
+- [x] 03-02-PLAN.md -- API routes, lifespan integration, and integration tests for all endpoints
 
 ### Phase 4: Intelligent Routing
 
@@ -162,7 +162,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete   | 2026-06-11 |
 | 2. Service Discovery | 2/2 | Complete   | 2026-06-11 |
-| 3. Request Proxying and Streaming | 1/2 | In progress | - |
+| 3. Request Proxying and Streaming | 2/2 | Verifying | - |
 | 4. Intelligent Routing | 0/3 | Not started | - |
 | 5. Resilience | 0/3 | Not started | - |
 | 6. Observability and Admin | 0/2 | Not started | - |
