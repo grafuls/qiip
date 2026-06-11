@@ -12,6 +12,7 @@ Usage::
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -75,9 +76,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         1. Signal the watch thread to stop via ``threading.Event`` (per D-10)
         2. Join the watch thread with timeout
     """
-    configure_logging()
-
     settings = get_settings()
+    configure_logging(
+        json_output=settings.logging.json_output,
+        log_level=getattr(logging, settings.logging.level.upper(), logging.INFO),
+    )
     etcd_client = EtcdClient(settings.etcd)
     registry = NodeRegistry()
 

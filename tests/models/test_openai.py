@@ -73,6 +73,13 @@ class TestChatCompletionRequest:
         assert req.stream is True
         assert req.n == 2
 
+    def test_request_rejects_empty_messages(self) -> None:
+        with pytest.raises(ValidationError):
+            ChatCompletionRequest(
+                model="llama-2-7b",
+                messages=[],
+            )
+
     def test_request_rejects_temperature_below_zero(self) -> None:
         with pytest.raises(ValidationError):
             ChatCompletionRequest(
@@ -294,6 +301,13 @@ class TestCompletionRequest:
         req = CompletionRequest(model="llama-2-7b", prompt="Once upon a time")
         assert req.model == "llama-2-7b"
         assert req.prompt == "Once upon a time"
+
+    def test_request_with_list_prompt(self) -> None:
+        req = CompletionRequest(
+            model="llama-2-7b",
+            prompt=["Hello", "World"],
+        )
+        assert req.prompt == ["Hello", "World"]
 
     def test_request_extra_fields_pass_through(self) -> None:
         """D-10: unknown fields pass through to vLLM."""

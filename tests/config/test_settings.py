@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 
@@ -15,21 +16,21 @@ from inference_proxy.config.settings import (
 
 class TestDefaultGatewaySettings:
     def test_default_gateway_settings(self) -> None:
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.gateway.host == "0.0.0.0"
         assert settings.gateway.port == 8080
 
 
 class TestDefaultEtcdSettings:
     def test_default_etcd_settings(self) -> None:
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.etcd.endpoints == ["http://localhost:2379"]
         assert settings.etcd.node_prefix == "/nodes/"
 
 
 class TestDefaultRoutingSettings:
     def test_default_routing_settings(self) -> None:
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.routing.strategy == "least_connections"
         assert settings.routing.health_check_interval == 30
         assert settings.routing.max_retries == 3
@@ -37,22 +38,22 @@ class TestDefaultRoutingSettings:
 
 
 class TestEnvVarOverrideGatewayPort:
-    def test_env_var_override_gateway_port(self, monkeypatch: object) -> None:
-        monkeypatch.setenv("INFERENCE_PROXY_GATEWAY__PORT", "9090")  # type: ignore[attr-defined]
+    def test_env_var_override_gateway_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_GATEWAY__PORT", "9090")
         settings = Settings()
         assert settings.gateway.port == 9090
 
 
 class TestEnvVarOverrideEtcdPrefix:
-    def test_env_var_override_etcd_prefix(self, monkeypatch: object) -> None:
-        monkeypatch.setenv("INFERENCE_PROXY_ETCD__NODE_PREFIX", "/test-nodes/")  # type: ignore[attr-defined]
+    def test_env_var_override_etcd_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_ETCD__NODE_PREFIX", "/test-nodes/")
         settings = Settings()
         assert settings.etcd.node_prefix == "/test-nodes/"
 
 
 class TestEnvVarOverrideRoutingStrategy:
-    def test_env_var_override_routing_strategy(self, monkeypatch: object) -> None:
-        monkeypatch.setenv("INFERENCE_PROXY_ROUTING__STRATEGY", "round_robin")  # type: ignore[attr-defined]
+    def test_env_var_override_routing_strategy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_ROUTING__STRATEGY", "round_robin")
         settings = Settings()
         assert settings.routing.strategy == "round_robin"
 

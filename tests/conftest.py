@@ -43,6 +43,7 @@ def app(test_settings: Settings, test_registry: NodeRegistry) -> Generator[FastA
     application.state.registry = test_registry
     yield application
     application.dependency_overrides.clear()
+    get_settings.cache_clear()
 
 
 @pytest.fixture

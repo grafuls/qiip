@@ -34,7 +34,7 @@ class ChatCompletionRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     model: str
-    messages: list[ChatMessage]
+    messages: list[ChatMessage] = Field(..., min_length=1)
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_tokens: int | None = Field(default=None, gt=0)
     top_p: float | None = Field(default=None, gt=0, le=1)
@@ -111,7 +111,7 @@ class CompletionRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     model: str
-    prompt: str
+    prompt: str | list[str]
     temperature: float | None = Field(default=None, ge=0, le=2)
     max_tokens: int | None = Field(default=None, gt=0)
     top_p: float | None = Field(default=None, gt=0, le=1)

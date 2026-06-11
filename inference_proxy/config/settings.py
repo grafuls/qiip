@@ -32,6 +32,13 @@ class RoutingSettings(BaseModel):
     timeout: int = 30
 
 
+class LoggingSettings(BaseModel):
+    """Logging configuration."""
+
+    json_output: bool = False
+    level: str = "INFO"
+
+
 class Settings(BaseSettings):
     """Root application settings.
 
@@ -51,3 +58,4 @@ class Settings(BaseSettings):
     gateway: GatewaySettings = GatewaySettings()
     etcd: EtcdSettings = EtcdSettings()
     routing: RoutingSettings = RoutingSettings()
+    logging: LoggingSettings = LoggingSettings()

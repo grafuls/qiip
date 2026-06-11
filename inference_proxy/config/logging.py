@@ -40,5 +40,7 @@ def configure_logging(
         wrapper_class=structlog.make_filtering_bound_logger(log_level),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),
+        # Cache loggers in production (json_output=True) for performance;
+        # disable in dev so hot-reloading picks up processor changes immediately.
         cache_logger_on_first_use=json_output,
     )
