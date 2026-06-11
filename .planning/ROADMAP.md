@@ -14,7 +14,7 @@ Deliver an OpenAI-compatible gateway that proxies inference requests to vLLM nod
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation** - Project scaffolding, config, data models, and test infrastructure (completed 2026-06-11)
-- [ ] **Phase 2: Service Discovery** - etcd-based node registry with watch-based live updates
+- [x] **Phase 2: Service Discovery** - etcd-based node registry with watch-based live updates (completed 2026-06-11)
 - [ ] **Phase 3: Request Proxying and Streaming** - OpenAI-compatible proxy with SSE streaming to vLLM nodes
 - [ ] **Phase 4: Intelligent Routing** - Least-connections load balancing with model-aware filtering
 - [ ] **Phase 5: Resilience** - Health checks, retry with failover, circuit breaker, graceful shutdown
@@ -58,7 +58,7 @@ Plans:
   2. When a new node is registered in etcd, the gateway detects it within seconds without restart
   3. When a node is removed from etcd, the gateway stops considering it for routing within seconds
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 **Wave 1**
@@ -67,7 +67,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-02-PLAN.md -- Watch thread with reconnection and lifespan integration
+- [x] 02-02-PLAN.md -- Watch thread with reconnection and lifespan integration
 
 ### Phase 3: Request Proxying and Streaming
 
@@ -159,7 +159,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete   | 2026-06-11 |
-| 2. Service Discovery | 1/2 | In Progress|  |
+| 2. Service Discovery | 2/2 | Complete   | 2026-06-11 |
 | 3. Request Proxying and Streaming | 0/4 | Not started | - |
 | 4. Intelligent Routing | 0/3 | Not started | - |
 | 5. Resilience | 0/3 | Not started | - |
