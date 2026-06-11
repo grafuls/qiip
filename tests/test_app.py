@@ -8,15 +8,33 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from inference_proxy.discovery.registry import NodeRegistry
+from inference_proxy.models.node import Node, NodeStatus
 
 
 def test_health_endpoint(client: TestClient) -> None:
-    """GET /health returns 200 with JSON containing 'status' key."""
+    """GET /health returns 200 with status and nodes_registered count."""
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
-    assert "status" in data
     assert data["status"] == "ok"
+    assert data["nodes_registered"] == 0
+
+
+def test_health_with_nodes(client: TestClient, test_registry: NodeRegistry) -> None:
+    """GET /health returns correct nodes_registered count when nodes exist."""
+    test_registry.add(
+        Node(
+            node_id="node-1",
+            endpoint="10.0.1.100:8000",
+            status=NodeStatus.HEALTHY,
+            model="llama-3",
+        )
+    )
+    response = client.get("/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["nodes_registered"] == 1
 
 
 def test_app_is_fastapi_instance(app: FastAPI) -> None:

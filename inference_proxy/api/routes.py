@@ -20,7 +20,7 @@ from typing import AsyncGenerator
 import structlog
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
-from fastapi.sse import EventSourceResponse, ServerSentEvent
+from fastapi.sse import EventSourceResponse, format_sse_event
 from httpx_sse import aconnect_sse
 
 from inference_proxy.api.errors import map_proxy_error, no_nodes_error
@@ -171,7 +171,7 @@ async def _stream_completion(
 
     url = f"http://{node.endpoint}{endpoint_path}"
 
-    async def event_generator() -> AsyncGenerator[ServerSentEvent, None]:
+    async def event_generator() -> AsyncGenerator[bytes, None]:
         try:
             async with aconnect_sse(
                 proxy.client, "POST", url, json=body
@@ -179,9 +179,9 @@ async def _stream_completion(
                 event_source.response.raise_for_status()
                 async for sse in event_source.aiter_sse():
                     if sse.data == "[DONE]":
-                        yield ServerSentEvent(raw_data="[DONE]")
+                        yield format_sse_event(data_str="[DONE]")
                         break
-                    yield ServerSentEvent(raw_data=sse.data)
+                    yield format_sse_event(data_str=sse.data)
         except Exception as exc:
             logger.error(
                 "streaming proxy error",
