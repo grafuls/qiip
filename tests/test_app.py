@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock, patch
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
+from inference_proxy.discovery.registry import NodeRegistry
 
 
 def test_health_endpoint(client: TestClient) -> None:
@@ -36,3 +40,71 @@ def test_subpackages_importable() -> None:
     assert inference_proxy.discovery is not None
     assert inference_proxy.routing is not None
     assert inference_proxy.resilience is not None
+
+
+class TestRegistryInAppState:
+    """Registry is accessible in app.state after startup."""
+
+    def test_app_state_has_registry(self, app: FastAPI) -> None:
+        """app.state.registry exists and is a NodeRegistry instance."""
+        assert hasattr(app.state, "registry")
+        assert isinstance(app.state.registry, NodeRegistry)
+
+
+class TestLifespanRegistryIntegration:
+    """Lifespan creates registry and watcher on startup, cleans up on shutdown."""
+
+    @patch("inference_proxy.main.run_watcher")
+    @patch("inference_proxy.main.EtcdClient")
+    def test_lifespan_creates_registry(
+        self,
+        mock_etcd_cls: MagicMock,
+        mock_run_watcher: MagicMock,
+    ) -> None:
+        """Lifespan populates app.state.registry with a NodeRegistry."""
+        mock_client = MagicMock()
+        mock_client.get_prefix.return_value = []
+        mock_client.prefix = "/nodes/"
+        mock_etcd_cls.return_value = mock_client
+
+        from inference_proxy.main import create_app
+
+        app = create_app()
+        with TestClient(app):
+            assert hasattr(app.state, "registry")
+            assert isinstance(app.state.registry, NodeRegistry)
+
+    @patch("inference_proxy.main.run_watcher")
+    @patch("inference_proxy.main.EtcdClient")
+    def test_lifespan_handles_etcd_unavailability(
+        self,
+        mock_etcd_cls: MagicMock,
+        mock_run_watcher: MagicMock,
+    ) -> None:
+        """Lifespan starts with empty registry when etcd is unavailable."""
+        mock_client = MagicMock()
+        mock_client.get_prefix.side_effect = ConnectionError("etcd down")
+        mock_client.prefix = "/nodes/"
+        mock_etcd_cls.return_value = mock_client
+
+        from inference_proxy.main import create_app
+
+        app = create_app()
+        with TestClient(app):
+            registry = app.state.registry
+            assert isinstance(registry, NodeRegistry)
+            assert registry.get_all() == []
+
+
+class TestGetRegistryDependency:
+    """get_registry dependency returns the registry from app.state."""
+
+    def test_get_registry_returns_registry(self, app: FastAPI) -> None:
+        """get_registry returns a NodeRegistry instance via dependency injection."""
+        from inference_proxy.config.dependencies import get_registry
+
+        # Simulate a request by calling get_registry with a mock request
+        mock_request = MagicMock()
+        mock_request.app = app
+        result = get_registry(mock_request)
+        assert isinstance(result, NodeRegistry)
