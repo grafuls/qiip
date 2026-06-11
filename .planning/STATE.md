@@ -18,7 +18,7 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-04)
+See: .planning/PROJECT.md (updated 2026-06-11)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover -- the gateway must reliably proxy requests and handle node failures transparently.
 **Current focus:** Phase 2 — service discovery
@@ -30,7 +30,7 @@ Plan: Not started
 Status: Ready to plan
 Last activity: 2026-06-11
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [████████████████████] 3/3 plans (100%)
 
 ## Performance Metrics
 
@@ -60,7 +60,11 @@ Progress: [░░░░░░░░░░] 0%
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- None yet.
+- FastAPI for gateway validated (Phase 1)
+- hatchling as build backend (makes inference_proxy importable via uv run)
+- structlog with console/JSON dual mode for logging
+- Sub-models (GatewaySettings, EtcdSettings, RoutingSettings) inherit BaseModel, not BaseSettings
+- Chat and text completion OpenAI models kept fully separate (no shared base class)
 
 ### Pending Todos
 
@@ -80,6 +84,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-10T21:04:20.917Z
-Stopped at: Phase 1 context gathered
-Resume file: .planning/phases/01-foundation/01-CONTEXT.md
+Last session: 2026-06-11
+Stopped at: Phase 01 complete, ready to discuss Phase 2
+Resume file: None
