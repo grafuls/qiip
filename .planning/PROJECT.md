@@ -55,7 +55,7 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| FastAPI for gateway | Async support, OpenAI compatibility, team familiarity | — Pending |
+| FastAPI for gateway | Async support, OpenAI compatibility, team familiarity | Validated in Phase 1 |
 | etcd for discovery | Dynamic node registration, watch-based updates, proven at scale | — Pending |
 | Least connections balancing | Better utilization than round-robin for variable-length inference requests | — Pending |
 | No auth in v1 | Internal network, simplifies initial implementation | — Pending |
@@ -79,4 +79,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-04 after initialization*
+*Last updated: 2026-06-11 after Phase 1 (Foundation) completion*
