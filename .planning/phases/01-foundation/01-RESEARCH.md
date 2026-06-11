@@ -655,17 +655,19 @@ INFERENCE_PROXY_ROUTING__TIMEOUT=30
 | A2 | pytest 9.0 has no breaking changes affecting this project | Standard Stack | Low -- major version bump may have minor fixture scoping changes; tests would surface issues immediately |
 | A3 | `requires-python = ">=3.12,<3.14"` is the correct upper bound | Code Examples | Medium -- if team wants 3.13 support too, the bound is fine; <3.14 excludes the system Python which is desired |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Package build system for `uv run uvicorn`**
+1. **RESOLVED: Package build system for `uv run uvicorn`**
    - What we know: `uv run uvicorn inference_proxy.main:app` requires the package to be importable. Without a `[build-system]` in pyproject.toml, uv does not install the project into the venv.
    - What's unclear: Whether uv's `--no-project` or adding a build system is needed.
    - Recommendation: Add a `[build-system]` with hatchling so `uv run` installs the package in editable mode. This makes `inference_proxy` importable. Alternative: use `PYTHONPATH=. uv run uvicorn ...` but this is fragile. The build-system approach is cleaner.
+   - **Resolution:** Plan 01-01 Task 1 Step 2 adds `[build-system]` with hatchling backend.
 
-2. **Text completion response models vs chat completion**
+2. **RESOLVED: Text completion response models vs chat completion**
    - What we know: D-12 requires models for both `/v1/completions` and `/v1/chat/completions`. The text completion response uses `text` field in choices instead of `message`.
    - What's unclear: Whether to share base classes or keep them fully separate.
    - Recommendation: Keep them separate. The schemas are similar but differ in key fields (`text` vs `message`, `prompt` vs `messages`). Sharing a base class would create awkward optionality. Two clean, explicit model sets are better per SRP.
+   - **Resolution:** Plan 01-03 Task 1 keeps chat and text completion models fully separate per SRP.
 
 ## Environment Availability
 
