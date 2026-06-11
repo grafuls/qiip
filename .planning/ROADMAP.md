@@ -88,7 +88,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md -- Proxy infrastructure: ProxyClient, node selector, error mapper, ProxySettings, and unit tests
+- [x] 03-01-PLAN.md -- Proxy infrastructure: ProxyClient, node selector, error mapper, ProxySettings, and unit tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -162,7 +162,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 |-------|----------------|--------|-----------|
 | 1. Foundation | 3/3 | Complete   | 2026-06-11 |
 | 2. Service Discovery | 2/2 | Complete   | 2026-06-11 |
-| 3. Request Proxying and Streaming | 0/2 | Planning complete | - |
+| 3. Request Proxying and Streaming | 1/2 | In progress | - |
 | 4. Intelligent Routing | 0/3 | Not started | - |
 | 5. Resilience | 0/3 | Not started | - |
 | 6. Observability and Admin | 0/2 | Not started | - |
