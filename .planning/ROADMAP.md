@@ -130,13 +130,16 @@ Plans:
   3. After consecutive failures to a node, a circuit breaker opens and stops sending traffic to it; after recovery, it closes again
   4. When the gateway receives a shutdown signal, it finishes in-flight requests before stopping
 
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
+**Wave 1**
 
-- [ ] 05-01: TBD
-- [ ] 05-02: TBD
-- [ ] 05-03: TBD
+- [ ] 05-01-PLAN.md -- CircuitBreaker, CircuitBreakerRegistry, health checker thread, ResilienceSettings, and unit tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 05-02-PLAN.md -- Retry with failover in routes, shutdown middleware, lifespan wiring, and integration tests
 
 ### Phase 6: Observability and Admin
 
@@ -167,5 +170,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 2. Service Discovery | 2/2 | Complete   | 2026-06-11 |
 | 3. Request Proxying and Streaming | 2/2 | Complete | 2026-06-12 |
 | 4. Intelligent Routing | 2/2 | Complete   | 2026-06-24 |
-| 5. Resilience | 0/3 | Not started | - |
+| 5. Resilience | 0/2 | Not started | - |
 | 6. Observability and Admin | 0/2 | Not started | - |
