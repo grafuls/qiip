@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, call, patch
 from inference_proxy.discovery.etcd_client import EtcdClient
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.discovery.watcher import _handle_event, run_watcher
-from inference_proxy.models.node import Node
+from inference_proxy.models.node import Node, NodeStatus
 
 
 class TestPutEventAddsNode:
@@ -42,14 +42,14 @@ class TestPutEventAddsNode:
         assert node.endpoint == "http://10.0.1.100:8000"
 
 
-class TestDeleteEventRemovesNode:
-    """DELETE event (type='DELETE') calls registry.remove with node_id."""
+class TestDeleteEventDrainsNode:
+    """DELETE event (type='DELETE') sets node to DRAINING instead of removing (D-10)."""
 
-    def test_delete_event_removes_node(self) -> None:
+    def test_delete_event_sets_draining(self) -> None:
         registry = NodeRegistry()
         prefix = "/nodes/"
-        # Pre-populate registry
-        registry.add(Node(node_id="node-1", endpoint="http://10.0.1.100:8000"))
+        # Pre-populate registry with HEALTHY node
+        registry.add(Node(node_id="node-1", endpoint="http://10.0.1.100:8000", status=NodeStatus.HEALTHY))
 
         event = {
             "kv": {"key": "/nodes/node-1"},
@@ -58,7 +58,21 @@ class TestDeleteEventRemovesNode:
 
         _handle_event(event, registry, prefix)
 
-        assert registry.get("node-1") is None
+        node = registry.get("node-1")
+        assert node is not None
+        assert node.status == NodeStatus.DRAINING
+
+    def test_delete_nonexistent_node_is_noop(self) -> None:
+        registry = NodeRegistry()
+        prefix = "/nodes/"
+
+        event = {
+            "kv": {"key": "/nodes/nonexistent"},
+            "type": "DELETE",
+        }
+
+        # Should not raise
+        _handle_event(event, registry, prefix)
 
 
 class TestPutMalformedValueSkipped:
