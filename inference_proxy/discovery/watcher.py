@@ -111,8 +111,10 @@ def _handle_event(event: dict, registry: NodeRegistry, prefix: str) -> None:
 
     if event_type == "DELETE":
         node_id = key.removeprefix(prefix)
-        registry.remove(node_id)
-        logger.info("node removed", node_id=node_id)
+        if registry.drain(node_id):
+            logger.info("node draining", node_id=node_id)
+        else:
+            logger.debug("delete event for unknown node, skipping", node_id=node_id)
     else:
         value = kv.get("value", b"")
         # Handle str values: encode to bytes for serializer
