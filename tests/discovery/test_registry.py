@@ -111,6 +111,46 @@ class TestRegistryGetAllReturnsCopy:
         assert len(registry.get_all()) == 1
 
 
+class TestDrain:
+    """drain() sets a node's status to DRAINING."""
+
+    def test_drain_existing_node_returns_true(self) -> None:
+        registry = NodeRegistry()
+        registry.add(Node(node_id="node-1", endpoint="http://10.0.1.100:8000", status=NodeStatus.HEALTHY))
+
+        result = registry.drain("node-1")
+
+        assert result is True
+
+    def test_drain_sets_status_to_draining(self) -> None:
+        registry = NodeRegistry()
+        registry.add(Node(node_id="node-1", endpoint="http://10.0.1.100:8000", status=NodeStatus.HEALTHY))
+
+        registry.drain("node-1")
+
+        node = registry.get("node-1")
+        assert node is not None
+        assert node.status == NodeStatus.DRAINING
+
+    def test_drain_nonexistent_returns_false(self) -> None:
+        registry = NodeRegistry()
+
+        result = registry.drain("nonexistent")
+
+        assert result is False
+
+    def test_drain_preserves_other_fields(self) -> None:
+        registry = NodeRegistry()
+        registry.add(Node(node_id="node-1", endpoint="http://10.0.1.100:8000", status=NodeStatus.HEALTHY, model="llama-3"))
+
+        registry.drain("node-1")
+
+        node = registry.get("node-1")
+        assert node is not None
+        assert node.endpoint == "http://10.0.1.100:8000"
+        assert node.model == "llama-3"
+
+
 class TestRegistryConcurrentAccess:
     """Concurrent add/remove from multiple threads does not corrupt state."""
 

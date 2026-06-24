@@ -19,6 +19,7 @@ from pytest_httpx import HTTPXMock, IteratorStream
 
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.models.node import Node, NodeStatus
+from inference_proxy.routing.node_selector import NodeSelector
 
 
 def _make_node(
@@ -460,3 +461,276 @@ class TestHealthEndpoint:
         data = response.json()
         assert data["status"] == "ok"
         assert "nodes_registered" in data
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Model-Aware Routing
+# ---------------------------------------------------------------------------
+
+
+class TestLeastConnectionsRouting:
+    """Requests route to the node with fewest active connections."""
+
+    def test_routes_to_least_connections_node(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        node_selector: NodeSelector,
+        httpx_mock: HTTPXMock,
+    ) -> None:
+        """With 2 nodes serving same model, routes to node with fewer connections."""
+        test_registry.add(_make_node(node_id="node-1", endpoint="10.0.1.100:8000", model="llama-3"))
+        test_registry.add(_make_node(node_id="node-2", endpoint="10.0.1.101:8000", model="llama-3"))
+
+        # Increment connections on node-1 so node-2 has fewer
+        node_selector.tracker.increment("node-1")
+
+        httpx_mock.add_response(
+            url="http://10.0.1.101:8000/v1/chat/completions",
+            json={"id": "chatcmpl-1", "object": "chat.completion", "created": 1234, "model": "llama-3", "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            status_code=200,
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert response.status_code == 200
+        # Verify the request went to node-2 (least connections)
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 1
+        assert "10.0.1.101:8000" in str(requests[0].url)
+
+
+class TestModelFiltering:
+    """Requests route only to nodes serving the requested model."""
+
+    def test_routes_to_matching_model_node(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        httpx_mock: HTTPXMock,
+    ) -> None:
+        """With different models, routes to node serving requested model."""
+        test_registry.add(_make_node(node_id="node-1", endpoint="10.0.1.100:8000", model="llama-3"))
+        test_registry.add(_make_node(node_id="node-2", endpoint="10.0.1.101:8000", model="mistral-7b"))
+
+        httpx_mock.add_response(
+            url="http://10.0.1.100:8000/v1/chat/completions",
+            json={"id": "chatcmpl-1", "object": "chat.completion", "created": 1234, "model": "llama-3", "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            status_code=200,
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert response.status_code == 200
+        requests = httpx_mock.get_requests()
+        assert len(requests) == 1
+        assert "10.0.1.100:8000" in str(requests[0].url)
+
+
+class TestModelNotFound:
+    """404 returned when no node serves the requested model."""
+
+    def test_model_not_found_returns_404(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+    ) -> None:
+        """Requesting a model no node serves returns 404."""
+        test_registry.add(_make_node(node_id="node-1", model="llama-3"))
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "nonexistent", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert response.status_code == 404
+        data = response.json()
+        assert data["error"]["code"] == "model_not_found"
+        assert data["error"]["type"] == "invalid_request_error"
+
+
+class TestModelUnavailable:
+    """503 returned when model exists but all nodes are draining."""
+
+    def test_model_unavailable_returns_503(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+    ) -> None:
+        """Requesting a model where all nodes are DRAINING returns 503."""
+        test_registry.add(_make_node(node_id="node-1", model="llama-3", status=NodeStatus.DRAINING))
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["error"]["code"] == "model_unavailable"
+
+
+class TestDrainingExcludedFromModels:
+    """DRAINING nodes do not appear in /v1/models response."""
+
+    def test_draining_nodes_excluded(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+    ) -> None:
+        """Only healthy nodes appear in model listing."""
+        test_registry.add(_make_node(node_id="node-1", model="llama-3", status=NodeStatus.HEALTHY))
+        test_registry.add(_make_node(node_id="node-2", endpoint="10.0.1.101:8000", model="mistral-7b", status=NodeStatus.DRAINING))
+
+        response = client.get("/v1/models")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["data"]) == 1
+        assert data["data"][0]["id"] == "llama-3"
+
+
+class TestTextCompletionModelRouting:
+    """Text completion also uses model-aware routing."""
+
+    def test_text_completion_model_not_found(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+    ) -> None:
+        """Text completion with nonexistent model returns 404."""
+        test_registry.add(_make_node(node_id="node-1", model="llama-3"))
+
+        response = client.post(
+            "/v1/completions",
+            json={"model": "nonexistent", "prompt": "Hello"},
+        )
+
+        assert response.status_code == 404
+        data = response.json()
+        assert data["error"]["code"] == "model_not_found"
+
+
+class TestStreamingModelFiltering:
+    """Streaming requests also use model-aware routing."""
+
+    def test_streaming_model_not_found(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+    ) -> None:
+        """Streaming with nonexistent model returns 404."""
+        test_registry.add(_make_node(node_id="node-1", model="llama-3"))
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "nonexistent", "messages": [{"role": "user", "content": "Hi"}], "stream": True},
+        )
+
+        assert response.status_code == 404
+        data = response.json()
+        assert data["error"]["code"] == "model_not_found"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Connection Tracking and Drain Auto-Removal
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionTracking:
+    """Connection count returns to 0 after successful non-streaming proxy call."""
+
+    def test_connection_count_returns_to_zero(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        node_selector: NodeSelector,
+        httpx_mock: HTTPXMock,
+    ) -> None:
+        """After non-streaming proxy call, connection count is 0."""
+        test_registry.add(_make_node(node_id="node-1", model="llama-3"))
+
+        httpx_mock.add_response(
+            url="http://10.0.1.100:8000/v1/chat/completions",
+            json={"id": "chatcmpl-1", "object": "chat.completion", "created": 1234, "model": "llama-3", "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            status_code=200,
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert response.status_code == 200
+        assert node_selector.tracker.get("node-1") == 0
+
+
+class TestStreamingConnectionTracking:
+    """Connection count returns to 0 after successful streaming proxy call."""
+
+    def test_streaming_connection_count_returns_to_zero(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        node_selector: NodeSelector,
+        httpx_mock: HTTPXMock,
+    ) -> None:
+        """After streaming proxy call, connection count is 0."""
+        test_registry.add(_make_node(node_id="node-1", model="llama-3"))
+
+        sse_chunks = [
+            b'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1234,"model":"llama-3","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}\n\n',
+            b"data: [DONE]\n\n",
+        ]
+        httpx_mock.add_response(
+            url="http://10.0.1.100:8000/v1/chat/completions",
+            headers={"content-type": "text/event-stream"},
+            stream=IteratorStream(sse_chunks),
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}], "stream": True},
+        )
+
+        assert response.status_code == 200
+        # Consume the response to trigger the generator completion
+        _ = response.text
+        assert node_selector.tracker.get("node-1") == 0
+
+
+class TestDrainAutoRemoval:
+    """Draining node with 0 connections is auto-removed from registry (D-11, LBAL-02)."""
+
+    def test_draining_node_removed_after_proxy_call(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        node_selector: NodeSelector,
+        httpx_mock: HTTPXMock,
+    ) -> None:
+        """DRAINING node with 0 connections is removed after proxy call completes."""
+        # Add a healthy node and a draining node both serving same model
+        test_registry.add(_make_node(node_id="node-1", endpoint="10.0.1.100:8000", model="llama-3", status=NodeStatus.HEALTHY))
+        test_registry.add(_make_node(node_id="node-2", endpoint="10.0.1.101:8000", model="llama-3", status=NodeStatus.DRAINING))
+
+        httpx_mock.add_response(
+            url="http://10.0.1.100:8000/v1/chat/completions",
+            json={"id": "chatcmpl-1", "object": "chat.completion", "created": 1234, "model": "llama-3", "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            status_code=200,
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert response.status_code == 200
+        # The draining node-2 with 0 connections should be auto-removed
+        assert test_registry.get("node-2") is None

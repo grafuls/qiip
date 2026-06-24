@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import threading
 
-from inference_proxy.models.node import Node
+from inference_proxy.models.node import Node, NodeStatus
 
 
 class NodeRegistry:
@@ -43,6 +43,21 @@ class NodeRegistry:
         """Return the node with the given ``node_id``, or ``None``."""
         with self._lock:
             return self._nodes.get(node_id)
+
+    def drain(self, node_id: str) -> bool:
+        """Mark a node as DRAINING.
+
+        Returns ``True`` if the node was found and transitioned,
+        ``False`` if the node was not in the registry.
+        """
+        with self._lock:
+            node = self._nodes.get(node_id)
+            if node is None:
+                return False
+            self._nodes[node_id] = node.model_copy(
+                update={"status": NodeStatus.DRAINING}
+            )
+            return True
 
     def get_all(self) -> list[Node]:
         """Return a copy of all registered nodes."""

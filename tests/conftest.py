@@ -9,7 +9,11 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from inference_proxy.config.dependencies import get_proxy_client, get_settings
+from inference_proxy.config.dependencies import (
+    get_node_selector,
+    get_proxy_client,
+    get_settings,
+)
 from inference_proxy.config.settings import (
     EtcdSettings,
     GatewaySettings,
@@ -19,6 +23,8 @@ from inference_proxy.config.settings import (
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.main import create_app
 from inference_proxy.proxy.client import ProxyClient
+from inference_proxy.routing.connection_tracker import ConnectionTracker
+from inference_proxy.routing.node_selector import NodeSelector
 
 
 @pytest.fixture
@@ -52,17 +58,35 @@ def proxy_client(mock_http_client: httpx.AsyncClient) -> ProxyClient:
 
 
 @pytest.fixture
+def connection_tracker() -> ConnectionTracker:
+    """Return a fresh ConnectionTracker for testing."""
+    return ConnectionTracker()
+
+
+@pytest.fixture
+def node_selector(
+    test_registry: NodeRegistry,
+    connection_tracker: ConnectionTracker,
+) -> NodeSelector:
+    """Return a NodeSelector wired to the test registry and tracker."""
+    return NodeSelector(test_registry, connection_tracker)
+
+
+@pytest.fixture
 def app(
     test_settings: Settings,
     test_registry: NodeRegistry,
     proxy_client: ProxyClient,
+    node_selector: NodeSelector,
 ) -> Generator[FastAPI, None, None]:
     """Create a FastAPI app with test settings, registry, and proxy client injected."""
     application = create_app(settings=test_settings)
     application.dependency_overrides[get_settings] = lambda: test_settings
     application.state.registry = test_registry
     application.state.proxy_client = proxy_client
+    application.state.node_selector = node_selector
     application.dependency_overrides[get_proxy_client] = lambda: proxy_client
+    application.dependency_overrides[get_node_selector] = lambda: node_selector
     yield application
     application.dependency_overrides.clear()
     get_settings.cache_clear()
