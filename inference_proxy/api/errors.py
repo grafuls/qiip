@@ -71,6 +71,48 @@ def map_proxy_error(exc: Exception) -> tuple[int, ErrorResponse]:
     )
 
 
+def model_not_found_error(model: str) -> tuple[int, ErrorResponse]:
+    """Return a 404 error when the requested model is not served by any node.
+
+    Used when no registered node (regardless of health status) serves the
+    requested model name (D-04).
+
+    Args:
+        model: The model name that was requested.
+
+    Returns:
+        A tuple of ``(404, ErrorResponse)`` with a ``model_not_found`` code.
+    """
+    return 404, ErrorResponse(
+        error=ErrorDetail(
+            message=f"The model '{model}' does not exist",
+            type="invalid_request_error",
+            code="model_not_found",
+        )
+    )
+
+
+def model_unavailable_error(model: str) -> tuple[int, ErrorResponse]:
+    """Return a 503 error when the model exists but all nodes are unavailable.
+
+    Used when nodes are registered for the requested model but all are
+    in UNHEALTHY or DRAINING status (D-06).
+
+    Args:
+        model: The model name that was requested.
+
+    Returns:
+        A tuple of ``(503, ErrorResponse)`` with a ``model_unavailable`` code.
+    """
+    return 503, ErrorResponse(
+        error=ErrorDetail(
+            message=f"The model '{model}' is temporarily unavailable",
+            type="server_error",
+            code="model_unavailable",
+        )
+    )
+
+
 def no_nodes_error() -> tuple[int, ErrorResponse]:
     """Return a 503 error response for when no inference nodes are available.
 

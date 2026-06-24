@@ -95,11 +95,13 @@ class TestSelectTieBreaking:
 
 
 class TestSelectModelFiltering:
-    """select() filters nodes by model name when model parameter is provided (DISC-03, D-05)."""
+    """select() filters nodes by model name (DISC-03, D-05)."""
 
     def test_model_filter_returns_matching_node(self) -> None:
         node_llama = _make_node("node-llama", model="llama-3")
-        node_gpt = _make_node("node-gpt", endpoint="http://10.0.1.200:8000", model="gpt-4")
+        node_gpt = _make_node(
+            "node-gpt", endpoint="http://10.0.1.200:8000", model="gpt-4"
+        )
         selector, _, _ = _make_selector([node_llama, node_gpt])
 
         result = selector.select(model="llama-3")
@@ -117,7 +119,9 @@ class TestSelectModelFiltering:
 
     def test_model_none_considers_all_healthy_nodes(self) -> None:
         node_llama = _make_node("node-llama", model="llama-3")
-        node_gpt = _make_node("node-gpt", endpoint="http://10.0.1.200:8000", model="gpt-4")
+        node_gpt = _make_node(
+            "node-gpt", endpoint="http://10.0.1.200:8000", model="gpt-4"
+        )
         selector, _, _ = _make_selector([node_llama, node_gpt])
 
         result = selector.select(model=None)
