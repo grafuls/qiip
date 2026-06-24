@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Foundation** - Project scaffolding, config, data models, and test infrastructure (completed 2026-06-11)
 - [x] **Phase 2: Service Discovery** - etcd-based node registry with watch-based live updates (completed 2026-06-11)
 - [x] **Phase 3: Request Proxying and Streaming** - OpenAI-compatible proxy with SSE streaming to vLLM nodes (completed 2026-06-12)
-- [ ] **Phase 4: Intelligent Routing** - Least-connections load balancing with model-aware filtering
+- [x] **Phase 4: Intelligent Routing** - Least-connections load balancing with model-aware filtering (completed 2026-06-24)
 - [ ] **Phase 5: Resilience** - Health checks, retry with failover, circuit breaker, graceful shutdown
 - [ ] **Phase 6: Observability and Admin** - Structured logging and admin API for operational visibility
 
@@ -106,7 +106,7 @@ Plans:
   2. When a client requests a model only available on specific nodes, the gateway routes exclusively to those nodes
   3. When a node is being removed, active connections drain before the node leaves the routing pool
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 **Wave 1**
@@ -115,7 +115,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-02-PLAN.md -- Wire routing into API routes, DI, lifespan, drain coordination, and integration tests
+- [x] 04-02-PLAN.md -- Wire routing into API routes, DI, lifespan, drain coordination, and integration tests
 
 ### Phase 5: Resilience
 
@@ -166,6 +166,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 1. Foundation | 3/3 | Complete   | 2026-06-11 |
 | 2. Service Discovery | 2/2 | Complete   | 2026-06-11 |
 | 3. Request Proxying and Streaming | 2/2 | Complete | 2026-06-12 |
-| 4. Intelligent Routing | 1/2 | In Progress|  |
+| 4. Intelligent Routing | 2/2 | Complete   | 2026-06-24 |
 | 5. Resilience | 0/3 | Not started | - |
 | 6. Observability and Admin | 0/2 | Not started | - |
