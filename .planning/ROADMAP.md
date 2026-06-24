@@ -106,13 +106,16 @@ Plans:
   2. When a client requests a model only available on specific nodes, the gateway routes exclusively to those nodes
   3. When a node is being removed, active connections drain before the node leaves the routing pool
 
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
+**Wave 1**
 
-- [ ] 04-01: TBD
-- [ ] 04-02: TBD
-- [ ] 04-03: TBD
+- [ ] 04-01-PLAN.md -- ConnectionTracker, NodeSelector strategy class, and model error factories with unit tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-02-PLAN.md -- Wire routing into API routes, DI, lifespan, drain coordination, and integration tests
 
 ### Phase 5: Resilience
 
@@ -163,6 +166,6 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 1. Foundation | 3/3 | Complete   | 2026-06-11 |
 | 2. Service Discovery | 2/2 | Complete   | 2026-06-11 |
 | 3. Request Proxying and Streaming | 2/2 | Complete | 2026-06-12 |
-| 4. Intelligent Routing | 0/3 | Not started | - |
+| 4. Intelligent Routing | 0/2 | Not started | - |
 | 5. Resilience | 0/3 | Not started | - |
 | 6. Observability and Admin | 0/2 | Not started | - |
