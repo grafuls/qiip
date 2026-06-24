@@ -31,7 +31,7 @@ from inference_proxy.api.errors import (
     no_nodes_error,
 )
 from inference_proxy.config.dependencies import get_node_selector, get_proxy_client
-from inference_proxy.models.node import NodeStatus
+from inference_proxy.models.node import Node, NodeStatus
 from inference_proxy.models.openai import ChatCompletionRequest, CompletionRequest
 from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.routing.node_selector import NodeSelector
@@ -62,6 +62,45 @@ def _select_error(
     return no_nodes_error()
 
 
+def _maybe_remove_drained(node: Node, node_selector: NodeSelector) -> None:
+    """Auto-remove a draining node when its connection count reaches 0.
+
+    Implements D-11: after decrementing the connection counter for a node,
+    check if the node is DRAINING with 0 active connections.  If so, remove
+    it from both the registry and the tracker.  This completes LBAL-02 by
+    ensuring that nodes marked DRAINING stay in the registry until their
+    in-flight requests finish.
+    """
+    current = node_selector._registry.get(node.node_id)
+    if (
+        current is not None
+        and current.status == NodeStatus.DRAINING
+        and node_selector.tracker.get(node.node_id) == 0
+    ):
+        node_selector._registry.remove(node.node_id)
+        node_selector.tracker.remove(node.node_id)
+        logger.info("drained node removed", node_id=node.node_id)
+
+
+def _scan_drained_nodes(node_selector: NodeSelector) -> None:
+    """Scan all nodes and remove any DRAINING nodes with 0 connections.
+
+    Called after a proxy call completes to clean up draining nodes that
+    have no remaining in-flight requests.  This handles the case where
+    the proxied node was not itself draining, but other nodes in the
+    registry may be.
+    """
+    for n in node_selector._registry.get_all():
+        is_drained = (
+            n.status == NodeStatus.DRAINING
+            and node_selector.tracker.get(n.node_id) == 0
+        )
+        if is_drained:
+            node_selector._registry.remove(n.node_id)
+            node_selector.tracker.remove(n.node_id)
+            logger.info("drained node removed", node_id=n.node_id)
+
+
 async def _proxy_non_streaming(
     endpoint_path: str,
     body: dict[str, Any],
@@ -76,7 +115,9 @@ async def _proxy_non_streaming(
         return JSONResponse(content=error_resp.model_dump(), status_code=status)
 
     url = f"http://{node.endpoint}{endpoint_path}"
+    tracker = node_selector.tracker
 
+    tracker.increment(node.node_id)
     try:
         response = await proxy.forward("POST", url, body)
         try:
@@ -87,6 +128,10 @@ async def _proxy_non_streaming(
     except Exception as exc:
         status, error_resp = map_proxy_error(exc)
         return JSONResponse(content=error_resp.model_dump(), status_code=status)
+    finally:
+        tracker.decrement(node.node_id)
+        _maybe_remove_drained(node, node_selector)
+        _scan_drained_nodes(node_selector)
 
 
 @router.post("/v1/chat/completions", response_model=None)
@@ -108,7 +153,9 @@ async def chat_completions(
             node_selector=node_selector,
             proxy=proxy,
         )
-    return await _proxy_non_streaming("/v1/chat/completions", body, node_selector, proxy)
+    return await _proxy_non_streaming(
+        "/v1/chat/completions", body, node_selector, proxy,
+    )
 
 
 @router.post("/v1/completions", response_model=None)
@@ -186,6 +233,9 @@ async def _stream_completion(
         return JSONResponse(content=error_resp.model_dump(), status_code=status)
 
     url = f"http://{node.endpoint}{endpoint_path}"
+    tracker = node_selector.tracker
+
+    tracker.increment(node.node_id)
 
     async def event_generator() -> AsyncGenerator[bytes, None]:
         try:
@@ -204,5 +254,9 @@ async def _stream_completion(
             error_json = json.dumps(error_resp.model_dump())
             yield format_sse_event(data_str=error_json)
             yield format_sse_event(data_str="[DONE]")
+        finally:
+            tracker.decrement(node.node_id)
+            _maybe_remove_drained(node, node_selector)
+            _scan_drained_nodes(node_selector)
 
     return EventSourceResponse(event_generator())
