@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import httpx
 
-from inference_proxy.api.errors import map_proxy_error, no_nodes_error
+from inference_proxy.api.errors import (
+    map_proxy_error,
+    model_not_found_error,
+    model_unavailable_error,
+    no_nodes_error,
+)
 
 
 class TestMapProxyError:
@@ -75,3 +80,27 @@ class TestNoNodesError:
         assert response.error.code == "no_nodes"
         assert "No inference nodes available" in response.error.message
         assert response.error.type == "server_error"
+
+
+class TestModelNotFoundError:
+    """model_not_found_error returns a 404 with model_not_found code."""
+
+    def test_returns_404(self) -> None:
+        status, response = model_not_found_error("llama-3")
+
+        assert status == 404
+        assert response.error.code == "model_not_found"
+        assert response.error.type == "invalid_request_error"
+        assert "llama-3" in response.error.message
+
+
+class TestModelUnavailableError:
+    """model_unavailable_error returns a 503 with model_unavailable code."""
+
+    def test_returns_503(self) -> None:
+        status, response = model_unavailable_error("llama-3")
+
+        assert status == 503
+        assert response.error.code == "model_unavailable"
+        assert response.error.type == "server_error"
+        assert "llama-3" in response.error.message
