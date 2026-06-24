@@ -31,6 +31,8 @@ from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.discovery.serializer import node_from_etcd
 from inference_proxy.discovery.watcher import run_watcher
 from inference_proxy.proxy.client import ProxyClient
+from inference_proxy.routing.connection_tracker import ConnectionTracker
+from inference_proxy.routing.node_selector import NodeSelector
 
 logger = structlog.get_logger()
 
@@ -115,6 +117,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         watch_thread.start()
 
         app.state.registry = registry
+
+        connection_tracker = ConnectionTracker()
+        node_selector = NodeSelector(registry, connection_tracker)
+        app.state.node_selector = node_selector
 
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(

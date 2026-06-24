@@ -18,6 +18,7 @@ from fastapi import Request
 
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.proxy.client import ProxyClient
+from inference_proxy.routing.node_selector import NodeSelector
 
 from .settings import Settings
 
@@ -46,3 +47,13 @@ def get_proxy_client(request: Request) -> ProxyClient:
     FastAPI route handlers via ``Depends(get_proxy_client)``.
     """
     return request.app.state.proxy_client  # type: ignore[no-any-return]
+
+
+def get_node_selector(request: Request) -> NodeSelector:
+    """Return the node selector from the current application state.
+
+    The node selector is created during lifespan startup and stored in
+    ``app.state.node_selector``.  This dependency makes it available to
+    FastAPI route handlers via ``Depends(get_node_selector)``.
+    """
+    return request.app.state.node_selector  # type: ignore[no-any-return]
