@@ -636,3 +636,101 @@ class TestStreamingModelFiltering:
         assert response.status_code == 404
         data = response.json()
         assert data["error"]["code"] == "model_not_found"
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Connection Tracking and Drain Auto-Removal
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionTracking:
+    """Connection count returns to 0 after successful non-streaming proxy call."""
+
+    def test_connection_count_returns_to_zero(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        node_selector: NodeSelector,
+        httpx_mock: HTTPXMock,
+    ) -> None:
+        """After non-streaming proxy call, connection count is 0."""
+        test_registry.add(_make_node(node_id="node-1", model="llama-3"))
+
+        httpx_mock.add_response(
+            url="http://10.0.1.100:8000/v1/chat/completions",
+            json={"id": "chatcmpl-1", "object": "chat.completion", "created": 1234, "model": "llama-3", "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            status_code=200,
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert response.status_code == 200
+        assert node_selector.tracker.get("node-1") == 0
+
+
+class TestStreamingConnectionTracking:
+    """Connection count returns to 0 after successful streaming proxy call."""
+
+    def test_streaming_connection_count_returns_to_zero(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        node_selector: NodeSelector,
+        httpx_mock: HTTPXMock,
+    ) -> None:
+        """After streaming proxy call, connection count is 0."""
+        test_registry.add(_make_node(node_id="node-1", model="llama-3"))
+
+        sse_chunks = [
+            b'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1234,"model":"llama-3","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}\n\n',
+            b"data: [DONE]\n\n",
+        ]
+        httpx_mock.add_response(
+            url="http://10.0.1.100:8000/v1/chat/completions",
+            headers={"content-type": "text/event-stream"},
+            stream=IteratorStream(sse_chunks),
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}], "stream": True},
+        )
+
+        assert response.status_code == 200
+        # Consume the response to trigger the generator completion
+        _ = response.text
+        assert node_selector.tracker.get("node-1") == 0
+
+
+class TestDrainAutoRemoval:
+    """Draining node with 0 connections is auto-removed from registry (D-11, LBAL-02)."""
+
+    def test_draining_node_removed_after_proxy_call(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        node_selector: NodeSelector,
+        httpx_mock: HTTPXMock,
+    ) -> None:
+        """DRAINING node with 0 connections is removed after proxy call completes."""
+        # Add a healthy node and a draining node both serving same model
+        test_registry.add(_make_node(node_id="node-1", endpoint="10.0.1.100:8000", model="llama-3", status=NodeStatus.HEALTHY))
+        test_registry.add(_make_node(node_id="node-2", endpoint="10.0.1.101:8000", model="llama-3", status=NodeStatus.DRAINING))
+
+        httpx_mock.add_response(
+            url="http://10.0.1.100:8000/v1/chat/completions",
+            json={"id": "chatcmpl-1", "object": "chat.completion", "created": 1234, "model": "llama-3", "choices": [{"index": 0, "message": {"role": "assistant", "content": "Hi"}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            status_code=200,
+        )
+
+        response = client.post(
+            "/v1/chat/completions",
+            json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
+        )
+
+        assert response.status_code == 200
+        # The draining node-2 with 0 connections should be auto-removed
+        assert test_registry.get("node-2") is None
