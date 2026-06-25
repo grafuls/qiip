@@ -12,7 +12,8 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Automatic retry on another healthy node when a request fails — Validated in Phase 5
+- [x] Health checking of registered vLLM nodes — Validated in Phase 5
 
 ### Active
 
@@ -20,8 +21,6 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - [ ] etcd-based service discovery for vLLM nodes
 - [ ] Least-connections load balancing across healthy nodes
 - [ ] SSE streaming support for token-by-token responses
-- [ ] Automatic retry on another healthy node when a request fails
-- [ ] Health checking of registered vLLM nodes
 
 ### Out of Scope
 
@@ -59,7 +58,10 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 | etcd for discovery | Dynamic node registration, watch-based updates, proven at scale | — Pending |
 | Least connections balancing | Better utilization than round-robin for variable-length inference requests | — Pending |
 | No auth in v1 | Internal network, simplifies initial implementation | — Pending |
-| Retry on failure | Transparent failover improves reliability without client complexity | — Pending |
+| Retry on failure | Transparent failover improves reliability without client complexity | Validated in Phase 5 |
+| Circuit breaker pattern | Trip after 3 consecutive failures, auto-recover on health check success | Validated in Phase 5 |
+| Background health checker | Dedicated thread probes /health, marks nodes UNHEALTHY/HEALTHY | Validated in Phase 5 |
+| Graceful shutdown | 503 for new requests (except /health), drain in-flight up to timeout | Validated in Phase 5 |
 
 ## Evolution
 
@@ -79,4 +81,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-24 after Phase 4 (Intelligent Routing) completion*
+*Last updated: 2026-06-25 after Phase 5 (Resilience) completion*
