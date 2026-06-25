@@ -547,17 +547,15 @@ application.include_router(admin_router)     # NEW: admin routes
 
 **If this table is empty:** N/A -- 5 assumptions listed above.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **What value should `target_node` contain -- `node.endpoint` or `node.node_id`?**
+1. **What value should `target_node` contain -- `node.endpoint` or `node.node_id`?** RESOLVED
    - What we know: D-04 says "target node" generically. `node.endpoint` is the `host:port` string; `node.node_id` is the unique identifier.
-   - What's unclear: Which is more useful for operators.
-   - Recommendation: Use `node.endpoint` (the `host:port` string) as it's directly actionable for debugging network issues. The planner should confirm this choice or note it as a discretion item for the implementer.
+   - Resolution: Use `node.endpoint` (the `host:port` string) as it's directly actionable for debugging network issues. Adopted in Plan 06-01.
 
-2. **Should streaming requests update `target_node` even though duration is TTFB-only?**
+2. **Should streaming requests update `target_node` even though duration is TTFB-only?** RESOLVED
    - What we know: For streaming responses, middleware sees the response immediately (before streaming completes). Duration is time-to-first-byte, not total request time.
-   - What's unclear: Whether target_node should still be set for streaming requests.
-   - Recommendation: Yes, set target_node for streaming requests. Knowing which node handled a streaming request is valuable even if duration is TTFB. The middleware doesn't need to distinguish streaming vs non-streaming.
+   - Resolution: Yes, set target_node for streaming requests. Knowing which node handled a streaming request is valuable even if duration is TTFB. Adopted in Plan 06-01.
 
 ## Validation Architecture
 
