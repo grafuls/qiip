@@ -161,7 +161,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 06-02-PLAN.md -- Admin endpoint at /admin/nodes with AdminNodeResponse model and tests
+- [x] 06-02-PLAN.md -- Admin endpoint at /admin/nodes with AdminNodeResponse model and tests
 
 ## Progress
 
@@ -175,4 +175,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 3. Request Proxying and Streaming | 2/2 | Complete | 2026-06-12 |
 | 4. Intelligent Routing | 2/2 | Complete   | 2026-06-24 |
 | 5. Resilience | 2/2 | Complete   | 2026-06-25 |
-| 6. Observability and Admin | 1/2 | In Progress | - |
+| 6. Observability and Admin | 2/2 | Complete | 2026-06-25 |
