@@ -152,12 +152,16 @@ Plans:
   1. Every proxied request produces a structured JSON log entry containing method, path, HTTP status, duration, and target node
   2. Admin can call an API endpoint and see all registered nodes, which models they serve, and their health status
 
-**Plans**: TBD
+**Plans:** 2 plans
 
 Plans:
+**Wave 1**
 
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+- [ ] 06-01-PLAN.md -- RequestLoggingMiddleware, route handler target_node tracking, and middleware tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 06-02-PLAN.md -- Admin endpoint at /admin/nodes with AdminNodeResponse model and tests
 
 ## Progress
 
