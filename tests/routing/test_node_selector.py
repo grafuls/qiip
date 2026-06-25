@@ -168,6 +168,66 @@ class TestSelectSkipsUnhealthy:
         assert result.node_id == "healthy-1"
 
 
+class TestSelectExcludeNodeIds:
+    """select() supports excluding specific node_ids from selection."""
+
+    def test_exclude_single_node(self) -> None:
+        node_a = _make_node("node-a", "http://10.0.1.100:8000")
+        node_b = _make_node("node-b", "http://10.0.1.200:8000")
+        selector, _, _ = _make_selector([node_a, node_b])
+
+        result = selector.select(exclude_node_ids={"node-a"})
+
+        assert result is not None
+        assert result.node_id == "node-b"
+
+    def test_exclude_all_nodes_returns_none(self) -> None:
+        node_a = _make_node("node-a", "http://10.0.1.100:8000")
+        node_b = _make_node("node-b", "http://10.0.1.200:8000")
+        selector, _, _ = _make_selector([node_a, node_b])
+
+        result = selector.select(exclude_node_ids={"node-a", "node-b"})
+
+        assert result is None
+
+    def test_exclude_none_no_filtering(self) -> None:
+        node_a = _make_node("node-a", "http://10.0.1.100:8000")
+        selector, _, _ = _make_selector([node_a])
+
+        result = selector.select(exclude_node_ids=None)
+
+        assert result is not None
+        assert result.node_id == "node-a"
+
+    def test_exclude_empty_set_no_filtering(self) -> None:
+        node_a = _make_node("node-a", "http://10.0.1.100:8000")
+        selector, _, _ = _make_selector([node_a])
+
+        result = selector.select(exclude_node_ids=set())
+
+        assert result is not None
+        assert result.node_id == "node-a"
+
+    def test_exclude_with_model_filter(self) -> None:
+        node_a = _make_node("node-a", "http://10.0.1.100:8000", model="llama-3")
+        node_b = _make_node("node-b", "http://10.0.1.200:8000", model="llama-3")
+        selector, _, _ = _make_selector([node_a, node_b])
+
+        result = selector.select(model="llama-3", exclude_node_ids={"node-a"})
+
+        assert result is not None
+        assert result.node_id == "node-b"
+
+    def test_exclude_nonexistent_node_id_has_no_effect(self) -> None:
+        node_a = _make_node("node-a", "http://10.0.1.100:8000")
+        selector, _, _ = _make_selector([node_a])
+
+        result = selector.select(exclude_node_ids={"nonexistent"})
+
+        assert result is not None
+        assert result.node_id == "node-a"
+
+
 class TestHasModel:
     """has_model() checks if any node (any status) serves the given model."""
 

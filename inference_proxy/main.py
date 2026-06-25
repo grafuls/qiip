@@ -12,6 +12,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import threading
 from collections.abc import AsyncGenerator
@@ -31,6 +32,9 @@ from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.discovery.serializer import node_from_etcd
 from inference_proxy.discovery.watcher import run_watcher
 from inference_proxy.proxy.client import ProxyClient
+from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
+from inference_proxy.resilience.health_checker import run_health_checker
+from inference_proxy.resilience.shutdown import ShutdownMiddleware
 from inference_proxy.routing.connection_tracker import ConnectionTracker
 from inference_proxy.routing.node_selector import NodeSelector
 
@@ -118,6 +122,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         app.state.registry = registry
 
+        circuit_breaker_registry = CircuitBreakerRegistry(
+            threshold=resolved_settings.resilience.circuit_breaker_threshold,
+        )
+        app.state.circuit_breaker_registry = circuit_breaker_registry
+
+        health_thread = threading.Thread(
+            target=run_health_checker,
+            args=(
+                registry,
+                circuit_breaker_registry,
+                stop_event,
+                resolved_settings.resilience.health_check_interval,
+                resolved_settings.resilience.health_check_failure_threshold,
+            ),
+            daemon=True,
+        )
+        health_thread.start()
+
         connection_tracker = ConnectionTracker()
         node_selector = NodeSelector(registry, connection_tracker)
         app.state.node_selector = node_selector
@@ -138,17 +160,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         proxy_client = ProxyClient(http_client)
         app.state.proxy_client = proxy_client
 
+        app.state.shutting_down = False
+
         yield
+
+        app.state.shutting_down = True
+        logger.info(
+            "graceful shutdown initiated",
+            timeout=resolved_settings.gateway.graceful_shutdown_timeout,
+        )
+        await asyncio.sleep(resolved_settings.gateway.graceful_shutdown_timeout)
 
         await http_client.aclose()
         stop_event.set()
         watch_thread.join(timeout=10)
+        health_thread.join(timeout=10)
 
     application = FastAPI(
         title="QUADS LLM Inference Proxy",
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    application.add_middleware(ShutdownMiddleware)
 
     @application.get("/health")
     async def health() -> JSONResponse:
