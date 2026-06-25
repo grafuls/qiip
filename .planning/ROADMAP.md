@@ -157,7 +157,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md -- RequestLoggingMiddleware, route handler target_node tracking, and middleware tests
+- [x] 06-01-PLAN.md -- RequestLoggingMiddleware, route handler target_node tracking, and middleware tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -175,4 +175,4 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 3. Request Proxying and Streaming | 2/2 | Complete | 2026-06-12 |
 | 4. Intelligent Routing | 2/2 | Complete   | 2026-06-24 |
 | 5. Resilience | 2/2 | Complete   | 2026-06-25 |
-| 6. Observability and Admin | 0/2 | Not started | - |
+| 6. Observability and Admin | 1/2 | In Progress | - |
