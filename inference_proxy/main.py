@@ -23,6 +23,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from inference_proxy.api.admin import admin_router
 from inference_proxy.api.middleware import RequestLoggingMiddleware
 from inference_proxy.api.routes import router
 from inference_proxy.config.dependencies import get_settings
@@ -198,6 +199,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     application.include_router(router)
+    application.include_router(admin_router)
 
     return application
 
