@@ -46,13 +46,20 @@ class NodeSelector:
         """Return the connection tracker for use by route handlers."""
         return self._tracker
 
-    def select(self, model: str | None = None) -> Node | None:
+    def select(
+        self,
+        model: str | None = None,
+        exclude_node_ids: set[str] | None = None,
+    ) -> Node | None:
         """Select the optimal node for a request.
 
         Args:
             model: If provided, only consider nodes serving this exact
                 model name (D-05).  If ``None``, consider all healthy
                 nodes regardless of model (D-09).
+            exclude_node_ids: If provided, skip nodes whose ``node_id``
+                is in this set.  Used by retry logic to avoid re-selecting
+                a node that already failed for the current request.
 
         Returns:
             The healthy ``Node`` with the fewest active connections,
@@ -66,6 +73,16 @@ class NodeSelector:
         if not healthy:
             logger.warning("no healthy nodes available", total_nodes=len(nodes))
             return None
+
+        # Exclude specific nodes (used for retry failover)
+        if exclude_node_ids:
+            healthy = [n for n in healthy if n.node_id not in exclude_node_ids]
+            if not healthy:
+                logger.debug(
+                    "all healthy nodes excluded",
+                    excluded=len(exclude_node_ids),
+                )
+                return None
 
         # Apply model filter if specified (D-05: exact string match)
         if model is not None:

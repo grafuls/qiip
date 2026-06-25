@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 from typing import Any, AsyncGenerator
 
+import httpx
 import structlog
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -30,10 +31,16 @@ from inference_proxy.api.errors import (
     model_unavailable_error,
     no_nodes_error,
 )
-from inference_proxy.config.dependencies import get_node_selector, get_proxy_client
+from inference_proxy.config.dependencies import (
+    get_circuit_breaker_registry,
+    get_node_selector,
+    get_proxy_client,
+    get_settings,
+)
 from inference_proxy.models.node import Node, NodeStatus
 from inference_proxy.models.openai import ChatCompletionRequest, CompletionRequest
 from inference_proxy.proxy.client import ProxyClient
+from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.node_selector import NodeSelector
 
 logger = structlog.get_logger()
@@ -101,37 +108,109 @@ def _scan_drained_nodes(node_selector: NodeSelector) -> None:
             logger.info("drained node removed", node_id=n.node_id)
 
 
+def _is_retryable(exc: Exception) -> bool:
+    """Return True if the exception should trigger a retry on another node.
+
+    Retryable exceptions:
+    - ConnectError: backend is unreachable
+    - TimeoutException: backend timed out (includes ReadTimeout)
+    - HTTPStatusError with status >= 500: backend returned a server error
+    """
+    if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException)):
+        return True
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500
+
+
+def _record_failure_and_trip(
+    node: Node,
+    circuit_breaker_registry: CircuitBreakerRegistry,
+    node_selector: NodeSelector,
+) -> None:
+    """Record a failure in the circuit breaker and trip to UNHEALTHY if open.
+
+    Per D-07: When the circuit breaker trips (is_open becomes True),
+    the node is marked UNHEALTHY in the registry so it exits the
+    routing pool.
+    """
+    breaker = circuit_breaker_registry.get_or_create(node.node_id)
+    breaker.record_failure()
+    if breaker.is_open:
+        updated = node.model_copy(update={"status": NodeStatus.UNHEALTHY})
+        node_selector._registry.add(updated)
+        logger.info(
+            "circuit breaker tripped, node marked unhealthy",
+            node_id=node.node_id,
+        )
+
+
 async def _proxy_non_streaming(
     endpoint_path: str,
     body: dict[str, Any],
     node_selector: NodeSelector,
     proxy: ProxyClient,
+    circuit_breaker_registry: CircuitBreakerRegistry,
+    max_retries: int = 3,
 ) -> JSONResponse:
-    """Forward a non-streaming request to a vLLM backend and return JSON."""
-    model = body.get("model")
-    node = node_selector.select(model=model)
-    if node is None:
-        status, error_resp = _select_error(model, node_selector)
-        return JSONResponse(content=error_resp.model_dump(), status_code=status)
+    """Forward a non-streaming request with retry-on-failover.
 
-    url = f"http://{node.endpoint}{endpoint_path}"
+    Retries on a different node when the current node fails with a
+    retryable error (ConnectError, TimeoutException, 5xx).  Each failed
+    node is excluded from subsequent selection via ``exclude_node_ids``.
+
+    Per T-05-05: retry count bounded by ``max_retries``; each retry
+    goes to a different node.
+    """
+    model = body.get("model")
+    excluded: set[str] = set()
+    last_error_response: JSONResponse | None = None
     tracker = node_selector.tracker
 
-    tracker.increment(node.node_id)
-    try:
-        response = await proxy.forward("POST", url, body)
+    for attempt in range(1, max_retries + 1):
+        node = node_selector.select(
+            model=model,
+            exclude_node_ids=excluded or None,
+        )
+        if node is None:
+            if last_error_response is not None:
+                return last_error_response
+            status, error_resp = _select_error(model, node_selector)
+            return JSONResponse(content=error_resp.model_dump(), status_code=status)
+
+        url = f"http://{node.endpoint}{endpoint_path}"
+        tracker.increment(node.node_id)
         try:
-            content = response.json()
-        except (json.JSONDecodeError, ValueError):
-            content = {"raw": response.text}
-        return JSONResponse(content=content, status_code=response.status_code)
-    except Exception as exc:
-        status, error_resp = map_proxy_error(exc)
-        return JSONResponse(content=error_resp.model_dump(), status_code=status)
-    finally:
-        tracker.decrement(node.node_id)
-        _maybe_remove_drained(node, node_selector)
-        _scan_drained_nodes(node_selector)
+            response = await proxy.forward("POST", url, body)
+            circuit_breaker_registry.get_or_create(node.node_id).record_success()
+            try:
+                content = response.json()
+            except (json.JSONDecodeError, ValueError):
+                content = {"raw": response.text}
+            return JSONResponse(content=content, status_code=response.status_code)
+        except Exception as exc:
+            _record_failure_and_trip(node, circuit_breaker_registry, node_selector)
+            status, error_resp = map_proxy_error(exc)
+            last_error_response = JSONResponse(
+                content=error_resp.model_dump(), status_code=status,
+            )
+            if _is_retryable(exc):
+                excluded.add(node.node_id)
+                logger.warning(
+                    "retrying on different node",
+                    failed_node=node.node_id,
+                    attempt=attempt,
+                    max_retries=max_retries,
+                    error=str(exc),
+                )
+                continue
+            return last_error_response
+        finally:
+            tracker.decrement(node.node_id)
+            _maybe_remove_drained(node, node_selector)
+            _scan_drained_nodes(node_selector)
+
+    # All retries exhausted
+    assert last_error_response is not None
+    return last_error_response
 
 
 @router.post("/v1/chat/completions", response_model=None)
@@ -139,6 +218,9 @@ async def chat_completions(
     request: ChatCompletionRequest,
     node_selector: NodeSelector = Depends(get_node_selector),
     proxy: ProxyClient = Depends(get_proxy_client),
+    circuit_breaker_registry: CircuitBreakerRegistry = Depends(
+        get_circuit_breaker_registry,
+    ),
 ) -> JSONResponse | EventSourceResponse:
     """Proxy a chat completion request to a vLLM backend.
 
@@ -146,15 +228,22 @@ async def chat_completions(
     Otherwise, returns the full JSON response from the backend.
     """
     body = request.model_dump(exclude_none=True)
+    settings = get_settings()
     if request.stream:
         return await _stream_completion(
             endpoint_path="/v1/chat/completions",
             body=body,
             node_selector=node_selector,
             proxy=proxy,
+            circuit_breaker_registry=circuit_breaker_registry,
         )
     return await _proxy_non_streaming(
-        "/v1/chat/completions", body, node_selector, proxy,
+        "/v1/chat/completions",
+        body,
+        node_selector,
+        proxy,
+        circuit_breaker_registry=circuit_breaker_registry,
+        max_retries=settings.routing.max_retries,
     )
 
 
@@ -163,6 +252,9 @@ async def text_completions(
     request: CompletionRequest,
     node_selector: NodeSelector = Depends(get_node_selector),
     proxy: ProxyClient = Depends(get_proxy_client),
+    circuit_breaker_registry: CircuitBreakerRegistry = Depends(
+        get_circuit_breaker_registry,
+    ),
 ) -> JSONResponse | EventSourceResponse:
     """Proxy a text completion request to a vLLM backend.
 
@@ -170,14 +262,23 @@ async def text_completions(
     Otherwise, returns the full JSON response from the backend.
     """
     body = request.model_dump(exclude_none=True)
+    settings = get_settings()
     if request.stream:
         return await _stream_completion(
             endpoint_path="/v1/completions",
             body=body,
             node_selector=node_selector,
             proxy=proxy,
+            circuit_breaker_registry=circuit_breaker_registry,
         )
-    return await _proxy_non_streaming("/v1/completions", body, node_selector, proxy)
+    return await _proxy_non_streaming(
+        "/v1/completions",
+        body,
+        node_selector,
+        proxy,
+        circuit_breaker_registry=circuit_breaker_registry,
+        max_retries=settings.routing.max_retries,
+    )
 
 
 @router.get("/v1/models")
@@ -217,6 +318,7 @@ async def _stream_completion(
     body: dict[str, Any],
     node_selector: NodeSelector,
     proxy: ProxyClient,
+    circuit_breaker_registry: CircuitBreakerRegistry,
 ) -> JSONResponse | EventSourceResponse:
     """Stream SSE events from a vLLM backend to the client.
 
@@ -225,6 +327,10 @@ async def _stream_completion(
 
     Uses ``format_sse_event(data_str=...)`` to avoid double JSON encoding
     (upstream data is already JSON-serialised by vLLM).
+
+    Records success/failure in the circuit breaker but does NOT retry
+    mid-stream.  Per plan: streaming requests may record failures but
+    do not retry once the SSE connection has started.
     """
     model = body.get("model")
     node = node_selector.select(model=model)
@@ -246,10 +352,16 @@ async def _stream_completion(
                 async for sse in event_source.aiter_sse():
                     if sse.data == "[DONE]":
                         yield format_sse_event(data_str="[DONE]")
+                        circuit_breaker_registry.get_or_create(
+                            node.node_id,
+                        ).record_success()
                         return
                     yield format_sse_event(data_str=sse.data)
         except Exception as exc:
             logger.error("streaming proxy error", error=str(exc), url=url)
+            _record_failure_and_trip(
+                node, circuit_breaker_registry, node_selector,
+            )
             _, error_resp = map_proxy_error(exc)
             error_json = json.dumps(error_resp.model_dump())
             yield format_sse_event(data_str=error_json)

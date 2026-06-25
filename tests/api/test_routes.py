@@ -749,6 +749,7 @@ class TestNonStreamingRetry:
         self,
         client: TestClient,
         test_registry: NodeRegistry,
+        node_selector: NodeSelector,
         httpx_mock: HTTPXMock,
     ) -> None:
         """First node fails with ConnectError, second node succeeds, client sees success."""
@@ -758,6 +759,8 @@ class TestNonStreamingRetry:
         test_registry.add(
             _make_node(node_id="node-2", endpoint="10.0.1.101:8000", model="llama-3")
         )
+        # Ensure node-1 is selected first (fewer connections)
+        node_selector.tracker.increment("node-2")
 
         httpx_mock.add_exception(
             httpx.ConnectError("connection refused"),
@@ -795,6 +798,7 @@ class TestNonStreamingRetry:
         self,
         client: TestClient,
         test_registry: NodeRegistry,
+        node_selector: NodeSelector,
         httpx_mock: HTTPXMock,
     ) -> None:
         """First node times out, second node succeeds."""
@@ -804,6 +808,8 @@ class TestNonStreamingRetry:
         test_registry.add(
             _make_node(node_id="node-2", endpoint="10.0.1.101:8000", model="llama-3")
         )
+        # Ensure node-1 is selected first
+        node_selector.tracker.increment("node-2")
 
         httpx_mock.add_exception(
             httpx.ReadTimeout("read timed out"),
@@ -873,7 +879,6 @@ class TestCircuitBreakerRecording:
 
     def test_records_success_on_successful_proxy(
         self,
-        client: TestClient,
         test_registry: NodeRegistry,
         app: object,
         httpx_mock: HTTPXMock,
@@ -886,9 +891,11 @@ class TestCircuitBreakerRecording:
         """
         from fastapi import FastAPI
 
+        from inference_proxy.config.dependencies import get_circuit_breaker_registry
+
         assert isinstance(app, FastAPI)
         cb_registry = CircuitBreakerRegistry(threshold=3)
-        app.state.circuit_breaker_registry = cb_registry
+        app.dependency_overrides[get_circuit_breaker_registry] = lambda: cb_registry
 
         test_registry.add(_make_node(node_id="node-1", model="llama-3"))
         # Pre-seed 3 failures to trip the breaker open
@@ -917,7 +924,8 @@ class TestCircuitBreakerRecording:
             status_code=200,
         )
 
-        response = client.post(
+        test_client = TestClient(app)
+        response = test_client.post(
             "/v1/chat/completions",
             json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
         )
@@ -928,7 +936,6 @@ class TestCircuitBreakerRecording:
 
     def test_records_failure_on_failed_proxy(
         self,
-        client: TestClient,
         test_registry: NodeRegistry,
         app: object,
         httpx_mock: HTTPXMock,
@@ -936,9 +943,11 @@ class TestCircuitBreakerRecording:
         """Failed proxy call records failure on the circuit breaker."""
         from fastapi import FastAPI
 
+        from inference_proxy.config.dependencies import get_circuit_breaker_registry
+
         assert isinstance(app, FastAPI)
         cb_registry = CircuitBreakerRegistry(threshold=1)
-        app.state.circuit_breaker_registry = cb_registry
+        app.dependency_overrides[get_circuit_breaker_registry] = lambda: cb_registry
 
         test_registry.add(_make_node(node_id="node-1", model="llama-3"))
 
@@ -947,7 +956,8 @@ class TestCircuitBreakerRecording:
             url="http://10.0.1.100:8000/v1/chat/completions",
         )
 
-        response = client.post(
+        test_client = TestClient(app)
+        response = test_client.post(
             "/v1/chat/completions",
             json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
         )
@@ -959,7 +969,6 @@ class TestCircuitBreakerRecording:
 
     def test_circuit_breaker_trip_marks_node_unhealthy(
         self,
-        client: TestClient,
         test_registry: NodeRegistry,
         app: object,
         httpx_mock: HTTPXMock,
@@ -967,9 +976,11 @@ class TestCircuitBreakerRecording:
         """When the circuit breaker trips, the node is marked UNHEALTHY in the registry."""
         from fastapi import FastAPI
 
+        from inference_proxy.config.dependencies import get_circuit_breaker_registry
+
         assert isinstance(app, FastAPI)
         cb_registry = CircuitBreakerRegistry(threshold=1)
-        app.state.circuit_breaker_registry = cb_registry
+        app.dependency_overrides[get_circuit_breaker_registry] = lambda: cb_registry
 
         test_registry.add(_make_node(node_id="node-1", model="llama-3"))
 
@@ -978,7 +989,8 @@ class TestCircuitBreakerRecording:
             url="http://10.0.1.100:8000/v1/chat/completions",
         )
 
-        client.post(
+        test_client = TestClient(app)
+        test_client.post(
             "/v1/chat/completions",
             json={"model": "llama-3", "messages": [{"role": "user", "content": "Hi"}]},
         )
@@ -993,17 +1005,19 @@ class TestStreamingCircuitBreaker:
 
     def test_streaming_records_failure_no_retry(
         self,
-        client: TestClient,
         test_registry: NodeRegistry,
+        node_selector: NodeSelector,
         app: object,
         httpx_mock: HTTPXMock,
     ) -> None:
         """Streaming error records failure but does not retry on another node."""
         from fastapi import FastAPI
 
+        from inference_proxy.config.dependencies import get_circuit_breaker_registry
+
         assert isinstance(app, FastAPI)
         cb_registry = CircuitBreakerRegistry(threshold=1)
-        app.state.circuit_breaker_registry = cb_registry
+        app.dependency_overrides[get_circuit_breaker_registry] = lambda: cb_registry
 
         test_registry.add(
             _make_node(node_id="node-1", endpoint="10.0.1.100:8000", model="llama-3")
@@ -1011,6 +1025,8 @@ class TestStreamingCircuitBreaker:
         test_registry.add(
             _make_node(node_id="node-2", endpoint="10.0.1.101:8000", model="llama-3")
         )
+        # Ensure node-1 is selected first (fewer connections)
+        node_selector.tracker.increment("node-2")
 
         # Simulate streaming error -- connection fails
         httpx_mock.add_exception(
@@ -1018,7 +1034,8 @@ class TestStreamingCircuitBreaker:
             url="http://10.0.1.100:8000/v1/chat/completions",
         )
 
-        response = client.post(
+        test_client = TestClient(app)
+        response = test_client.post(
             "/v1/chat/completions",
             json={
                 "model": "llama-3",
@@ -1042,7 +1059,6 @@ class TestStreamingCircuitBreaker:
 
     def test_streaming_records_success(
         self,
-        client: TestClient,
         test_registry: NodeRegistry,
         app: object,
         httpx_mock: HTTPXMock,
@@ -1050,11 +1066,20 @@ class TestStreamingCircuitBreaker:
         """Successful streaming records success on the circuit breaker."""
         from fastapi import FastAPI
 
+        from inference_proxy.config.dependencies import get_circuit_breaker_registry
+
         assert isinstance(app, FastAPI)
-        cb_registry = CircuitBreakerRegistry()
-        app.state.circuit_breaker_registry = cb_registry
+        cb_registry = CircuitBreakerRegistry(threshold=3)
+        app.dependency_overrides[get_circuit_breaker_registry] = lambda: cb_registry
 
         test_registry.add(_make_node(node_id="node-1", model="llama-3"))
+
+        # Pre-seed breaker to OPEN to verify success closes it
+        breaker = cb_registry.get_or_create("node-1")
+        breaker.record_failure()
+        breaker.record_failure()
+        breaker.record_failure()
+        assert breaker.is_open is True
 
         sse_chunks = [
             b'data: {"id":"chatcmpl-1","object":"chat.completion.chunk","created":1234,"model":"llama-3","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":"stop"}]}\n\n',
@@ -1066,7 +1091,8 @@ class TestStreamingCircuitBreaker:
             stream=IteratorStream(sse_chunks),
         )
 
-        response = client.post(
+        test_client = TestClient(app)
+        response = test_client.post(
             "/v1/chat/completions",
             json={
                 "model": "llama-3",
@@ -1078,5 +1104,5 @@ class TestStreamingCircuitBreaker:
         assert response.status_code == 200
         _ = response.text  # Consume the response
 
-        breaker = cb_registry.get_or_create("node-1")
+        # After successful streaming, breaker should be closed (record_success called)
         assert breaker.is_open is False
