@@ -23,6 +23,7 @@ import structlog
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from inference_proxy.api.middleware import RequestLoggingMiddleware
 from inference_proxy.api.routes import router
 from inference_proxy.config.dependencies import get_settings
 from inference_proxy.config.logging import configure_logging
@@ -183,6 +184,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     application.add_middleware(ShutdownMiddleware)
+    application.add_middleware(RequestLoggingMiddleware)
 
     @application.get("/health")
     async def health() -> JSONResponse:

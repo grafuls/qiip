@@ -21,6 +21,7 @@ from typing import Any, AsyncGenerator
 import httpx
 import structlog
 from fastapi import APIRouter, Depends
+from fastapi import Request as StarletteRequest
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse, format_sse_event
 from httpx_sse import aconnect_sse
@@ -150,6 +151,7 @@ async def _proxy_non_streaming(
     proxy: ProxyClient,
     circuit_breaker_registry: CircuitBreakerRegistry,
     max_retries: int = 3,
+    starlette_request: StarletteRequest | None = None,
 ) -> JSONResponse:
     """Forward a non-streaming request with retry-on-failover.
 
@@ -175,6 +177,9 @@ async def _proxy_non_streaming(
                 return last_error_response
             status, error_resp = _select_error(model, node_selector)
             return JSONResponse(content=error_resp.model_dump(), status_code=status)
+
+        if starlette_request is not None:
+            starlette_request.state.target_node = node.endpoint
 
         url = f"http://{node.endpoint}{endpoint_path}"
         tracker.increment(node.node_id)
@@ -216,6 +221,7 @@ async def _proxy_non_streaming(
 @router.post("/v1/chat/completions", response_model=None)
 async def chat_completions(
     request: ChatCompletionRequest,
+    starlette_request: StarletteRequest,
     node_selector: NodeSelector = Depends(get_node_selector),
     proxy: ProxyClient = Depends(get_proxy_client),
     circuit_breaker_registry: CircuitBreakerRegistry = Depends(
@@ -236,6 +242,7 @@ async def chat_completions(
             node_selector=node_selector,
             proxy=proxy,
             circuit_breaker_registry=circuit_breaker_registry,
+            starlette_request=starlette_request,
         )
     return await _proxy_non_streaming(
         "/v1/chat/completions",
@@ -244,12 +251,14 @@ async def chat_completions(
         proxy,
         circuit_breaker_registry=circuit_breaker_registry,
         max_retries=settings.routing.max_retries,
+        starlette_request=starlette_request,
     )
 
 
 @router.post("/v1/completions", response_model=None)
 async def text_completions(
     request: CompletionRequest,
+    starlette_request: StarletteRequest,
     node_selector: NodeSelector = Depends(get_node_selector),
     proxy: ProxyClient = Depends(get_proxy_client),
     circuit_breaker_registry: CircuitBreakerRegistry = Depends(
@@ -270,6 +279,7 @@ async def text_completions(
             node_selector=node_selector,
             proxy=proxy,
             circuit_breaker_registry=circuit_breaker_registry,
+            starlette_request=starlette_request,
         )
     return await _proxy_non_streaming(
         "/v1/completions",
@@ -278,6 +288,7 @@ async def text_completions(
         proxy,
         circuit_breaker_registry=circuit_breaker_registry,
         max_retries=settings.routing.max_retries,
+        starlette_request=starlette_request,
     )
 
 
@@ -319,6 +330,7 @@ async def _stream_completion(
     node_selector: NodeSelector,
     proxy: ProxyClient,
     circuit_breaker_registry: CircuitBreakerRegistry,
+    starlette_request: StarletteRequest | None = None,
 ) -> JSONResponse | EventSourceResponse:
     """Stream SSE events from a vLLM backend to the client.
 
@@ -337,6 +349,9 @@ async def _stream_completion(
     if node is None:
         status, error_resp = _select_error(model, node_selector)
         return JSONResponse(content=error_resp.model_dump(), status_code=status)
+
+    if starlette_request is not None:
+        starlette_request.state.target_node = node.endpoint
 
     url = f"http://{node.endpoint}{endpoint_path}"
     tracker = node_selector.tracker
