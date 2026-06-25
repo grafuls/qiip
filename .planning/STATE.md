@@ -79,11 +79,12 @@ None yet.
 
 ## Deferred Items
 
-Items acknowledged and carried forward from previous milestone close:
+Items acknowledged and deferred at milestone v1.0 close on 2026-06-25:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| *(none)* | | | |
+| verification_gap | Phase 03 — 03-VERIFICATION.md | human_needed | 2026-06-25 |
+| verification_gap | Phase 06 — 06-VERIFICATION.md | human_needed | 2026-06-25 |
 
 ## Session Continuity
 

@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A gateway service that proxies OpenAI-compatible requests to vLLM inference nodes running on idle QUADS lab servers. Part of a larger system that dynamically provisions LLM inference capacity from unused GPU servers in Scale and Alias labs.
+An OpenAI-compatible inference gateway that proxies requests to vLLM nodes on QUADS lab servers with automatic service discovery, least-connections load balancing, circuit breaker resilience, and structured observability. Part of a larger system that dynamically provisions LLM inference capacity from unused GPU servers in Scale and Alias labs.
 
 ## Core Value
 
@@ -12,15 +12,20 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Validated
 
-- [x] Automatic retry on another healthy node when a request fails — Validated in Phase 5
-- [x] Health checking of registered vLLM nodes — Validated in Phase 5
+- [x] OpenAI-compatible API proxy (chat completions, completions, models, health) — v1.0
+- [x] etcd-based service discovery for vLLM nodes — v1.0
+- [x] Least-connections load balancing across healthy nodes — v1.0
+- [x] SSE streaming support for token-by-token responses — v1.0
+- [x] Automatic retry on another healthy node when a request fails — v1.0
+- [x] Health checking of registered vLLM nodes — v1.0
+- [x] Circuit breaker pattern for node failure isolation — v1.0
+- [x] Graceful shutdown with in-flight request draining — v1.0
+- [x] Structured request logging with target node tracking — v1.0
+- [x] Admin API for node fleet inspection — v1.0
 
 ### Active
 
-- [ ] OpenAI-compatible API proxy (chat completions, completions, models, health)
-- [ ] etcd-based service discovery for vLLM nodes
-- [ ] Least-connections load balancing across healthy nodes
-- [ ] SSE streaming support for token-by-token responses
+(None — v1.0 complete. Define new requirements via `/gsd:new-milestone`)
 
 ### Out of Scope
 
@@ -34,14 +39,17 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ## Context
 
+Shipped v1.0 with 6,830 LOC Python across 6 phases and 226 tests.
+Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, structlog, Pydantic v2.
+
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
 
-**Architecture context from PLAN.md:**
+**Architecture:**
 - vLLM nodes run in Podman containers on bare metal servers
 - Models are served from NFS shared storage (read-only mounts)
 - etcd provides service registry — nodes register with endpoint, model info, capabilities
 - The gateway is a FastAPI application using httpx for async proxying
-- Future phases add a control plane (SSH-based provisioning) and NGINX (external access)
+- Next milestone: control plane (SSH-based provisioning), NGINX (external access), Prometheus metrics
 
 ## Constraints
 
@@ -54,14 +62,16 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| FastAPI for gateway | Async support, OpenAI compatibility, team familiarity | Validated in Phase 1 |
-| etcd for discovery | Dynamic node registration, watch-based updates, proven at scale | — Pending |
-| Least connections balancing | Better utilization than round-robin for variable-length inference requests | — Pending |
-| No auth in v1 | Internal network, simplifies initial implementation | — Pending |
-| Retry on failure | Transparent failover improves reliability without client complexity | Validated in Phase 5 |
-| Circuit breaker pattern | Trip after 3 consecutive failures, auto-recover on health check success | Validated in Phase 5 |
-| Background health checker | Dedicated thread probes /health, marks nodes UNHEALTHY/HEALTHY | Validated in Phase 5 |
-| Graceful shutdown | 503 for new requests (except /health), drain in-flight up to timeout | Validated in Phase 5 |
+| FastAPI for gateway | Async support, OpenAI compatibility, team familiarity | Validated v1.0 |
+| etcd3gw for discovery | HTTP gateway client, no grpcio dependency, OpenStack-maintained | Validated v1.0 |
+| Least connections balancing | Better utilization than round-robin for variable-length inference requests | Validated v1.0 |
+| No auth in v1 | Internal network, simplifies initial implementation | Validated v1.0 |
+| Retry on failure | Transparent failover improves reliability without client complexity | Validated v1.0 |
+| Circuit breaker pattern | Trip after 3 consecutive failures, auto-recover on health check success | Validated v1.0 |
+| Background health checker | Dedicated thread probes /health, marks nodes UNHEALTHY/HEALTHY | Validated v1.0 |
+| Graceful shutdown | 503 for new requests (except /health), drain in-flight up to timeout | Validated v1.0 |
+| BaseHTTPMiddleware for logging | Simpler than pure ASGI; accepted streaming duration trade-off | Validated v1.0 |
+| Separate admin router | /admin namespace for operational endpoints, distinct from proxy routes | Validated v1.0 |
 
 ## Evolution
 
@@ -81,4 +91,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-25 after Phase 5 (Resilience) completion*
+*Last updated: 2026-06-25 after v1.0 milestone completion*
