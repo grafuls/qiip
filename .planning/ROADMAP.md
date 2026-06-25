@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Service Discovery** - etcd-based node registry with watch-based live updates (completed 2026-06-11)
 - [x] **Phase 3: Request Proxying and Streaming** - OpenAI-compatible proxy with SSE streaming to vLLM nodes (completed 2026-06-12)
 - [x] **Phase 4: Intelligent Routing** - Least-connections load balancing with model-aware filtering (completed 2026-06-24)
-- [ ] **Phase 5: Resilience** - Health checks, retry with failover, circuit breaker, graceful shutdown
+- [x] **Phase 5: Resilience** - Health checks, retry with failover, circuit breaker, graceful shutdown (completed 2026-06-25)
 - [ ] **Phase 6: Observability and Admin** - Structured logging and admin API for operational visibility
 
 ## Phase Details
@@ -130,7 +130,7 @@ Plans:
   3. After consecutive failures to a node, a circuit breaker opens and stops sending traffic to it; after recovery, it closes again
   4. When the gateway receives a shutdown signal, it finishes in-flight requests before stopping
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 
 Plans:
 **Wave 1**
@@ -139,7 +139,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 05-02-PLAN.md -- Retry with failover in routes, shutdown middleware, lifespan wiring, and integration tests
+- [x] 05-02-PLAN.md -- Retry with failover in routes, shutdown middleware, lifespan wiring, and integration tests
 
 ### Phase 6: Observability and Admin
 
@@ -170,5 +170,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
 | 2. Service Discovery | 2/2 | Complete   | 2026-06-11 |
 | 3. Request Proxying and Streaming | 2/2 | Complete | 2026-06-12 |
 | 4. Intelligent Routing | 2/2 | Complete   | 2026-06-24 |
-| 5. Resilience | 1/2 | In Progress|  |
+| 5. Resilience | 2/2 | Complete   | 2026-06-25 |
 | 6. Observability and Admin | 0/2 | Not started | - |
