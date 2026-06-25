@@ -14,6 +14,7 @@ class GatewaySettings(BaseModel):
 
     host: str = "0.0.0.0"
     port: int = 8080
+    graceful_shutdown_timeout: int = 30
 
 
 class EtcdSettings(BaseModel):
@@ -56,6 +57,26 @@ class ProxySettings(BaseModel):
     keepalive_expiry: int = 30
 
 
+class ResilienceSettings(BaseModel):
+    """Resilience configuration for circuit breakers and health checking.
+
+    ``circuit_breaker_threshold``: consecutive failures before a circuit
+    breaker trips to OPEN (per D-06, default 3).
+
+    ``health_check_failure_threshold``: consecutive probe failures before
+    marking a node UNHEALTHY (per D-03, default 3).
+
+    ``health_check_interval``: seconds between health check probe cycles
+    (default 30).  This is the canonical source; the legacy
+    ``RoutingSettings.health_check_interval`` is retained for backward
+    compatibility.
+    """
+
+    circuit_breaker_threshold: int = 3
+    health_check_failure_threshold: int = 3
+    health_check_interval: int = 30
+
+
 class LoggingSettings(BaseModel):
     """Logging configuration."""
 
@@ -83,4 +104,5 @@ class Settings(BaseSettings):
     etcd: EtcdSettings = EtcdSettings()
     routing: RoutingSettings = RoutingSettings()
     proxy: ProxySettings = ProxySettings()
+    resilience: ResilienceSettings = ResilienceSettings()
     logging: LoggingSettings = LoggingSettings()
