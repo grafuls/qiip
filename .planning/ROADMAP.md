@@ -35,7 +35,10 @@
   1. Gateway increments request counters per-node and per-model on every proxied request
   2. GET /admin/nodes returns active_connections and circuit_breaker_state for each node
   3. Counter data is accessible programmatically (exists in a form the dashboard can consume)
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
+- [ ] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
 
 ### Phase 8: Dashboard and Node Fleet
 **Goal**: Operators can view the node fleet status at a glance on a single web page
@@ -47,7 +50,10 @@
   3. Healthy, unhealthy, and draining nodes are visually distinguishable (color, icon, or badge)
   4. Dashboard is served by the existing FastAPI app with no separate server process
   5. Page has readable CSS styling (not unstyled HTML)
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
+- [ ] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
 **UI hint**: yes
 
 ### Phase 9: Live Metrics and Auto-Refresh
@@ -58,7 +64,10 @@
   1. Dashboard displays request counts broken down by node
   2. Dashboard content updates automatically at a configurable polling interval without full page reload
   3. Operator can see counts change in real time as requests flow through the proxy
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
+- [ ] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
 **UI hint**: yes
 
 ## Progress
@@ -74,6 +83,6 @@ Phases execute in numeric order: 7 -> 8 -> 9
 | 4. Intelligent Routing | v1.0 | 2/2 | Complete | 2026-06-24 |
 | 5. Resilience | v1.0 | 2/2 | Complete | 2026-06-25 |
 | 6. Observability and Admin | v1.0 | 2/2 | Complete | 2026-06-25 |
-| 7. Request Metrics and Admin API | v1.1 | 0/0 | Not started | - |
+| 7. Request Metrics and Admin API | v1.1 | 0/2 | Planning complete | - |
 | 8. Dashboard and Node Fleet | v1.1 | 0/0 | Not started | - |
 | 9. Live Metrics and Auto-Refresh | v1.1 | 0/0 | Not started | - |
