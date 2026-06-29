@@ -36,6 +36,7 @@ from inference_proxy.config.dependencies import (
     get_circuit_breaker_registry,
     get_node_selector,
     get_proxy_client,
+    get_request_metrics,
     get_settings,
 )
 from inference_proxy.models.node import Node, NodeStatus
@@ -43,6 +44,7 @@ from inference_proxy.models.openai import ChatCompletionRequest, CompletionReque
 from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.node_selector import NodeSelector
+from inference_proxy.routing.request_metrics import RequestMetrics
 
 logger = structlog.get_logger()
 
@@ -150,6 +152,7 @@ async def _proxy_non_streaming(
     node_selector: NodeSelector,
     proxy: ProxyClient,
     circuit_breaker_registry: CircuitBreakerRegistry,
+    request_metrics: RequestMetrics,
     max_retries: int = 3,
     starlette_request: StarletteRequest | None = None,
 ) -> JSONResponse:
@@ -166,6 +169,7 @@ async def _proxy_non_streaming(
     excluded: set[str] = set()
     last_error_response: JSONResponse | None = None
     tracker = node_selector.tracker
+    first_attempt = True
 
     for attempt in range(1, max_retries + 1):
         node = node_selector.select(
@@ -177,6 +181,12 @@ async def _proxy_non_streaming(
                 return last_error_response
             status, error_resp = _select_error(model, node_selector)
             return JSONResponse(content=error_resp.model_dump(), status_code=status)
+
+        if first_attempt:
+            request_metrics.record_request(node.node_id, model)
+            first_attempt = False
+        else:
+            request_metrics.record_node_attempt(node.node_id)
 
         if starlette_request is not None:
             starlette_request.state.target_node = node.endpoint
@@ -227,6 +237,7 @@ async def chat_completions(
     circuit_breaker_registry: CircuitBreakerRegistry = Depends(
         get_circuit_breaker_registry,
     ),
+    request_metrics: RequestMetrics = Depends(get_request_metrics),
 ) -> JSONResponse | EventSourceResponse:
     """Proxy a chat completion request to a vLLM backend.
 
@@ -242,6 +253,7 @@ async def chat_completions(
             node_selector=node_selector,
             proxy=proxy,
             circuit_breaker_registry=circuit_breaker_registry,
+            request_metrics=request_metrics,
             starlette_request=starlette_request,
         )
     return await _proxy_non_streaming(
@@ -250,6 +262,7 @@ async def chat_completions(
         node_selector,
         proxy,
         circuit_breaker_registry=circuit_breaker_registry,
+        request_metrics=request_metrics,
         max_retries=settings.routing.max_retries,
         starlette_request=starlette_request,
     )
@@ -264,6 +277,7 @@ async def text_completions(
     circuit_breaker_registry: CircuitBreakerRegistry = Depends(
         get_circuit_breaker_registry,
     ),
+    request_metrics: RequestMetrics = Depends(get_request_metrics),
 ) -> JSONResponse | EventSourceResponse:
     """Proxy a text completion request to a vLLM backend.
 
@@ -279,6 +293,7 @@ async def text_completions(
             node_selector=node_selector,
             proxy=proxy,
             circuit_breaker_registry=circuit_breaker_registry,
+            request_metrics=request_metrics,
             starlette_request=starlette_request,
         )
     return await _proxy_non_streaming(
@@ -287,6 +302,7 @@ async def text_completions(
         node_selector,
         proxy,
         circuit_breaker_registry=circuit_breaker_registry,
+        request_metrics=request_metrics,
         max_retries=settings.routing.max_retries,
         starlette_request=starlette_request,
     )
@@ -330,6 +346,7 @@ async def _stream_completion(
     node_selector: NodeSelector,
     proxy: ProxyClient,
     circuit_breaker_registry: CircuitBreakerRegistry,
+    request_metrics: RequestMetrics,
     starlette_request: StarletteRequest | None = None,
 ) -> JSONResponse | EventSourceResponse:
     """Stream SSE events from a vLLM backend to the client.
@@ -357,6 +374,7 @@ async def _stream_completion(
     tracker = node_selector.tracker
 
     tracker.increment(node.node_id)
+    request_metrics.record_request(node.node_id, model)
 
     async def event_generator() -> AsyncGenerator[bytes, None]:
         try:

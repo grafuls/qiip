@@ -39,6 +39,7 @@ from inference_proxy.resilience.health_checker import run_health_checker
 from inference_proxy.resilience.shutdown import ShutdownMiddleware
 from inference_proxy.routing.connection_tracker import ConnectionTracker
 from inference_proxy.routing.node_selector import NodeSelector
+from inference_proxy.routing.request_metrics import RequestMetrics
 
 logger = structlog.get_logger()
 
@@ -145,6 +146,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         connection_tracker = ConnectionTracker()
         node_selector = NodeSelector(registry, connection_tracker)
         app.state.node_selector = node_selector
+
+        request_metrics = RequestMetrics()
+        app.state.request_metrics = request_metrics
 
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(
