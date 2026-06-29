@@ -65,7 +65,7 @@ Plans:
 Plans:
 
 - [x] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
-- [ ] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
+- [x] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
 
 **UI hint**: yes
 
@@ -83,7 +83,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 
-- [ ] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
+- [x] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
 - [ ] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
 
 **UI hint**: yes
