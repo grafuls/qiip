@@ -53,6 +53,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 ## Context
 
 Shipped v1.0 with 6,830 LOC Python across 6 phases and 226 tests.
+Phase 7 complete — request metrics tracking (per-node, per-model, total) and enriched admin API (/admin/nodes with 6 fields, /admin/metrics endpoint). 247 tests.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, structlog, Pydantic v2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
