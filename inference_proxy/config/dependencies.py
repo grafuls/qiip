@@ -20,6 +20,7 @@ from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.node_selector import NodeSelector
+from inference_proxy.routing.request_metrics import RequestMetrics
 
 from .settings import Settings
 
@@ -59,6 +60,16 @@ def get_circuit_breaker_registry(request: Request) -> CircuitBreakerRegistry:
     ``Depends(get_circuit_breaker_registry)``.
     """
     return request.app.state.circuit_breaker_registry  # type: ignore[no-any-return]
+
+
+def get_request_metrics(request: Request) -> RequestMetrics:
+    """Return the request metrics from the current application state.
+
+    The metrics instance is created during lifespan startup and stored in
+    ``app.state.request_metrics``.  This dependency makes it available to
+    FastAPI route handlers via ``Depends(get_request_metrics)``.
+    """
+    return request.app.state.request_metrics  # type: ignore[no-any-return]
 
 
 def get_node_selector(request: Request) -> NodeSelector:

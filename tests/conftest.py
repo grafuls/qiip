@@ -13,6 +13,7 @@ from inference_proxy.config.dependencies import (
     get_circuit_breaker_registry,
     get_node_selector,
     get_proxy_client,
+    get_request_metrics,
     get_settings,
 )
 from inference_proxy.config.settings import (
@@ -27,6 +28,7 @@ from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.connection_tracker import ConnectionTracker
 from inference_proxy.routing.node_selector import NodeSelector
+from inference_proxy.routing.request_metrics import RequestMetrics
 
 
 @pytest.fixture
@@ -72,6 +74,12 @@ def circuit_breaker_registry() -> CircuitBreakerRegistry:
 
 
 @pytest.fixture
+def request_metrics() -> RequestMetrics:
+    """Return a fresh RequestMetrics instance for testing."""
+    return RequestMetrics()
+
+
+@pytest.fixture
 def node_selector(
     test_registry: NodeRegistry,
     connection_tracker: ConnectionTracker,
@@ -87,6 +95,7 @@ def app(
     proxy_client: ProxyClient,
     node_selector: NodeSelector,
     circuit_breaker_registry: CircuitBreakerRegistry,
+    request_metrics: RequestMetrics,
 ) -> Generator[FastAPI, None, None]:
     """Create a FastAPI app with test settings, registry, and proxy client injected."""
     application = create_app(settings=test_settings)
@@ -95,11 +104,15 @@ def app(
     application.state.proxy_client = proxy_client
     application.state.node_selector = node_selector
     application.state.circuit_breaker_registry = circuit_breaker_registry
+    application.state.request_metrics = request_metrics
     application.state.shutting_down = False
     application.dependency_overrides[get_proxy_client] = lambda: proxy_client
     application.dependency_overrides[get_node_selector] = lambda: node_selector
     application.dependency_overrides[get_circuit_breaker_registry] = (
         lambda: circuit_breaker_registry
+    )
+    application.dependency_overrides[get_request_metrics] = (
+        lambda: request_metrics
     )
     yield application
     application.dependency_overrides.clear()

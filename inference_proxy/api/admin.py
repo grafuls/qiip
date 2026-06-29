@@ -14,11 +14,13 @@ from inference_proxy.config.dependencies import (
     get_circuit_breaker_registry,
     get_node_selector,
     get_registry,
+    get_request_metrics,
 )
 from inference_proxy.discovery.registry import NodeRegistry
-from inference_proxy.models.admin import AdminNodeResponse
+from inference_proxy.models.admin import AdminMetricsResponse, AdminNodeResponse
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.node_selector import NodeSelector
+from inference_proxy.routing.request_metrics import RequestMetrics
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -47,3 +49,15 @@ async def list_nodes(
         )
         for n in nodes
     ]
+
+
+@admin_router.get("/metrics")
+async def get_metrics(
+    request_metrics: RequestMetrics = Depends(get_request_metrics),
+) -> AdminMetricsResponse:
+    """Return aggregate request counter data for the operations dashboard."""
+    return AdminMetricsResponse(
+        total_requests=request_metrics.get_total(),
+        per_model=request_metrics.get_per_model(),
+        per_node=request_metrics.get_per_node(),
+    )
