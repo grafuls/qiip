@@ -42,7 +42,7 @@
 Plans:
 **Wave 1**
 
-- [ ] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
+- [x] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -101,6 +101,6 @@ Phases execute in numeric order: 7 -> 8 -> 9
 | 4. Intelligent Routing | v1.0 | 2/2 | Complete | 2026-06-24 |
 | 5. Resilience | v1.0 | 2/2 | Complete | 2026-06-25 |
 | 6. Observability and Admin | v1.0 | 2/2 | Complete | 2026-06-25 |
-| 7. Request Metrics and Admin API | v1.1 | 0/2 | Planning complete | - |
+| 7. Request Metrics and Admin API | v1.1 | 1/2 | In Progress|  |
 | 8. Dashboard and Node Fleet | v1.1 | 0/0 | Not started | - |
 | 9. Live Metrics and Auto-Refresh | v1.1 | 0/0 | Not started | - |
