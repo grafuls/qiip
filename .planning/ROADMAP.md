@@ -21,7 +21,7 @@
 
 ### v1.1 Web UI
 
-- [ ] **Phase 7: Request Metrics and Admin API** - In-memory request counters and enriched admin endpoint for node data
+- [x] **Phase 7: Request Metrics and Admin API** - In-memory request counters and enriched admin endpoint for node data (completed 2026-06-29)
 - [ ] **Phase 8: Dashboard and Node Fleet** - Jinja2-rendered operations dashboard with node fleet table and styling
 - [ ] **Phase 9: Live Metrics and Auto-Refresh** - Request metrics display and JS polling for automatic dashboard updates
 
@@ -46,7 +46,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
+- [x] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
 
 ### Phase 8: Dashboard and Node Fleet
 
@@ -64,7 +64,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 
-- [ ] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
+- [x] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
 - [ ] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
 
 **UI hint**: yes
@@ -101,6 +101,6 @@ Phases execute in numeric order: 7 -> 8 -> 9
 | 4. Intelligent Routing | v1.0 | 2/2 | Complete | 2026-06-24 |
 | 5. Resilience | v1.0 | 2/2 | Complete | 2026-06-25 |
 | 6. Observability and Admin | v1.0 | 2/2 | Complete | 2026-06-25 |
-| 7. Request Metrics and Admin API | v1.1 | 1/2 | In Progress|  |
+| 7. Request Metrics and Admin API | v1.1 | 2/2 | Complete   | 2026-06-29 |
 | 8. Dashboard and Node Fleet | v1.1 | 0/0 | Not started | - |
 | 9. Live Metrics and Auto-Refresh | v1.1 | 0/0 | Not started | - |
