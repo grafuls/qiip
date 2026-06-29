@@ -3,7 +3,7 @@
 Tests cover:
 - GET /admin/nodes with populated registry returns all nodes
 - GET /admin/nodes with empty registry returns empty list
-- Each node in the response contains exactly node_id, endpoint, model, status
+- Each node in the response contains six fields (identity + operational state)
 - Nodes with different statuses (HEALTHY, UNHEALTHY, DRAINING) all appear
 - The response is a flat JSON array, not wrapped in an object
 """
@@ -55,12 +55,12 @@ class TestAdminNodesPopulated:
         data = response.json()
         assert len(data) == 2
 
-    def test_each_node_has_exactly_four_fields(
+    def test_each_node_has_exactly_six_fields(
         self,
         client: TestClient,
         test_registry: NodeRegistry,
     ) -> None:
-        """Each node in the response contains exactly node_id, endpoint, model, status."""
+        """Each node contains identity and operational state fields."""
         test_registry.add(_make_node())
 
         response = client.get("/admin/nodes")
@@ -68,11 +68,16 @@ class TestAdminNodesPopulated:
 
         assert len(data) == 1
         node = data[0]
-        assert set(node.keys()) == {"node_id", "endpoint", "model", "status"}
-        # Must NOT contain operational data
+        assert set(node.keys()) == {
+            "node_id",
+            "endpoint",
+            "model",
+            "status",
+            "active_connections",
+            "circuit_breaker_state",
+        }
         assert "last_heartbeat" not in node
         assert "capabilities" not in node
-        assert "active_connections" not in node
 
     def test_mixed_statuses_all_appear(
         self,

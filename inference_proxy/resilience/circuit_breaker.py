@@ -75,6 +75,12 @@ class CircuitBreaker:
         with self._lock:
             return self._state == "open"
 
+    @property
+    def state(self) -> str:
+        """Return the current state as a string (``'closed'`` or ``'open'``)."""
+        with self._lock:
+            return self._state
+
     def reset(self) -> None:
         """Reset the breaker to CLOSED and clear the failure count.
 
