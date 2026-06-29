@@ -57,22 +57,22 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DASH-01 | — | Pending |
-| DASH-02 | — | Pending |
-| DASH-03 | — | Pending |
-| NODE-01 | — | Pending |
-| NODE-02 | — | Pending |
-| METR-01 | — | Pending |
-| METR-02 | — | Pending |
-| METR-03 | — | Pending |
-| TMPL-01 | — | Pending |
-| TMPL-02 | — | Pending |
+| DASH-01 | Phase 8 | Pending |
+| DASH-02 | Phase 9 | Pending |
+| DASH-03 | Phase 8 | Pending |
+| NODE-01 | Phase 8 | Pending |
+| NODE-02 | Phase 8 | Pending |
+| METR-01 | Phase 7 | Pending |
+| METR-02 | Phase 9 | Pending |
+| METR-03 | Phase 7 | Pending |
+| TMPL-01 | Phase 8 | Pending |
+| TMPL-02 | Phase 8 | Pending |
 
 **Coverage:**
 - v1.1 requirements: 10 total
-- Mapped to phases: 0
-- Unmapped: 10 ⚠️
+- Mapped to phases: 10
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-06-29*
-*Last updated: 2026-06-29 after initial definition*
+*Last updated: 2026-06-29 after roadmap creation*

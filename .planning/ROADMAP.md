@@ -3,6 +3,7 @@
 ## Milestones
 
 - SHIPPED **v1.0 MVP** -- Phases 1-6 (shipped 2026-06-25)
+- IN PROGRESS **v1.1 Web UI** -- Phases 7-9
 
 ## Phases
 
@@ -18,7 +19,52 @@
 
 </details>
 
+### v1.1 Web UI
+
+- [ ] **Phase 7: Request Metrics and Admin API** - In-memory request counters and enriched admin endpoint for node data
+- [ ] **Phase 8: Dashboard and Node Fleet** - Jinja2-rendered operations dashboard with node fleet table and styling
+- [ ] **Phase 9: Live Metrics and Auto-Refresh** - Request metrics display and JS polling for automatic dashboard updates
+
+## Phase Details
+
+### Phase 7: Request Metrics and Admin API
+**Goal**: Operators can query enriched node data and the gateway tracks request volume
+**Depends on**: Phase 6 (admin API exists)
+**Requirements**: METR-01, METR-03
+**Success Criteria** (what must be TRUE):
+  1. Gateway increments request counters per-node and per-model on every proxied request
+  2. GET /admin/nodes returns active_connections and circuit_breaker_state for each node
+  3. Counter data is accessible programmatically (exists in a form the dashboard can consume)
+**Plans**: TBD
+
+### Phase 8: Dashboard and Node Fleet
+**Goal**: Operators can view the node fleet status at a glance on a single web page
+**Depends on**: Phase 7 (enriched node data available)
+**Requirements**: DASH-01, DASH-03, NODE-01, NODE-02, TMPL-01, TMPL-02
+**Success Criteria** (what must be TRUE):
+  1. Navigating to the dashboard URL shows a single page with a node fleet table
+  2. Node table displays node_id, endpoint, model, status, active connections, and circuit breaker state for every registered node
+  3. Healthy, unhealthy, and draining nodes are visually distinguishable (color, icon, or badge)
+  4. Dashboard is served by the existing FastAPI app with no separate server process
+  5. Page has readable CSS styling (not unstyled HTML)
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 9: Live Metrics and Auto-Refresh
+**Goal**: Dashboard shows request volume and stays current without manual refresh
+**Depends on**: Phase 8 (dashboard page exists)
+**Requirements**: METR-02, DASH-02
+**Success Criteria** (what must be TRUE):
+  1. Dashboard displays request counts broken down by node
+  2. Dashboard content updates automatically at a configurable polling interval without full page reload
+  3. Operator can see counts change in real time as requests flow through the proxy
+**Plans**: TBD
+**UI hint**: yes
+
 ## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 7 -> 8 -> 9
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -28,3 +74,6 @@
 | 4. Intelligent Routing | v1.0 | 2/2 | Complete | 2026-06-24 |
 | 5. Resilience | v1.0 | 2/2 | Complete | 2026-06-25 |
 | 6. Observability and Admin | v1.0 | 2/2 | Complete | 2026-06-25 |
+| 7. Request Metrics and Admin API | v1.1 | 0/0 | Not started | - |
+| 8. Dashboard and Node Fleet | v1.1 | 0/0 | Not started | - |
+| 9. Live Metrics and Auto-Refresh | v1.1 | 0/0 | Not started | - |

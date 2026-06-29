@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Web UI
 status: planning
-last_updated: "2026-06-29T20:01:35.176Z"
+last_updated: "2026-06-29T21:00:00.000Z"
 last_activity: 2026-06-29
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,23 +17,25 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-06-11)
+See: .planning/PROJECT.md (updated 2026-06-29)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover -- the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** All phases complete — milestone v1.0 delivered
+**Current focus:** v1.1 Web UI -- Phase 7 ready to plan
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-06-29 — Milestone v1.1 started
+Phase: 7 of 9 (Request Metrics and Admin API)
+Plan: --
+Status: Ready to plan
+Last activity: 2026-06-29 -- Roadmap created for v1.1
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 9
+- Total plans completed: 13
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -43,8 +45,10 @@ Last activity: 2026-06-29 — Milestone v1.1 started
 |-------|-------|-------|----------|
 | 01 | 3 | - | - |
 | 02 | 2 | - | - |
+| 03 | 2 | - | - |
 | 04 | 2 | - | - |
 | 05 | 2 | - | - |
+| 06 | 2 | - | - |
 
 **Recent Trend:**
 
@@ -60,11 +64,9 @@ Last activity: 2026-06-29 — Milestone v1.1 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- FastAPI for gateway validated (Phase 1)
-- hatchling as build backend (makes inference_proxy importable via uv run)
-- structlog with console/JSON dual mode for logging
-- Sub-models (GatewaySettings, EtcdSettings, RoutingSettings) inherit BaseModel, not BaseSettings
-- Chat and text completion OpenAI models kept fully separate (no shared base class)
+- Jinja2 + vanilla JS for Web UI (no build step, stays in Python ecosystem)
+- Polling for auto-refresh (simple JS interval, sufficient for ops dashboard)
+- In-memory counters only (no persistent metrics storage in v1.1)
 
 ### Pending Todos
 
@@ -72,7 +74,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- etcd client choice (etcd3gw vs aetcd/etcetra) needs validation spike during Phase 2 planning.
+None.
 
 ## Deferred Items
 
@@ -80,11 +82,11 @@ Items acknowledged and deferred at milestone v1.0 close on 2026-06-25:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| verification_gap | Phase 03 — 03-VERIFICATION.md | human_needed | 2026-06-25 |
-| verification_gap | Phase 06 — 06-VERIFICATION.md | human_needed | 2026-06-25 |
+| verification_gap | Phase 03 -- 03-VERIFICATION.md | human_needed | 2026-06-25 |
+| verification_gap | Phase 06 -- 06-VERIFICATION.md | human_needed | 2026-06-25 |
 
 ## Session Continuity
 
-Last session: 2026-06-25T09:04:50.295Z
-Stopped at: Phase 6 context gathered
-Resume file: .planning/phases/06-observability-and-admin/06-CONTEXT.md
+Last session: 2026-06-29
+Stopped at: Roadmap created for v1.1 Web UI milestone
+Resume file: None
