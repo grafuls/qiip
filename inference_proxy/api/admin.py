@@ -45,7 +45,7 @@ async def list_nodes(
             model=n.model,
             status=n.status.value,
             active_connections=tracker.get(n.node_id),
-            circuit_breaker_state=cb_registry.get_or_create(n.node_id).state,
+            circuit_breaker_state=(breaker.state if (breaker := cb_registry.get(n.node_id)) is not None else "closed"),
         )
         for n in nodes
     ]

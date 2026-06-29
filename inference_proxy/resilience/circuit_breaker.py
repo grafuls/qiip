@@ -106,6 +106,11 @@ class CircuitBreakerRegistry:
         self._breakers: dict[str, CircuitBreaker] = {}
         self._lock = threading.Lock()
 
+    def get(self, node_id: str) -> CircuitBreaker | None:
+        """Return the breaker for *node_id*, or ``None`` if absent."""
+        with self._lock:
+            return self._breakers.get(node_id)
+
     def get_or_create(self, node_id: str) -> CircuitBreaker:
         """Return the breaker for *node_id*, creating one if absent."""
         with self._lock:
