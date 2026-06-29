@@ -25,7 +25,20 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Active
 
-(None — v1.0 complete. Define new requirements via `/gsd:new-milestone`)
+- [ ] Operations dashboard showing node fleet status and request metrics — v1.1
+- [ ] Node fleet overview with health state, model, connections, circuit breaker status — v1.1
+- [ ] Request metrics (counts, latencies, error rates) per-node and aggregate — v1.1
+- [ ] Auto-refresh via polling to keep dashboard current — v1.1
+
+## Current Milestone: v1.1 Web UI
+
+**Goal:** Add an operations dashboard so operators can monitor the node fleet and request metrics at a glance.
+
+**Target features:**
+- Node fleet overview — health state, model served, active connections, circuit breaker status
+- Request metrics — aggregate and per-node request counts, latencies, error rates
+- Auto-refresh via polling
+- FastAPI + Jinja2 server-rendered templates with vanilla JS
 
 ### Out of Scope
 
@@ -49,7 +62,8 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 - Models are served from NFS shared storage (read-only mounts)
 - etcd provides service registry — nodes register with endpoint, model info, capabilities
 - The gateway is a FastAPI application using httpx for async proxying
-- Next milestone: control plane (SSH-based provisioning), NGINX (external access), Prometheus metrics
+- v1.1 adds a Jinja2-rendered operations dashboard with vanilla JS polling for auto-refresh
+- Future: control plane (SSH-based provisioning), NGINX (external access), Prometheus metrics
 
 ## Constraints
 
@@ -72,6 +86,8 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 | Graceful shutdown | 503 for new requests (except /health), drain in-flight up to timeout | Validated v1.0 |
 | BaseHTTPMiddleware for logging | Simpler than pure ASGI; accepted streaming duration trade-off | Validated v1.0 |
 | Separate admin router | /admin namespace for operational endpoints, distinct from proxy routes | Validated v1.0 |
+| Jinja2 + vanilla JS for Web UI | No build step, stays in Python ecosystem, minimal dependencies | — Pending |
+| Polling for auto-refresh | Simple JS interval vs SSE/WebSocket; sufficient for ops dashboard | — Pending |
 
 ## Evolution
 
@@ -91,4 +107,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-25 after v1.0 milestone completion*
+*Last updated: 2026-06-29 after v1.1 milestone start*
