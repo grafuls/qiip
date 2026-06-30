@@ -38,7 +38,7 @@ Declared values for the custom `dashboard.css` overrides only:
 | Token | Value | Usage |
 |-------|-------|-------|
 | badge-px | 8px | Horizontal padding inside status badges |
-| badge-py | 2px | Vertical padding inside status badges |
+| badge-py | 4px | Vertical padding inside status badges |
 | table-cell-px | 8px | Extra horizontal padding on `<td>` if Simple.css default feels tight |
 
 Exceptions: none — all other spacing is Simple.css defaults on semantic HTML.
@@ -49,16 +49,18 @@ Exceptions: none — all other spacing is Simple.css defaults on semantic HTML.
 
 Simple.css controls all typography. No custom font sizes or weights are declared. The framework uses the system sans-serif stack with responsive defaults.
 
-For reference, the effective values Simple.css applies:
+Two weights only: 400 (body/table text) and 600 (all emphasis — badges, headings, table headers).
+
+For reference, the effective values Simple.css applies (with h1 weight overridden to 600 in `dashboard.css`):
 
 | Role | Size | Weight | Line Height |
 |------|------|--------|-------------|
 | Body | 16px (1rem) | 400 (normal) | 1.5 |
 | Label / Badge | 14px (0.875rem) | 600 (semibold) | 1.0 |
-| Heading (h1) | 2rem (32px) | 700 (bold) | 1.2 |
+| Heading (h1) | 2rem (32px) | 600 (semibold) | 1.2 |
 | Table header (th) | 16px (1rem) | 600 (semibold) | 1.5 |
 
-The only custom typography is the badge `<span>` text at 14px / 600 weight, defined in `dashboard.css`.
+The only custom typography is the badge `<span>` text at 14px / 600 weight and the h1 weight override to 600, both defined in `dashboard.css`.
 
 ---
 
@@ -97,7 +99,7 @@ No component library. All UI is semantic HTML elements styled by Simple.css, plu
 | Element | HTML | Custom CSS | Notes |
 |---------|------|------------|-------|
 | Page container | `<body>` inside `<html>` | none | Simple.css centers and constrains width |
-| Page title | `<h1>` | none | "Node Fleet Dashboard" |
+| Page title | `<h1>` | yes (weight override to 600) | "Node Fleet Dashboard" |
 | Node count summary | `<p>` | none | "{N} nodes registered" — shows total count |
 | Node table | `<table>` | none | Simple.css styles tables automatically |
 | Table header | `<thead><tr><th>` | none | 6 columns matching AdminNodeResponse fields |
@@ -110,9 +112,13 @@ No component library. All UI is semantic HTML elements styled by Simple.css, plu
 ### Badge CSS Contract
 
 ```css
+h1 {
+  font-weight: 600;
+}
+
 .badge {
   display: inline-block;
-  padding: 2px 8px;
+  padding: 4px 8px;
   border-radius: 9999px;
   font-size: 0.875rem;
   font-weight: 600;
@@ -242,7 +248,7 @@ The `/admin/nodes` endpoint already exists (Phase 7). No new API endpoints neede
 | Color + text | Badges show status text inside the colored pill — never color-only |
 | Dark mode | Simple.css handles automatically via `prefers-color-scheme: dark` |
 | Keyboard nav | Not applicable — no interactive elements |
-| Badge contrast | White text on green-600/red-600/yellow-600 meets WCAG AA for large text (14px bold) |
+| Badge contrast | White text on green-600/red-600/yellow-600 meets WCAG AA for large text (14px semibold) |
 
 ---
 
@@ -254,7 +260,7 @@ inference_proxy/
     dashboard.html          # Jinja2 template
   static/
     css/
-      dashboard.css         # Badge styles only (~30 lines)
+      dashboard.css         # Badge styles + h1 weight override (~35 lines)
     js/
       dashboard.js          # Fetch /admin/nodes, populate table (~40 lines)
 ```
