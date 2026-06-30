@@ -51,6 +51,7 @@ class EtcdClient:
             host=parsed.hostname,
             port=parsed.port or 2379,
             protocol=parsed.scheme,
+            timeout=5,
         )
         self._prefix = settings.node_prefix
 

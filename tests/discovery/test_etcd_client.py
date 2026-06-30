@@ -31,6 +31,7 @@ class TestEtcdClientInit:
             host="etcd.internal",
             port=2379,
             protocol="http",
+            timeout=5,
         )
 
 
@@ -108,6 +109,7 @@ class TestEtcdClientDefaultPort:
             host="etcd.internal",
             port=2379,
             protocol="http",
+            timeout=5,
         )
 
 
@@ -127,6 +129,7 @@ class TestEtcdClientHttpsProtocol:
             host="secure-etcd.internal",
             port=2380,
             protocol="https",
+            timeout=5,
         )
 
 
