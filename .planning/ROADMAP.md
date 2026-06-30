@@ -63,9 +63,13 @@ Plans:
 
 **Plans**: 2 plans
 Plans:
+**Wave 1**
 
-- [x] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
-- [x] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
+- [ ] 08-01-PLAN.md — Dashboard route, Jinja2 template, CSS badges, JS fetch, main.py wiring
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 08-02-PLAN.md — Integration tests and visual verification
 
 **UI hint**: yes
 
@@ -80,11 +84,7 @@ Plans:
   2. Dashboard content updates automatically at a configurable polling interval without full page reload
   3. Operator can see counts change in real time as requests flow through the proxy
 
-**Plans**: 2 plans
-Plans:
-
-- [x] 07-01-PLAN.md — RequestMetrics class, CircuitBreaker.state property, admin model enrichment
-- [ ] 07-02-PLAN.md — DI wiring, counter increments in routes, enriched admin endpoints, tests
+**Plans**: [to be planned]
 
 **UI hint**: yes
 
@@ -102,5 +102,5 @@ Phases execute in numeric order: 7 -> 8 -> 9
 | 5. Resilience | v1.0 | 2/2 | Complete | 2026-06-25 |
 | 6. Observability and Admin | v1.0 | 2/2 | Complete | 2026-06-25 |
 | 7. Request Metrics and Admin API | v1.1 | 2/2 | Complete   | 2026-06-29 |
-| 8. Dashboard and Node Fleet | v1.1 | 0/0 | Not started | - |
+| 8. Dashboard and Node Fleet | v1.1 | 0/2 | Planning | - |
 | 9. Live Metrics and Auto-Refresh | v1.1 | 0/0 | Not started | - |
