@@ -1,0 +1,32 @@
+h1 {
+  font-weight: 600;
+}
+
+.badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1;
+  text-transform: lowercase;
+  white-space: nowrap;
+}
+
+.badge-healthy,
+.badge-closed {
+  background-color: #16a34a;
+  color: #fff;
+}
+
+.badge-unhealthy,
+.badge-open {
+  background-color: #dc2626;
+  color: #fff;
+}
+
+.badge-draining,
+.badge-half_open {
+  background-color: #ca8a04;
+  color: #fff;
+}
