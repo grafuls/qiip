@@ -17,13 +17,16 @@ import logging
 import threading
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import structlog
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from inference_proxy.api.admin import admin_router
+from inference_proxy.api.dashboard import dashboard_router
 from inference_proxy.api.middleware import RequestLoggingMiddleware
 from inference_proxy.api.routes import router
 from inference_proxy.config.dependencies import get_settings
@@ -204,6 +207,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     application.include_router(router)
     application.include_router(admin_router)
+    application.include_router(dashboard_router)
+
+    static_dir = Path(__file__).resolve().parent / "static"
+    application.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     return application
 
