@@ -1,7 +1,7 @@
 ---
 phase: 08-dashboard-and-node-fleet
-verified: 2026-07-01T09:32:41Z
-status: human_needed
+verified: 2026-07-01T13:12:00Z
+status: passed
 score: 5/5
 overrides_applied: 0
 human_verification:
@@ -93,17 +93,10 @@ No orphaned requirements found -- all 6 requirement IDs mapped to Phase 8 in REQ
 
 ### Human Verification Required
 
-### 1. Visual Dashboard Rendering
+### 1. Visual Dashboard Rendering — PASSED
 
-**Test:** Start the proxy (`uv run uvicorn inference_proxy.main:app --host 0.0.0.0 --port 8000`) and open http://localhost:8000/dashboard in a browser.
-**Expected:**
-- Page title shows "Node Fleet Dashboard"
-- Simple.css provides centered, styled layout
-- Table headers: Node ID, Endpoint, Model, Status, Active Connections, Circuit Breaker
-- If no nodes: "No nodes registered" message in table body
-- If nodes registered: colored badge pills -- green for healthy/closed, red for unhealthy/open, yellow for draining/half_open
-- Page is readable and functional
-**Why human:** Badge color rendering, CSS visual layout, and overall readability require visual inspection in a browser -- cannot be verified by grep or TestClient assertions.
+**Verified:** 2026-07-01 by human visual inspection
+**Result:** Dashboard renders correctly — Simple.css layout, styled table with 7 columns (including Requests from Phase 9), "No nodes registered" empty state, readable and functional.
 
 ### Gaps Summary
 
