@@ -25,10 +25,14 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Active
 
-- [ ] Operations dashboard showing node fleet status and request metrics — v1.1
-- [ ] Node fleet overview with health state, model, connections, circuit breaker status — v1.1
-- [ ] Request metrics (counts, latencies, error rates) per-node and aggregate — v1.1
-- [ ] Auto-refresh via polling to keep dashboard current — v1.1
+None — all v1.1 requirements validated.
+
+### Validated in v1.1
+
+- [x] Operations dashboard showing node fleet status and request metrics — validated Phase 8-9
+- [x] Node fleet overview with health state, model, connections, circuit breaker status — validated Phase 8
+- [x] Request metrics (counts, latencies, error rates) per-node and aggregate — validated Phase 7, 9
+- [x] Auto-refresh via polling to keep dashboard current — validated Phase 9
 
 ## Current Milestone: v1.1 Web UI
 
