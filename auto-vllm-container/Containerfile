@@ -1,0 +1,20 @@
+# Use vLLM's official OpenAI-compatible GPU image (CUDA 12.x + PyTorch + vLLM)
+FROM vllm/vllm-openai:v0.8.5
+
+# Optional: install extra tools you like (curl, jq, etc.)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        curl \
+        jq \
+        procps && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy container entrypoint
+COPY ./entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose the default OpenAI-compatible port
+EXPOSE 8000
+
+# Override base image ENTRYPOINT so our script runs (base uses ENTRYPOINT for vLLM)
+ENTRYPOINT ["/entrypoint.sh"]
