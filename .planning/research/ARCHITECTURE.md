@@ -1,542 +1,348 @@
-# Architecture Patterns
+# Architecture Patterns: SSH Node Provisioning (v1.2)
 
-**Domain:** LLM inference gateway (OpenAI-compatible proxy to vLLM nodes)
-**Researched:** 2026-06-10
+**Domain:** SSH-based node setup/teardown integrated into existing LLM inference gateway
+**Researched:** 2026-07-01
+**Overall confidence:** HIGH
+
+## Decision: Embedded, Not Separate Service
+
+**Embed provisioning inside the existing FastAPI gateway.** Do not create a separate service.
+
+**Why:**
+- The gateway already owns the NodeRegistry, etcd client, and dashboard -- provisioning needs to read/write all three.
+- A separate service would need its own etcd client, its own health state, and an IPC mechanism to talk to the gateway. That is more code than embedding.
+- The provisioning workload is light (operators set up a handful of nodes per day, not thousands). It does not justify a separate deployment.
+- The existing codebase already runs background threads (watcher, health checker) managed via lifespan. Provisioning is one more background concern (asyncio tasks, not threads).
+
+**Ceiling:** If provisioning volume grows to the point where SSH sessions compete with proxy request handling for CPU/memory, extract to a sidecar. That is unlikely for internal QUADS lab usage.
 
 ## Recommended Architecture
 
-The gateway follows a **centralized proxy pattern**: a single FastAPI service sits between clients and a fleet of vLLM inference nodes, using etcd as a live service registry. This is the simplest viable architecture for an internal inference gateway and aligns with how production LLM gateways are structured (vLLM Production Stack, LiteLLM, and similar systems all use this topology).
-
 ```
-                    Clients
-                       |
-                       v
-              +------------------+
-              |  FastAPI Gateway |
-              |                  |
-              |  +------------+  |       +-------+
-              |  | Router     |<-------->| etcd  |
-              |  +-----+------+  |       +-------+
-              |        |         |
-              |  +-----v------+  |
-              |  | Proxy Core |  |
-              |  +-----+------+  |
-              |        |         |
-              +--------|---------+
-                       |
-          +------------+------------+
-          |            |            |
-     +----v----+  +----v----+  +----v----+
-     |  vLLM   |  |  vLLM   |  |  vLLM   |
-     | Node A  |  | Node B  |  | Node N  |
-     | (Podman)|  | (Podman)|  | (Podman)|
-     +---------+  +---------+  +---------+
-          |            |            |
-          +-----+------+------+-----+
-                |             |
-           +----v----+   +----v----+
-           |   NFS   |   |   GPU   |
-           | (Models)|   | (Infer) |
-           +---------+   +---------+
+              +--------------------------------------------+
+              |             FastAPI Gateway                 |
+              |                                            |
+              |  +----------+  +----------+  +-----------+ |
+              |  | /v1/*    |  | /admin/* |  | /dashboard| |
+              |  | (proxy)  |  | (fleet)  |  | (UI)      | |
+              |  +----------+  +----+-----+  +-----+-----+ |
+              |                     |              |        |
+              |         +-----------v--------------v---+    |
+              |         |  NEW: /admin/nodes/setup     |    |
+              |         |  NEW: /admin/nodes/{id} DEL  |    |
+              |         |  NEW: /admin/provisioning/*   |    |
+              |         +-----------+------------------+    |
+              |                     |                       |
+              |         +-----------v------------------+    |
+              |         | ProvisioningManager           |    |
+              |         | (in-memory task registry)     |    |
+              |         +--+---------------------+-----+    |
+              |            |                     |          |
+              |   +--------v--------+  +---------v-------+ |
+              |   | NodeProvisioner |  | NodeTeardown    | |
+              |   | (asyncio.Task)  |  | (asyncio.Task)  | |
+              |   +--------+--------+  +---------+-------+ |
+              |            |                     |          |
+              |   +--------v--------+            |          |
+              |   | asyncssh conn   |            |          |
+              |   | (per-host)      |            |          |
+              |   +-----------------+            |          |
+              |                                  |          |
+              |  +------------+  +----------+    |          |
+              |  | NodeRegistry|  | EtcdClient|<--+          |
+              |  +------------+  +----------+              |
+              +--------------------------------------------+
 ```
 
-### Component Boundaries
+### New Components
 
-The gateway decomposes into five internal components and two external dependencies.
+| Component | Responsibility | Lives In | Communicates With |
+|-----------|---------------|----------|-------------------|
+| **ProvisioningManager** | Track in-progress setup/teardown tasks, enforce one-task-per-host | `inference_proxy/provisioning/manager.py` | Admin API, NodeProvisioner, NodeTeardown |
+| **NodeProvisioner** | Run SSH setup sequence on a single host (connect, run setup.sh, poll /health, register in etcd) | `inference_proxy/provisioning/provisioner.py` | asyncssh, EtcdClient, NodeRegistry |
+| **NodeTeardown** | Stop container, deregister from etcd | `inference_proxy/provisioning/teardown.py` | asyncssh, EtcdClient, NodeRegistry |
+| **ProvisioningSettings** | SSH key paths, setup script path, timeouts, container image | `inference_proxy/config/settings.py` (add nested model) | Settings |
+| **Provisioning models** | TaskStatus enum, ProvisioningTask Pydantic model, API request/response models | `inference_proxy/models/provisioning.py` | Admin API, ProvisioningManager |
+| **Admin provisioning routes** | POST /admin/nodes/setup, DELETE /admin/nodes/{id}, GET /admin/provisioning/tasks | `inference_proxy/api/admin.py` (extend existing router) | ProvisioningManager |
 
-| Component | Responsibility | Communicates With | Boundary Type |
-|-----------|---------------|-------------------|---------------|
-| **API Layer** | Accept OpenAI-compatible HTTP requests, validate structure, route to handlers | Proxy Core, Health Checker | FastAPI router endpoints |
-| **Node Registry** | Maintain in-memory list of healthy vLLM nodes, react to etcd watch events | etcd (external), Router, Health Checker | Class/module with async watch loop |
-| **Router** | Select which node handles a given request using least-connections + model affinity | Node Registry, Connection Tracker | Pure function / strategy interface |
-| **Proxy Core** | Forward requests to selected vLLM node, stream SSE responses back, handle retries | Router, vLLM nodes (external), Connection Tracker | Async function using httpx |
-| **Health Checker** | Periodically probe vLLM `/health` endpoints, mark nodes healthy/unhealthy | Node Registry, vLLM nodes (external) | Background asyncio task |
-| **Connection Tracker** | Track active request count per node for least-connections routing | Router, Proxy Core | In-memory counter (dict + asyncio lock) |
-| **Config** | Load and validate gateway configuration (etcd endpoints, timeouts, retry policy) | All components | Pydantic settings / dataclass |
+### Modified Components
 
-**External dependencies:**
-
-| External System | Role | Protocol |
-|----------------|------|----------|
-| **etcd** | Service registry: nodes register themselves; gateway watches for changes | gRPC (via Python client) or HTTP gateway |
-| **vLLM nodes** | Serve inference requests via OpenAI-compatible API | HTTP (port 8000) |
-
-### Why These Boundaries
-
-Each component has a single reason to change (SRP), communicates through well-defined interfaces (DIP), and can be tested independently by injecting mock dependencies. The Router is a strategy that can be swapped without modifying the Proxy Core (OCP). The Node Registry abstracts away etcd specifics so the rest of the system depends on an interface, not the etcd client directly (DIP).
+| Component | Change | Why |
+|-----------|--------|-----|
+| `settings.py` | Add `ProvisioningSettings` nested model | SSH key path, timeouts, container config |
+| `admin.py` | Add 3-4 new endpoints on existing `admin_router` | Same `/admin` namespace, same DI pattern |
+| `dependencies.py` | Add `get_provisioning_manager()` | Follow existing DI pattern |
+| `main.py` lifespan | Create ProvisioningManager, store in `app.state` | Follow existing lifespan pattern |
+| `dashboard.html` | Add setup/teardown buttons, task status display | JS fetches new `/admin/provisioning/*` endpoints |
 
 ---
 
-## Data Flow
+## Handling Long-Running SSH Operations
 
-### Non-Streaming Request (e.g., `/v1/models`)
+Node setup can take minutes (driver install, container build, vLLM startup). This is the central design challenge.
 
-```
-Client --HTTP POST--> API Layer
-                        |
-                        v
-                    API Layer validates request shape
-                        |
-                        v
-                    Router.select_node(model, request)
-                        |
-                        +-- queries Node Registry for healthy nodes with matching model
-                        +-- queries Connection Tracker for active counts
-                        +-- returns node with fewest active connections
-                        |
-                        v
-                    Connection Tracker.increment(node)
-                        |
-                        v
-                    Proxy Core.forward(node, request)
-                        |
-                        +-- httpx.AsyncClient.post(node.endpoint + path, json=body)
-                        +-- on success: return response JSON
-                        +-- on failure: Connection Tracker.decrement(node)
-                        |              mark node suspect
-                        |              retry with Router.select_node (excluding failed node)
-                        v
-                    Connection Tracker.decrement(node)
-                        |
-                        v
-                    API Layer returns response to client
-```
+### Approach: asyncio.create_task + In-Memory Task Registry
 
-### Streaming Request (SSE, e.g., `/v1/chat/completions` with `stream: true`)
+**Why not threads?** The existing codebase uses threads for the watcher and health checker because those wrap a synchronous library (etcd3gw, httpx sync client). AsyncSSH is natively async -- it runs on the asyncio event loop without blocking. No threads needed.
 
-```
-Client --HTTP POST--> API Layer
-                        |
-                        v
-                    Same routing as above
-                        |
-                        v
-                    Connection Tracker.increment(node)
-                        |
-                        v
-                    Proxy Core.stream(node, request)
-                        |
-                        +-- httpx.AsyncClient.stream("POST", node.endpoint + path, json=body)
-                        +-- yield chunks via response.aiter_lines()
-                        +-- wrap in StreamingResponse(media_type="text/event-stream")
-                        +-- on client disconnect: close upstream, decrement counter
-                        v
-                    Connection Tracker.decrement(node)
-                        |
-                        v
-                    StreamingResponse completes
-```
+**Why not Celery/RQ?** YAGNI. The gateway provisions a handful of nodes per day on an internal network. Adding Redis + Celery for this is a new deployment dependency for no gain. The in-memory approach is sufficient.
 
-**Critical detail for SSE proxy:** The `StreamingResponse` must use `media_type="text/event-stream; charset=utf-8"`, not `application/json`. This is a documented bug in naive vLLM proxy implementations where hardcoded JSON content-type breaks SSE semantics for OpenAI SDK clients.
+**Why not FastAPI BackgroundTasks?** `BackgroundTasks` is fire-and-forget. We need progress tracking, error capture, and task listing for the dashboard. `asyncio.create_task` gives us handles to track.
 
-### Node Discovery Flow (Background)
-
-```
-Gateway starts
-    |
-    v
-Node Registry connects to etcd
-    |
-    +-- reads all keys under /nodes/ prefix (initial snapshot)
-    +-- starts watch on /nodes/ prefix
-    |
-    v
-Watch loop (runs forever):
-    |
-    +-- PUT event: add/update node in in-memory registry
-    +-- DELETE event: remove node from in-memory registry
-    +-- Connection error: reconnect with backoff
-```
-
-### Health Check Flow (Background)
-
-```
-Health Checker starts (periodic, e.g., every 10s)
-    |
-    v
-For each node in Node Registry:
-    |
-    +-- GET node.endpoint/health (timeout: 5s)
-    +-- Success: mark healthy, reset failure counter
-    +-- Failure: increment failure counter
-    |     +-- if failures >= threshold (e.g., 3): mark unhealthy
-    |     +-- unhealthy nodes excluded from routing
-    +-- Node returns healthy after cooldown: mark healthy again
-```
-
----
-
-## Internal Component Design
-
-### API Layer
-
-The API Layer is a set of FastAPI route handlers. It owns request validation and response formatting but delegates all routing and proxying to other components.
-
-**Endpoints to implement (matching OpenAI API contract):**
-
-| Endpoint | Method | Streaming | Purpose |
-|----------|--------|-----------|---------|
-| `/v1/chat/completions` | POST | Yes (optional) | Chat inference |
-| `/v1/completions` | POST | Yes (optional) | Text completion |
-| `/v1/models` | GET | No | List available models |
-| `/health` | GET | No | Gateway health |
-| `/healthz` | GET | No | Liveness probe (alias) |
-
-Each endpoint handler follows the same pattern: validate, route, proxy, return. The streaming vs. non-streaming split is determined by the `stream` field in the request body.
-
-### Node Registry
-
-Maintains an in-memory `dict[str, NodeInfo]` mapping node IDs to their metadata (endpoint URL, model name, capabilities, health status). Populated on startup from etcd, kept current via etcd watch.
+### Pattern: ProvisioningManager
 
 ```python
-# Conceptual interface (not implementation)
-class NodeRegistry(Protocol):
-    async def get_healthy_nodes(self, model: str | None = None) -> list[NodeInfo]: ...
-    async def mark_unhealthy(self, node_id: str) -> None: ...
-    async def mark_healthy(self, node_id: str) -> None: ...
-    # Watch loop is internal implementation detail
-```
+class ProvisioningManager:
+    """Track provisioning tasks. One per app, created in lifespan."""
 
-**etcd key structure** (from PLAN.md):
-```
-/nodes/{node-id} -> JSON { endpoint, status, model, last_heartbeat, capabilities }
-```
+    def __init__(self) -> None:
+        self._tasks: dict[str, ProvisioningTask] = {}  # task_id -> task state
+        self._active_hosts: dict[str, str] = {}  # hostname -> task_id (prevent duplicates)
+        self._lock = asyncio.Lock()
 
-**etcd client choice:** The Python etcd3 async ecosystem is fragmented. Options:
+    async def start_setup(self, hostname: str, model: str, ...) -> str:
+        """Start a setup task. Returns task_id. Raises if host already provisioning."""
+        async with self._lock:
+            if hostname in self._active_hosts:
+                raise ValueError(f"Host {hostname} already has active task")
+            task_id = ...  # uuid4
+            task = ProvisioningTask(id=task_id, hostname=hostname, status=TaskStatus.PENDING, ...)
+            self._tasks[task_id] = task
+            self._active_hosts[hostname] = task_id
+        # Launch the actual work as a background task
+        asyncio.create_task(self._run_setup(task_id, hostname, model, ...))
+        return task_id
 
-| Library | Status | Notes |
-|---------|--------|-------|
-| `etcetra` | Active (asyncio native, pure gRPC) | Best async option; watch + lease support |
-| `aetcd` | Maintained fork of etcd3aio | Good docs, asyncio native |
-| `async-etcd3gw` | Active (HTTP gateway based) | Simpler setup, no gRPC dependency |
-| `etcd3` (sync) | Stable but sync-only | Would need `run_in_executor` wrapping |
-
-**Recommendation:** Use `aetcd` or `etcetra` for native asyncio watch support. If gRPC dependency management proves painful, fall back to `async-etcd3gw` which uses the HTTP gateway. The watch mechanism is critical -- polling etcd on a timer is inferior because it misses events and adds latency. Confidence: MEDIUM (ecosystem is fragmented; validate library choice with a spike).
-
-### Router (Load Balancer)
-
-The Router is a **strategy** that selects a node for a given request. The v1 strategy is least-connections with model affinity filtering.
-
-```python
-# Conceptual interface
-class RoutingStrategy(Protocol):
-    def select(
-        self,
-        healthy_nodes: list[NodeInfo],
-        active_connections: dict[str, int],
-        request_model: str,
-    ) -> NodeInfo | None: ...
-```
-
-**Least-connections algorithm:**
-
-1. Filter `healthy_nodes` to those serving the requested model
-2. From filtered set, pick the node with the lowest value in `active_connections`
-3. Break ties arbitrarily (or by node ID for determinism)
-4. Return `None` if no nodes available (caller raises 503)
-
-**Why least-connections over round-robin:** LLM inference requests have highly variable duration -- a 10-token response completes in milliseconds while a 4096-token generation takes seconds. Round-robin sends the same number of requests to each node regardless of how long prior requests take, leading to uneven load. Least-connections naturally routes to the node that finishes work fastest. This is the correct default for inference workloads.
-
-**Future evolution (not v1):** KV-cache-aware routing via consistent hashing. This routes requests with similar prefixes to the same node, maximizing KV cache reuse and reducing time-to-first-token. The vLLM Router (Rust-based) and llm-d both implement this pattern. The strategy interface makes it possible to add this later without modifying existing code.
-
-### Connection Tracker
-
-A simple in-memory counter per node. Must be concurrency-safe since multiple requests are in-flight simultaneously in the asyncio event loop.
-
-```python
-# Conceptual structure
-class ConnectionTracker:
-    _counts: dict[str, int]  # node_id -> active connections
-
-    def increment(self, node_id: str) -> None: ...
-    def decrement(self, node_id: str) -> None: ...
-    def get_counts(self) -> dict[str, int]: ...
-```
-
-**Concurrency note:** Within a single asyncio event loop (single process), dict operations are atomic between `await` points. An `asyncio.Lock` is technically unnecessary for simple increment/decrement if no `await` occurs between read and write. However, wrapping in a lock is defensive and has negligible overhead. If the gateway runs multi-process (multiple Uvicorn workers), each process has its own counter -- this is acceptable because each process independently tracks its own connections.
-
-### Proxy Core
-
-The Proxy Core owns the `httpx.AsyncClient` and handles both streaming and non-streaming forwarding.
-
-**Key design decisions:**
-
-1. **Single `httpx.AsyncClient` per process lifetime** -- created in FastAPI lifespan, closed on shutdown. Shares connection pool across all requests. Configure with `httpx.Limits(max_connections=100, max_keepalive_connections=20)` and appropriate timeouts.
-
-2. **Streaming proxy pattern:**
-   ```python
-   async def stream_proxy(client, node, request_body):
-       async with client.stream("POST", f"{node.endpoint}/v1/chat/completions",
-                                json=request_body) as upstream:
-           async def generate():
-               async for line in upstream.aiter_lines():
-                   yield line + "\n"
-           return StreamingResponse(
-               generate(),
-               media_type="text/event-stream; charset=utf-8",
-               headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-           )
-   ```
-
-3. **Retry logic:** On connection error or 5xx from vLLM node:
-   - Decrement connection count on failed node
-   - Exclude failed node from candidate set
-   - Re-invoke Router to select a different node
-   - Maximum 2 retries (3 total attempts)
-   - **Never retry streaming requests that have already started sending chunks** -- the client has received partial data and retrying would produce garbled output
-   - Only retry on connection-level failures, not on HTTP 4xx (client errors)
-
-4. **Client disconnect handling:** Check `request.is_disconnected()` or catch `asyncio.CancelledError` to stop reading from upstream and close the connection cleanly. This prevents zombie connections to vLLM nodes when clients abort.
-
-### Health Checker
-
-Runs as a background `asyncio.Task` started in the FastAPI lifespan. Probes each registered node at a configurable interval.
-
-**Design:**
-- Probe endpoint: `GET {node.endpoint}/health` (vLLM provides this natively)
-- Timeout per probe: 5 seconds
-- Failure threshold: 3 consecutive failures before marking unhealthy
-- Recovery: Node marked healthy again after 1 successful probe
-- Probes run concurrently via `asyncio.gather` for all nodes
-
-**Relationship to etcd:** Health Checker updates the Node Registry's in-memory state (healthy/unhealthy). It does NOT write health status back to etcd -- the control plane (out of scope for v1) owns etcd writes. The gateway is a read-only consumer of etcd data plus its own health observations.
-
-**Circuit breaker integration (simple version):** When a node is marked unhealthy by the Health Checker, it enters a cooldown period. The Router excludes cooled-down nodes. When the cooldown TTL expires, the Health Checker re-probes. This is functionally equivalent to a circuit breaker with CLOSED -> OPEN -> HALF-OPEN states, but implemented simply via the health check loop rather than a separate circuit breaker library.
-
----
-
-## Patterns to Follow
-
-### Pattern 1: Strategy Pattern for Routing
-
-**What:** Define a `RoutingStrategy` protocol/ABC. Implement `LeastConnectionsStrategy` as the default. The Router holds a reference to the strategy and delegates selection.
-
-**When:** Always -- this is the primary extension point for the gateway.
-
-**Why:** The PLAN.md already lists four routing strategies (round-robin, least-connections, response-time, model-affinity). Making this pluggable from day one costs almost nothing and avoids the `if/elif` chain anti-pattern.
-
-```python
-from typing import Protocol
-
-class RoutingStrategy(Protocol):
-    def select(
-        self,
-        nodes: list[NodeInfo],
-        connections: dict[str, int],
-        model: str,
-    ) -> NodeInfo | None: ...
-
-class LeastConnectionsStrategy:
-    def select(self, nodes, connections, model):
-        candidates = [n for n in nodes if n.model == model and n.healthy]
-        if not candidates:
-            return None
-        return min(candidates, key=lambda n: connections.get(n.id, 0))
-```
-
-### Pattern 2: Lifespan-Managed Resources
-
-**What:** Use FastAPI's `@asynccontextmanager` lifespan to initialize and tear down shared resources: httpx client, etcd watcher, health check task.
-
-**When:** For any resource that should live for the process lifetime.
-
-**Why:** Prevents per-request overhead (connection pool creation), ensures clean shutdown, and is the officially recommended FastAPI pattern.
-
-```python
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Startup
-    app.state.http_client = httpx.AsyncClient(limits=..., timeout=...)
-    app.state.registry = NodeRegistry(etcd_endpoints=...)
-    await app.state.registry.start_watching()
-    app.state.health_task = asyncio.create_task(health_check_loop(app.state.registry))
-
-    yield
-
-    # Shutdown
-    app.state.health_task.cancel()
-    await app.state.registry.stop_watching()
-    await app.state.http_client.aclose()
-```
-
-### Pattern 3: Dependency Injection via FastAPI Depends
-
-**What:** Inject the Node Registry, Router, and httpx client into route handlers via `Depends()`.
-
-**When:** Every route handler that needs access to shared state.
-
-**Why:** Makes handlers testable (inject mocks), keeps handlers thin, enforces DIP.
-
-```python
-async def get_registry(request: Request) -> NodeRegistry:
-    return request.app.state.registry
-
-@app.post("/v1/chat/completions")
-async def chat_completions(
-    body: ChatCompletionRequest,
-    registry: NodeRegistry = Depends(get_registry),
-    # ...
-):
-    ...
-```
-
-### Pattern 4: Background Watch Loop with Reconnection
-
-**What:** The etcd watch runs as a long-lived async generator. On disconnection, reconnect with exponential backoff starting from the last known revision.
-
-**When:** The Node Registry's etcd integration.
-
-**Why:** etcd watch connections can drop (network blip, etcd restart). Without reconnection logic, the gateway silently stops receiving node updates and routes to stale data.
-
-```python
-async def watch_nodes(self):
-    revision = 0
-    while True:
+    async def _run_setup(self, task_id: str, hostname: str, ...) -> None:
+        """The actual SSH setup sequence. Updates task status as it progresses."""
         try:
-            async for event in self.etcd.watch_prefix("/nodes/", start_revision=revision):
-                revision = event.mod_revision + 1
-                if event.type == PUT:
-                    self._update_node(event.key, event.value)
-                elif event.type == DELETE:
-                    self._remove_node(event.key)
-        except ConnectionError:
-            await asyncio.sleep(min(2 ** self._retry_count, 30))
-            self._retry_count += 1
+            self._update_status(task_id, TaskStatus.CONNECTING)
+            async with asyncssh.connect(hostname, ...) as conn:
+                self._update_status(task_id, TaskStatus.RUNNING_SETUP)
+                result = await conn.run('/path/to/setup.sh', check=True, timeout=600)
+                self._update_status(task_id, TaskStatus.STARTING_VLLM)
+                # ... start container, poll health ...
+                self._update_status(task_id, TaskStatus.REGISTERING)
+                # ... register in etcd ...
+                self._update_status(task_id, TaskStatus.COMPLETED)
+        except Exception as exc:
+            self._update_status(task_id, TaskStatus.FAILED, error=str(exc))
+        finally:
+            async with self._lock:
+                self._active_hosts.pop(hostname, None)
+
+    def get_task(self, task_id: str) -> ProvisioningTask | None: ...
+    def get_all_tasks(self) -> list[ProvisioningTask]: ...
 ```
+
+**Key properties:**
+- One task per host enforced (prevents double-provisioning).
+- Status transitions are synchronous dict writes -- no race conditions within a single asyncio loop because status updates happen between `await` points.
+- Task history persists in memory for the lifetime of the gateway process (sufficient -- operators can see recent tasks on the dashboard).
+- `asyncio.Lock` only guards the host-dedup check, not the SSH operations themselves.
+
+### Task Status State Machine
+
+```
+PENDING -> CONNECTING -> RUNNING_SETUP -> STARTING_VLLM -> POLLING_HEALTH -> REGISTERING -> COMPLETED
+                \            \                \                \                \
+                 +----------->+--------------->+--------------->+--------------->+-> FAILED
+```
+
+Each status transition is a log event with structlog. The dashboard polls `/admin/provisioning/tasks` to get current status.
+
+---
+
+## SSH Library: asyncssh
+
+**Use asyncssh because it is native asyncio.** The gateway is already async-first. Paramiko would require wrapping every call in `asyncio.to_thread()` -- more code, worse concurrency, and the threading overhead is unnecessary for I/O-bound SSH operations.
+
+| Criterion | asyncssh | paramiko + to_thread |
+|-----------|----------|---------------------|
+| Async native | Yes | No (wrapped) |
+| Streaming output | `create_process` + async readline | Blocking recv() in thread |
+| Timeout support | Built-in `timeout=` parameter | Manual threading.Timer |
+| Connection pooling | Reuse `SSHClientConnection` | Manual |
+| License | EPL 2.0 OR GPL 2.0+ | LGPL |
+| Maturity | Active since 2013, v2.24.0 | Active since 2003 |
+
+**Confidence:** HIGH (PyPI-verified API, active maintenance, well-documented)
+
+### SSH Connection Pattern
+
+```python
+async with asyncssh.connect(
+    hostname,
+    username='root',
+    client_keys=[settings.provisioning.ssh_key_path],
+    known_hosts=None,  # ponytail: internal network only, add known_hosts when external
+    connect_timeout=30,
+    keepalive_interval=60,
+) as conn:
+    result = await conn.run(command, check=True, timeout=timeout)
+```
+
+**known_hosts=None** is acceptable here because PROJECT.md explicitly states "internal network only, no external-facing endpoints in v1." Add known_hosts validation when/if external access is added.
+
+### Streaming Setup Output for Progress
+
+For long-running setup scripts, use `conn.create_process()` to read stdout line-by-line and update task log:
+
+```python
+async with conn.create_process(setup_command) as process:
+    async for line in process.stdout:
+        task.append_log(line.rstrip())
+        # ponytail: log lines stored in-memory, capped at ~1000 lines
+```
+
+This lets the dashboard show real-time output from the setup script without waiting for completion.
+
+---
+
+## Integration with Existing Components
+
+### NodeRegistry Integration
+
+After successful setup, the provisioner registers the new node in etcd. The existing watcher thread will pick up the PUT event and add the node to the in-memory NodeRegistry automatically. **Do not add the node to NodeRegistry directly** -- let it flow through etcd so all gateway instances (if scaled) see it.
+
+```
+Provisioner completes setup
+    |
+    v
+Provisioner writes to etcd: PUT /nodes/{node-id} -> {endpoint, model, ...}
+    |
+    v
+Existing watcher thread detects PUT event
+    |
+    v
+Watcher calls registry.add(node)
+    |
+    v
+Node is now routable
+```
+
+For teardown, the reverse: provisioner DELETEs the etcd key, watcher detects it, calls registry.remove().
+
+### EtcdClient Extension
+
+The existing `EtcdClient` may need `put()` and `delete()` if not already present. These are synchronous (etcd3gw is sync). Wrap in `asyncio.to_thread()` when called from async context, following the existing pattern.
+
+### Dashboard Integration
+
+The dashboard currently polls `/admin/nodes` for the fleet table. Add:
+
+1. **Setup form:** hostname input. POST to `/admin/nodes/setup`.
+2. **Task list:** Poll `/admin/provisioning/tasks` alongside the node list. Show status, elapsed time, last log line.
+3. **Teardown button:** On each node row, a "Teardown" button that calls DELETE `/admin/nodes/{node_id}`.
+
+Follow the existing pattern: Jinja2 renders the HTML shell, vanilla JS does the fetching and DOM updates. No new frontend dependencies.
+
+### DI Integration
+
+Follow the exact pattern of existing dependencies:
+
+```python
+# In dependencies.py
+def get_provisioning_manager(request: Request) -> ProvisioningManager:
+    return request.app.state.provisioning_manager
+
+# In main.py lifespan
+provisioning_manager = ProvisioningManager(etcd_client, settings.provisioning)
+app.state.provisioning_manager = provisioning_manager
+```
+
+---
+
+## API Design
+
+### POST /admin/nodes/setup
+
+Starts an async provisioning task. Returns immediately with a task ID.
+
+**Request:**
+```json
+{
+    "hostname": "gpu-server-42.lab.example.com"
+}
+```
+
+**Response (202 Accepted):**
+```json
+{
+    "task_id": "abc-123",
+    "status": "pending",
+    "hostname": "gpu-server-42.lab.example.com"
+}
+```
+
+**Why 202?** The operation is not complete when the response is sent. 202 Accepted is the correct HTTP status for async operations.
+
+### GET /admin/provisioning/tasks
+
+Returns all provisioning tasks (recent history).
+
+### GET /admin/provisioning/tasks/{task_id}
+
+Returns a single task with full log output.
+
+### DELETE /admin/nodes/{node_id}
+
+Starts an async teardown task. Returns 202 with task ID.
+
+---
+
+## File Layout
+
+```
+inference_proxy/
+    provisioning/
+        __init__.py
+        manager.py          # ProvisioningManager (task registry)
+        provisioner.py       # NodeProvisioner (SSH setup logic)
+        teardown.py          # NodeTeardown (SSH teardown logic)
+    models/
+        provisioning.py      # TaskStatus, ProvisioningTask, request/response models
+    config/
+        settings.py          # Add ProvisioningSettings (modify existing)
+        dependencies.py      # Add get_provisioning_manager (modify existing)
+    api/
+        admin.py             # Add provisioning endpoints (modify existing)
+    templates/
+        dashboard.html       # Add setup/teardown UI (modify existing)
+    main.py                  # Add ProvisioningManager to lifespan (modify existing)
+```
+
+New files: 4 (manager, provisioner, teardown, models). Modified files: 5 (settings, dependencies, admin, dashboard, main).
 
 ---
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Creating httpx.AsyncClient Per Request
+### Anti-Pattern: Blocking SSH in the Event Loop
+**What:** Using paramiko or subprocess.run() for SSH in an async handler.
+**Why bad:** Blocks the entire event loop. All proxy requests stall during SSH operations.
+**Instead:** Use asyncssh (native async) or wrap sync calls in asyncio.to_thread().
 
-**What:** Instantiating a new `httpx.AsyncClient()` inside each request handler.
+### Anti-Pattern: Direct NodeRegistry Mutation from Provisioner
+**What:** Calling `registry.add(node)` directly after setup completes.
+**Why bad:** Bypasses etcd. If the gateway restarts, the node is lost. If multiple gateways exist, only one knows about the node.
+**Instead:** Write to etcd, let the watcher propagate to all registries.
 
-**Why bad:** Destroys connection pooling. Each request opens a new TCP connection to the vLLM node, with full TLS handshake overhead (if TLS is used). Under load, this exhausts file descriptors and dramatically increases latency.
+### Anti-Pattern: Unbounded Task History
+**What:** Keeping all provisioning tasks in memory forever.
+**Why bad:** Memory leak over weeks/months of operation.
+**Instead:** Cap task history (e.g., keep last 100 tasks, or prune tasks older than 24 hours).
 
-**Instead:** Create one `AsyncClient` in the lifespan, share it via `app.state`.
-
-### Anti-Pattern 2: Polling etcd Instead of Watching
-
-**What:** Using a timer to periodically read all keys from etcd.
-
-**Why bad:** Misses events between polls (node added, then immediately removed). Adds unnecessary load on etcd. Introduces latency between actual state change and gateway awareness. Does not scale -- polling N keys every M seconds is O(N) per poll.
-
-**Instead:** Use etcd's watch API with prefix watching. React to events in real-time. Fall back to a full re-read only on watch reconnection to catch any missed events.
-
-### Anti-Pattern 3: Retrying Partially-Streamed Responses
-
-**What:** When a vLLM node fails mid-stream, attempting to retry the request on another node and continue streaming.
-
-**Why bad:** The client has already received partial SSE data. Retrying produces a new response that starts from the beginning, resulting in duplicate or garbled output. OpenAI SDK clients parse SSE events sequentially and will break.
-
-**Instead:** If the connection fails before any data is sent to the client, retry on another node. If chunks have already been sent, propagate the error to the client (send an SSE error event or close the connection). The client application is responsible for retry at the application level.
-
-### Anti-Pattern 4: Monolithic Gateway Class
-
-**What:** A single class that handles routing, health checking, etcd communication, request proxying, and connection tracking.
-
-**Why bad:** Violates SRP. Every change to any subsystem risks breaking others. Untestable without standing up the entire stack.
-
-**Instead:** Separate components with clear interfaces as described in the component boundaries above. Each can be unit-tested with mocks.
-
-### Anti-Pattern 5: Synchronous etcd Client in Async Context
-
-**What:** Using the synchronous `etcd3` client inside async FastAPI handlers.
-
-**Why bad:** Blocks the event loop during etcd calls. Every etcd read/watch blocks all other request processing. Under load, this creates a bottleneck that defeats the purpose of async.
-
-**Instead:** Use an async-native etcd client (`aetcd`, `etcetra`, or `async-etcd3gw`). If forced to use the sync client, wrap calls in `asyncio.get_event_loop().run_in_executor()`, but this is strictly inferior.
-
----
-
-## Build Order (Component Dependencies)
-
-Components must be built in an order that respects their dependencies. Each layer depends on the one below it.
-
-```
-Layer 0 (no dependencies):
-    Config
-    Connection Tracker
-    NodeInfo model / data structures
-
-Layer 1 (depends on Layer 0):
-    Node Registry (depends on: Config for etcd endpoints, NodeInfo model)
-    Routing Strategy (depends on: NodeInfo model, Connection Tracker interface)
-
-Layer 2 (depends on Layers 0-1):
-    Health Checker (depends on: Node Registry, Config for intervals/thresholds)
-    Proxy Core (depends on: Connection Tracker, httpx client)
-
-Layer 3 (depends on Layers 0-2):
-    API Layer (depends on: Router, Proxy Core, Node Registry)
-
-Layer 4 (integration):
-    Lifespan wiring (connects all components)
-    End-to-end tests
-```
-
-### Suggested Build Sequence
-
-**Phase 1: Foundation** -- Build Layers 0-1. This gives you data models, config loading, a working Node Registry with etcd watch, and the routing strategy. These can be fully unit-tested without any HTTP concerns.
-
-**Phase 2: Proxy Core** -- Build the httpx-based forwarding for both streaming and non-streaming requests. Test against a mock HTTP server or a real vLLM instance. This is where SSE streaming correctness is validated.
-
-**Phase 3: API Surface** -- Wire FastAPI endpoints, connect Proxy Core to Router, add the lifespan. This produces a functional gateway that can proxy requests.
-
-**Phase 4: Resilience** -- Add Health Checker, retry logic, circuit breaker behavior, and graceful degradation. This hardens the gateway for production use.
-
-**Phase 5: Observability** -- Add structured logging, request tracing, and metrics endpoints. Not strictly required for functionality but essential for operations.
-
-### Rationale for This Order
-
-- Layers 0-1 are pure logic with no I/O dependencies, making them fast to build and test.
-- The Proxy Core (Layer 2) is the highest-risk component due to SSE streaming complexity. Getting it right early reduces integration surprises.
-- The API Layer (Layer 3) is mostly glue code once the lower layers work.
-- Resilience (Layer 4) is important but separable -- a gateway without health checks still works (it just lacks failover). Building resilience last means you have a working baseline to compare against.
-
----
-
-## Scalability Considerations
-
-| Concern | At 10 users | At 100 users | At 1000+ users |
-|---------|-------------|--------------|-----------------|
-| **Connection pool** | Default httpx limits sufficient | Tune `max_connections` per vLLM node | Consider per-node connection limits |
-| **Gateway instances** | Single process, single worker | Single process, 2-4 Uvicorn workers | Multiple gateway instances behind NGINX |
-| **etcd load** | Negligible (watch is long-lived) | Still negligible | Still negligible -- watch is O(events), not O(clients) |
-| **Node registry consistency** | Single process = always consistent | Multi-worker = each worker has own copy (acceptable) | Multi-instance = each instance has own copy (acceptable, etcd ensures eventual consistency) |
-| **Connection tracking accuracy** | Perfect (single process) | Per-worker (slightly imbalanced routing) | Per-instance (use external metrics for better accuracy) |
-| **Streaming memory** | Minimal (httpx streams without buffering) | Monitor per-connection memory | Set maximum concurrent streams |
-
-**Key insight:** For this project's scope (internal network, likely <100 concurrent users), a single-process gateway with 2-4 Uvicorn workers is sufficient. The architecture supports horizontal scaling (multiple gateway instances behind NGINX) without code changes -- each instance independently watches etcd and maintains its own state.
+### Anti-Pattern: No Host Deduplication
+**What:** Allowing two setup tasks for the same hostname simultaneously.
+**Why bad:** Both try to install drivers, start containers, register in etcd. Race conditions, wasted resources, corrupted state.
+**Instead:** ProvisioningManager maintains hostname-to-task mapping, rejects duplicates.
 
 ---
 
 ## Sources
 
-### Architecture Patterns
-- [AI Gateway Architecture: Components (DeepInspect)](https://www.deepinspect.ai/blog/ai-gateway-architecture) - HIGH confidence
-- [LLM Gateway Architecture (AWS Labs)](https://awslabs.github.io/generative-ai-atlas/topics/3_0_architecture_and_design_patterns/3_1_system_and_application_design_patterns_for_genai/3_1_1_foundation_architecture_components/3_1_1_4_llm_gateway/index.html) - HIGH confidence
-- [vLLM Production Stack Architecture (DeepWiki)](https://deepwiki.com/vllm-project/production-stack/2-architecture) - HIGH confidence
-
-### vLLM Router & Load Balancing
-- [vLLM Router Release Blog](https://blog.vllm.ai/2025/12/13/vllm-router-release.html) - HIGH confidence
-- [KV Cache Utilization-Aware Load Balancing (BentoML)](https://bentoml.com/llm/inference-optimization/kv-cache-utilization-aware-load-balancing) - HIGH confidence
-- [Load Balancing and Scaling LLM Serving (DigitalOcean)](https://www.digitalocean.com/blog/load-balancing-scaling-llm-serving) - MEDIUM confidence
-- [LLM Load Balancing at Scale: CHWBL (KubeAI)](https://www.kubeai.org/blog/2025/02/26/llm-load-balancing-at-scale-chwbl/) - HIGH confidence
-
-### FastAPI + httpx Streaming
-- [FastAPI SSE Documentation](https://fastapi.tiangolo.com/tutorial/server-sent-events/) - HIGH confidence (official)
-- [httpx Async Streaming Documentation](https://www.python-httpx.org/async) - HIGH confidence (official, verified via Context7)
-- [FastAPI Lifespan Events](https://fastapi.tiangolo.com/advanced/testing-events) - HIGH confidence (official, verified via Context7)
-- [vLLM SSE Content-Type Bug Fix (PR #6985)](https://github.com/vllm-project/vllm-ascend/pull/6985) - HIGH confidence
-
-### etcd Python Clients
-- [etcd Official Discussion on Python Clients](https://github.com/etcd-io/etcd/discussions/18211) - HIGH confidence
-- [etcetra (async gRPC client)](https://github.com/lablup/etcetra) - MEDIUM confidence
-- [aetcd (asyncio etcd3 client)](https://github.com/martyanov/aetcd) - MEDIUM confidence
-
-### Resilience Patterns
-- [Circuit Breakers for LLM APIs (n1n.ai)](https://explore.n1n.ai/blog/circuit-breakers-llm-api-sre-reliability-patterns-2026-02-15) - MEDIUM confidence
-- [Retries, Fallbacks, and Circuit Breakers (Portkey)](https://portkey.ai/blog/retries-fallbacks-and-circuit-breakers-in-llm-apps/) - MEDIUM confidence
-- [LiteLLM Health Monitoring (Cooldown Pattern)](https://leeroopedia.com/index.php/Principle:BerriAI_Litellm_Health_Monitoring) - MEDIUM confidence
+- [AsyncSSH documentation](https://asyncssh.readthedocs.io/) - HIGH confidence
+- [AsyncSSH PyPI](https://pypi.org/project/asyncssh/) - HIGH confidence
+- [AsyncSSH GitHub](https://github.com/ronf/asyncssh) - HIGH confidence
+- [AsyncSSH vs Paramiko comparison](https://elegantnetwork.github.io/posts/comparing-ssh/) - MEDIUM confidence
