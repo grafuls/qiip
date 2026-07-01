@@ -84,7 +84,9 @@ Plans:
   2. Dashboard content updates automatically at a configurable polling interval without full page reload
   3. Operator can see counts change in real time as requests flow through the proxy
 
-**Plans**: [to be planned]
+**Plans**: 1 plan
+Plans:
+- [ ] 09-01-PLAN.md — Metrics column, JS polling, config, and tests
 
 **UI hint**: yes
 
@@ -103,4 +105,4 @@ Phases execute in numeric order: 7 -> 8 -> 9
 | 6. Observability and Admin | v1.0 | 2/2 | Complete | 2026-06-25 |
 | 7. Request Metrics and Admin API | v1.1 | 2/2 | Complete   | 2026-06-29 |
 | 8. Dashboard and Node Fleet | v1.1 | 2/2 | Complete   | 2026-07-01 |
-| 9. Live Metrics and Auto-Refresh | v1.1 | 0/0 | Not started | - |
+| 9. Live Metrics and Auto-Refresh | v1.1 | 0/1 | Not started | - |
