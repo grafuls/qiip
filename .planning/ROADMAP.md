@@ -62,7 +62,10 @@ Plans:
   2. Gateway runs setup.sh on a remote host and captures its output and exit code
   3. Gateway builds and starts a vLLM container on the remote host with GPU auto-detection
   4. After vLLM starts, gateway polls the remote /health endpoint and registers the node in etcd once healthy
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 11-01-PLAN.md — SSHClient wrapper, settings, EtcdClient.put() with tests
+- [ ] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
 
 ### Phase 12: Provisioning Robustness
 **Goal**: Setup operations validate preconditions, report step-by-step progress, and coordinate with the health checker
@@ -72,7 +75,10 @@ Plans:
   1. Before setup begins, the gateway verifies SSH is reachable, at least one GPU is present, and sufficient disk space exists
   2. Each setup operation tracks its current step and overall state (PENDING through COMPLETE or FAILED)
   3. A node in PROVISIONING state is not marked unhealthy by the health checker or selected by the router
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 11-01-PLAN.md — SSHClient wrapper, settings, EtcdClient.put() with tests
+- [ ] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
 
 ### Phase 13: Teardown and Admin API
 **Goal**: Operators can provision and decommission nodes through REST API endpoints
@@ -83,7 +89,10 @@ Plans:
   2. GET /admin/provisioning/tasks returns status of all active and completed setup/teardown operations
   3. DELETE /admin/nodes/{id} drains connections, stops the container via SSH, and deregisters from etcd
   4. DELETE /admin/nodes/{id}?force=true skips connection drain and immediately stops and deregisters
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 11-01-PLAN.md — SSHClient wrapper, settings, EtcdClient.put() with tests
+- [ ] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
 
 ### Phase 14: Dashboard Operations
 **Goal**: Operators can trigger and monitor setup/teardown from the web dashboard
@@ -93,7 +102,10 @@ Plans:
   1. Dashboard has a form where operator enters a hostname and triggers node setup
   2. Each node row in the fleet table has a teardown button that triggers removal
   3. Dashboard displays setup/teardown progress with per-step status updates via polling
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 11-01-PLAN.md — SSHClient wrapper, settings, EtcdClient.put() with tests
+- [ ] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
 **UI hint**: yes
 
 ## Progress
@@ -110,7 +122,7 @@ Plans:
 | 8. Dashboard and Node Fleet | v1.1 | 2/2 | Complete | 2026-07-01 |
 | 9. Live Metrics and Auto-Refresh | v1.1 | 1/1 | Complete | 2026-07-01 |
 | 10. Script Hardening | v1.2 | 2/2 | Complete    | 2026-07-01 |
-| 11. SSH Provisioning | v1.2 | 0/0 | Not started | - |
+| 11. SSH Provisioning | v1.2 | 0/2 | Planning    | - |
 | 12. Provisioning Robustness | v1.2 | 0/0 | Not started | - |
 | 13. Teardown and Admin API | v1.2 | 0/0 | Not started | - |
 | 14. Dashboard Operations | v1.2 | 0/0 | Not started | - |
