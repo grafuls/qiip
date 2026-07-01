@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Node Setup
-status: ready_to_plan
-stopped_at: Phase 10 complete (2/2) — ready to discuss Phase 11
-last_updated: 2026-07-01T19:07:55.307Z
-last_activity: 2026-07-01 -- Phase 10 execution started
+status: planning
+stopped_at: Phase 11 context gathered
+last_updated: "2026-07-01T20:15:16.525Z"
+last_activity: 2026-07-01
 progress:
   total_phases: 5
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
   completed_plans: 2
-  percent: 0
+  percent: 20
 ---
 
 # Project State
@@ -92,6 +92,6 @@ Items acknowledged and deferred at milestone v1.0 close on 2026-06-25:
 
 ## Session Continuity
 
-Last session: 2026-07-01T16:30:33.169Z
-Stopped at: Phase 10 context gathered
-Resume file: .planning/phases/10-script-hardening/10-CONTEXT.md
+Last session: 2026-07-01T20:15:16.513Z
+Stopped at: Phase 11 context gathered
+Resume file: .planning/phases/11-ssh-provisioning/11-CONTEXT.md
