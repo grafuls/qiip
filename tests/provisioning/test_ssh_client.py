@@ -21,7 +21,7 @@ from inference_proxy.provisioning.ssh_client import (
 
 
 def _make_settings(**overrides: object) -> SSHSettings:
-    defaults = {
+    defaults: dict[str, object] = {
         "key_path": Path("/tmp/test_key"),
         "username": "testuser",
         "connect_timeout": 5,
@@ -30,28 +30,41 @@ def _make_settings(**overrides: object) -> SSHSettings:
     return SSHSettings(**defaults)
 
 
+def _setup_mock_asyncssh(
+    mock_asyncssh: MagicMock,
+    stdout_lines: list[str] | None = None,
+    stderr_text: str = "",
+    exit_status: int = 0,
+) -> None:
+    """Wire up mock_asyncssh with real exception classes and a mock process."""
+    # Must set real exception classes so `except asyncssh.X` works
+    mock_asyncssh.PermissionDenied = type("PermissionDenied", (Exception,), {})
+    mock_asyncssh.DisconnectError = type(
+        "DisconnectError", (Exception,), {"reason": ""}
+    )
+
+    mock_process = MagicMock()
+    mock_process.stdout = _AsyncLineIter(stdout_lines or [])
+    mock_process.stderr = MagicMock()
+    mock_process.stderr.read = AsyncMock(return_value=stderr_text)
+    mock_process.exit_status = exit_status
+
+    mock_conn = MagicMock()
+    mock_conn.create_process = MagicMock(return_value=_async_cm(mock_process))
+
+    mock_asyncssh.connect = MagicMock(return_value=_async_cm(mock_conn))
+
+
 class TestSSHClientConnectParams:
     """D-03, D-04: asyncssh.connect called with correct parameters."""
 
     @pytest.mark.asyncio
     @patch("inference_proxy.provisioning.ssh_client.asyncssh")
     async def test_connect_params(self, mock_asyncssh: MagicMock) -> None:
-        settings = _make_settings()
-        client = SSHClient(settings)
+        _setup_mock_asyncssh(mock_asyncssh)
+        client = SSHClient(_make_settings())
 
-        # Set up the mock chain: connect -> conn -> create_process -> process
-        mock_process = AsyncMock()
-        mock_process.stdout.__aiter__ = AsyncMock(return_value=aiter([]))
-        mock_process.stderr = AsyncMock()
-        mock_process.stderr.read = AsyncMock(return_value="")
-        mock_process.exit_status = 0
-
-        mock_conn = AsyncMock()
-        mock_conn.create_process = MagicMock(return_value=_async_cm(mock_process))
-
-        mock_asyncssh.connect = MagicMock(return_value=_async_cm(mock_conn))
-
-        lines = [line async for line in client.run_streaming("host1", "echo hi")]
+        _ = [line async for line in client.run_streaming("host1", "echo hi")]
 
         mock_asyncssh.connect.assert_called_once_with(
             "host1",
@@ -68,20 +81,8 @@ class TestSSHClientStdoutStreaming:
     @pytest.mark.asyncio
     @patch("inference_proxy.provisioning.ssh_client.asyncssh")
     async def test_yields_stdout_lines(self, mock_asyncssh: MagicMock) -> None:
-        settings = _make_settings()
-        client = SSHClient(settings)
-
-        mock_process = AsyncMock()
-        mock_process.stdout.__aiter__ = AsyncMock(
-            return_value=aiter(["line1\n", "line2\n"])
-        )
-        mock_process.stderr = AsyncMock()
-        mock_process.stderr.read = AsyncMock(return_value="")
-        mock_process.exit_status = 0
-
-        mock_conn = AsyncMock()
-        mock_conn.create_process = MagicMock(return_value=_async_cm(mock_process))
-        mock_asyncssh.connect = MagicMock(return_value=_async_cm(mock_conn))
+        _setup_mock_asyncssh(mock_asyncssh, stdout_lines=["line1\n", "line2\n"])
+        client = SSHClient(_make_settings())
 
         lines = [line async for line in client.run_streaming("host1", "ls")]
 
@@ -94,20 +95,10 @@ class TestSSHClientStderrStreaming:
     @pytest.mark.asyncio
     @patch("inference_proxy.provisioning.ssh_client.asyncssh")
     async def test_yields_stderr_lines(self, mock_asyncssh: MagicMock) -> None:
-        settings = _make_settings()
-        client = SSHClient(settings)
-
-        mock_process = AsyncMock()
-        mock_process.stdout.__aiter__ = AsyncMock(
-            return_value=aiter(["out\n"])
+        _setup_mock_asyncssh(
+            mock_asyncssh, stdout_lines=["out\n"], stderr_text="warn1\nwarn2\n"
         )
-        mock_process.stderr = AsyncMock()
-        mock_process.stderr.read = AsyncMock(return_value="warn1\nwarn2\n")
-        mock_process.exit_status = 0
-
-        mock_conn = AsyncMock()
-        mock_conn.create_process = MagicMock(return_value=_async_cm(mock_process))
-        mock_asyncssh.connect = MagicMock(return_value=_async_cm(mock_conn))
+        client = SSHClient(_make_settings())
 
         lines = [line async for line in client.run_streaming("host1", "cmd")]
 
@@ -122,18 +113,8 @@ class TestSSHClientNonZeroExit:
     @pytest.mark.asyncio
     @patch("inference_proxy.provisioning.ssh_client.asyncssh")
     async def test_raises_remote_command_error(self, mock_asyncssh: MagicMock) -> None:
-        settings = _make_settings()
-        client = SSHClient(settings)
-
-        mock_process = AsyncMock()
-        mock_process.stdout.__aiter__ = AsyncMock(return_value=aiter([]))
-        mock_process.stderr = AsyncMock()
-        mock_process.stderr.read = AsyncMock(return_value="")
-        mock_process.exit_status = 1
-
-        mock_conn = AsyncMock()
-        mock_conn.create_process = MagicMock(return_value=_async_cm(mock_process))
-        mock_asyncssh.connect = MagicMock(return_value=_async_cm(mock_conn))
+        _setup_mock_asyncssh(mock_asyncssh, exit_status=1)
+        client = SSHClient(_make_settings())
 
         with pytest.raises(RemoteCommandError) as exc_info:
             async for _ in client.run_streaming("host1", "fail"):
@@ -150,18 +131,14 @@ class TestSSHClientConnectionError:
     @pytest.mark.asyncio
     @patch("inference_proxy.provisioning.ssh_client.asyncssh")
     async def test_wraps_permission_denied(self, mock_asyncssh: MagicMock) -> None:
-        settings = _make_settings()
-        client = SSHClient(settings)
-
-        # Make asyncssh.PermissionDenied available as the actual exception class
         mock_asyncssh.PermissionDenied = type("PermissionDenied", (Exception,), {})
         mock_asyncssh.DisconnectError = type(
             "DisconnectError", (Exception,), {"reason": "test"}
         )
-
         mock_asyncssh.connect = MagicMock(
             return_value=_async_cm_raises(mock_asyncssh.PermissionDenied("denied"))
         )
+        client = SSHClient(_make_settings())
 
         with pytest.raises(SSHConnectionError) as exc_info:
             async for _ in client.run_streaming("host1", "cmd"):
@@ -173,17 +150,14 @@ class TestSSHClientConnectionError:
     @pytest.mark.asyncio
     @patch("inference_proxy.provisioning.ssh_client.asyncssh")
     async def test_wraps_os_error(self, mock_asyncssh: MagicMock) -> None:
-        settings = _make_settings()
-        client = SSHClient(settings)
-
         mock_asyncssh.PermissionDenied = type("PermissionDenied", (Exception,), {})
         mock_asyncssh.DisconnectError = type(
             "DisconnectError", (Exception,), {"reason": "test"}
         )
-
         mock_asyncssh.connect = MagicMock(
             return_value=_async_cm_raises(OSError("Connection refused"))
         )
+        client = SSHClient(_make_settings())
 
         with pytest.raises(SSHConnectionError) as exc_info:
             async for _ in client.run_streaming("host1", "cmd"):
@@ -196,10 +170,18 @@ class TestSSHClientConnectionError:
 # -- Helpers --
 
 
-async def aiter(items: list[str]):  # noqa: ANN201
-    """Create an async iterator from a list."""
-    for item in items:
-        yield item
+class _AsyncLineIter:
+    """Async iterable that yields lines from a list."""
+
+    def __init__(self, lines: list[str]) -> None:
+        self._lines = lines
+
+    def __aiter__(self):  # noqa: ANN204
+        return self._iter()
+
+    async def _iter(self):  # noqa: ANN201
+        for line in self._lines:
+            yield line
 
 
 class _async_cm:
