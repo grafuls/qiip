@@ -31,7 +31,7 @@
 
 ### v1.2 Node Setup
 
-- [ ] **Phase 10: Script Hardening** - Harden setup and start scripts for safe automated execution
+- [x] **Phase 10: Script Hardening** - Harden setup and start scripts for safe automated execution (completed 2026-07-01)
 - [ ] **Phase 11: SSH Provisioning** - Gateway can SSH into a host and run the full setup sequence
 - [ ] **Phase 12: Provisioning Robustness** - Pre-flight checks, state machine tracking, and health checker coordination
 - [ ] **Phase 13: Teardown and Admin API** - Operators can provision and teardown nodes via REST API
@@ -50,8 +50,8 @@
   4. start-vllm.sh replaces an existing container with the same name instead of failing on name collision
 **Plans**: 2 plans
 Plans:
-- [ ] 10-01-PLAN.md — Harden setup.sh (fail-fast, idempotency, NFS timeout, step markers)
-- [ ] 10-02-PLAN.md — Restructure container boundary (entrypoint.sh + host launcher + Containerfile)
+- [x] 10-01-PLAN.md — Harden setup.sh (fail-fast, idempotency, NFS timeout, step markers)
+- [x] 10-02-PLAN.md — Restructure container boundary (entrypoint.sh + host launcher + Containerfile)
 
 ### Phase 11: SSH Provisioning
 **Goal**: Gateway can connect to a remote host over SSH and execute the full provisioning sequence end-to-end
@@ -109,7 +109,7 @@ Plans:
 | 7. Request Metrics and Admin API | v1.1 | 2/2 | Complete | 2026-06-29 |
 | 8. Dashboard and Node Fleet | v1.1 | 2/2 | Complete | 2026-07-01 |
 | 9. Live Metrics and Auto-Refresh | v1.1 | 1/1 | Complete | 2026-07-01 |
-| 10. Script Hardening | v1.2 | 0/2 | Not started | - |
+| 10. Script Hardening | v1.2 | 2/2 | Complete   | 2026-07-01 |
 | 11. SSH Provisioning | v1.2 | 0/0 | Not started | - |
 | 12. Provisioning Robustness | v1.2 | 0/0 | Not started | - |
 | 13. Teardown and Admin API | v1.2 | 0/0 | Not started | - |
