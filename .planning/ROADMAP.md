@@ -23,7 +23,7 @@
 
 - [x] **Phase 7: Request Metrics and Admin API** - In-memory request counters and enriched admin endpoint for node data (completed 2026-06-29)
 - [x] **Phase 8: Dashboard and Node Fleet** - Jinja2-rendered operations dashboard with node fleet table and styling (completed 2026-07-01)
-- [ ] **Phase 9: Live Metrics and Auto-Refresh** - Request metrics display and JS polling for automatic dashboard updates
+- [x] **Phase 9: Live Metrics and Auto-Refresh** - Request metrics display and JS polling for automatic dashboard updates (completed 2026-07-01)
 
 ## Phase Details
 
@@ -86,7 +86,7 @@ Plans:
 
 **Plans**: 1 plan
 Plans:
-- [ ] 09-01-PLAN.md — Metrics column, JS polling, config, and tests
+- [x] 09-01-PLAN.md — Metrics column, JS polling, config, and tests
 
 **UI hint**: yes
 
@@ -105,4 +105,4 @@ Phases execute in numeric order: 7 -> 8 -> 9
 | 6. Observability and Admin | v1.0 | 2/2 | Complete | 2026-06-25 |
 | 7. Request Metrics and Admin API | v1.1 | 2/2 | Complete   | 2026-06-29 |
 | 8. Dashboard and Node Fleet | v1.1 | 2/2 | Complete   | 2026-07-01 |
-| 9. Live Metrics and Auto-Refresh | v1.1 | 0/1 | Not started | - |
+| 9. Live Metrics and Auto-Refresh | v1.1 | 1/1 | Complete   | 2026-07-01 |
