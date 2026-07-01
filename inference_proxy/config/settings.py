@@ -5,7 +5,7 @@ nested env var resolution works correctly through the root Settings class.
 Only the root Settings class inherits from BaseSettings.
 """
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -87,7 +87,7 @@ class LoggingSettings(BaseModel):
 class DashboardSettings(BaseModel):
     """Dashboard UI configuration."""
 
-    poll_interval: int = 10
+    poll_interval: int = Field(default=10, ge=1)
 
 
 class Settings(BaseSettings):

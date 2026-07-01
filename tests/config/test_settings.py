@@ -41,21 +41,21 @@ class TestDefaultRoutingSettings:
 class TestEnvVarOverrideGatewayPort:
     def test_env_var_override_gateway_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("INFERENCE_PROXY_GATEWAY__PORT", "9090")
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.gateway.port == 9090
 
 
 class TestEnvVarOverrideEtcdPrefix:
     def test_env_var_override_etcd_prefix(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("INFERENCE_PROXY_ETCD__NODE_PREFIX", "/test-nodes/")
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.etcd.node_prefix == "/test-nodes/"
 
 
 class TestEnvVarOverrideRoutingStrategy:
     def test_env_var_override_routing_strategy(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("INFERENCE_PROXY_ROUTING__STRATEGY", "round_robin")
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.routing.strategy == "round_robin"
 
 
@@ -70,7 +70,7 @@ class TestEnvVarOverrideDashboardPollInterval:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("INFERENCE_PROXY_DASHBOARD__POLL_INTERVAL", "30")
-        settings = Settings()
+        settings = Settings(_env_file=None)
         assert settings.dashboard.poll_interval == 30
 
 

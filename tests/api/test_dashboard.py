@@ -4,7 +4,7 @@ Tests cover:
 - GET /dashboard returns 200 with text/html content type (DASH-01)
 - Dashboard served by same app as API (DASH-03)
 - HTML contains Simple.css CDN link and dashboard assets (TMPL-01, TMPL-02)
-- Table structure with 6 column headers (NODE-01)
+- Table structure with 7 column headers (NODE-01, METR-02)
 - Badge CSS classes for status and circuit breaker states (NODE-02)
 """
 
