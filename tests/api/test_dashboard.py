@@ -67,8 +67,8 @@ class TestDashboardTemplate:
 class TestDashboardTableStructure:
     """Dashboard HTML contains the node fleet table structure (NODE-01)."""
 
-    def test_contains_all_six_column_headers(self, client: TestClient) -> None:
-        """HTML contains all 6 th elements for the node table."""
+    def test_contains_all_seven_column_headers(self, client: TestClient) -> None:
+        """HTML contains all 7 th elements for the node table."""
         response = client.get("/dashboard")
         headers = [
             "Node ID",
@@ -77,14 +77,44 @@ class TestDashboardTableStructure:
             "Status",
             "Active Connections",
             "Circuit Breaker",
+            "Requests",
         ]
         for header in headers:
             assert header in response.text, f"Missing column header: {header}"
+
+    def test_contains_requests_column_header(self, client: TestClient) -> None:
+        """HTML contains the Requests column header (METR-02)."""
+        response = client.get("/dashboard")
+        assert "Requests" in response.text
 
     def test_contains_table_body_id(self, client: TestClient) -> None:
         """HTML contains tbody with id="node-table-body" for JS population."""
         response = client.get("/dashboard")
         assert 'id="node-table-body"' in response.text
+
+
+class TestDashboardPolling:
+    """Dashboard HTML includes polling configuration (DASH-02)."""
+
+    def test_contains_poll_interval_js_variable(self, client: TestClient) -> None:
+        """HTML contains POLL_INTERVAL_MS JavaScript variable."""
+        response = client.get("/dashboard")
+        assert "POLL_INTERVAL_MS" in response.text
+
+    def test_poll_interval_default_value(self, client: TestClient) -> None:
+        """Default poll interval is 10s = 10000ms in the JS variable."""
+        response = client.get("/dashboard")
+        assert "10000" in response.text
+
+    def test_contains_last_updated_element(self, client: TestClient) -> None:
+        """HTML contains element with id='last-updated'."""
+        response = client.get("/dashboard")
+        assert 'id="last-updated"' in response.text
+
+    def test_contains_poll_warning_element(self, client: TestClient) -> None:
+        """HTML contains element with id='poll-warning'."""
+        response = client.get("/dashboard")
+        assert 'id="poll-warning"' in response.text
 
 
 class TestDashboardBadgeCSS:

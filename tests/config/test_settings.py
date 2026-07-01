@@ -7,6 +7,7 @@ from pydantic import BaseModel, ValidationError
 from pydantic_settings import BaseSettings
 
 from inference_proxy.config.settings import (
+    DashboardSettings,
     EtcdSettings,
     GatewaySettings,
     RoutingSettings,
@@ -58,14 +59,31 @@ class TestEnvVarOverrideRoutingStrategy:
         assert settings.routing.strategy == "round_robin"
 
 
+class TestDefaultDashboardSettings:
+    def test_default_dashboard_poll_interval(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.dashboard.poll_interval == 10
+
+
+class TestEnvVarOverrideDashboardPollInterval:
+    def test_env_var_override_dashboard_poll_interval(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_DASHBOARD__POLL_INTERVAL", "30")
+        settings = Settings()
+        assert settings.dashboard.poll_interval == 30
+
+
 class TestSubModelsAreNotBaseSettings:
     def test_sub_models_are_not_base_settings(self) -> None:
         assert not issubclass(GatewaySettings, BaseSettings)
         assert not issubclass(EtcdSettings, BaseSettings)
         assert not issubclass(RoutingSettings, BaseSettings)
+        assert not issubclass(DashboardSettings, BaseSettings)
         assert issubclass(GatewaySettings, BaseModel)
         assert issubclass(EtcdSettings, BaseModel)
         assert issubclass(RoutingSettings, BaseModel)
+        assert issubclass(DashboardSettings, BaseModel)
 
 
 class TestEtcdSettingsEmptyEndpointsRejected:
