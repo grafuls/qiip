@@ -32,17 +32,27 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Active
 
-None — planning next milestone.
+- [ ] SSH-based node setup from gateway (connect, install deps, start vLLM, register)
+- [ ] Node teardown (stop container, deregister from etcd)
+- [ ] Admin API for node provisioning (POST setup, DELETE teardown)
+- [ ] Dashboard UI for setup/teardown operations
 
-## Current State
+## Current Milestone: v1.2 Node Setup
 
-Shipped v1.1 Web UI (2026-07-01). All milestones complete. Next milestone TBD via `/gsd:new-milestone`.
+**Goal:** Operators can provision and decommission vLLM nodes on idle QUADS servers from the dashboard or API.
+
+**Target features:**
+- SSH-based node setup: connect to host, run setup.sh, build container, start vLLM with GPU auto-detection, poll /health, register in etcd
+- Node teardown: stop container, deregister from etcd
+- Admin API endpoints: POST /admin/nodes/setup, DELETE /admin/nodes/{id}
+- Dashboard UI: setup/teardown buttons on the node fleet page
+- Pre-configured SSH keys (operator ensures ~/.ssh access)
 
 ### Out of Scope
 
 - Authentication/authorization — internal network only for v1
 - NGINX/SSL termination — separate deployment concern
-- Control plane (node provisioning) — next phase after gateway
+- Control plane (full orchestration, auto-scaling) — v1.2 covers setup/teardown only
 - Auto-scaling — future work
 - Multi-tenancy — future work
 - Geographic distribution — future work
@@ -61,7 +71,8 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 - etcd provides service registry — nodes register with endpoint, model info, capabilities
 - The gateway is a FastAPI application using httpx for async proxying
 - Operations dashboard: Jinja2-rendered HTML with vanilla JS polling for auto-refresh
-- Future: control plane (SSH-based provisioning), NGINX (external access), Prometheus metrics
+- v1.2: SSH-based node provisioning and teardown from gateway
+- Future: NGINX (external access), Prometheus metrics, auto-scaling
 
 ## Constraints
 
@@ -106,4 +117,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-01 after v1.1 milestone*
+*Last updated: 2026-07-01 after v1.2 milestone start*
