@@ -31,3 +31,13 @@ h1 {
   background-color: #ca8a04;
   color: #fff;
 }
+
+.last-updated {
+  font-size: 0.875rem;
+  color: var(--text-light);
+}
+
+.poll-warning {
+  font-size: 0.875rem;
+  color: #ca8a04;
+}

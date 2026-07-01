@@ -84,6 +84,12 @@ class LoggingSettings(BaseModel):
     level: str = "INFO"
 
 
+class DashboardSettings(BaseModel):
+    """Dashboard UI configuration."""
+
+    poll_interval: int = 10
+
+
 class Settings(BaseSettings):
     """Root application settings.
 
@@ -106,3 +112,4 @@ class Settings(BaseSettings):
     proxy: ProxySettings = ProxySettings()
     resilience: ResilienceSettings = ResilienceSettings()
     logging: LoggingSettings = LoggingSettings()
+    dashboard: DashboardSettings = DashboardSettings()
