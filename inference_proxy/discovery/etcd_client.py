@@ -69,6 +69,18 @@ class EtcdClient:
         """
         return self._client.get_prefix(self._prefix)  # type: ignore[no-any-return]
 
+    def put(self, key: str, value: str | bytes) -> bool:
+        """Put a key-value pair into etcd.
+
+        Args:
+            key: The full key (e.g., ``/nodes/hostname``).
+            value: The value to store (typically JSON-encoded).
+
+        Returns:
+            True on success.
+        """
+        return self._client.put(key, value)  # type: ignore[no-any-return]
+
     def watch_prefix(self) -> tuple[Any, Any]:
         """Start watching for changes under the configured node prefix.
 
