@@ -33,7 +33,10 @@ async function loadNodes() {
       tr.appendChild(tdModel);
 
       const tdStatus = document.createElement("td");
-      tdStatus.innerHTML = `<span class="badge badge-${node.status}">${node.status}</span>`;
+      const statusBadge = document.createElement("span");
+      statusBadge.className = `badge badge-${node.status}`;
+      statusBadge.textContent = node.status;
+      tdStatus.appendChild(statusBadge);
       tr.appendChild(tdStatus);
 
       const tdConn = document.createElement("td");
@@ -41,7 +44,10 @@ async function loadNodes() {
       tr.appendChild(tdConn);
 
       const tdCb = document.createElement("td");
-      tdCb.innerHTML = `<span class="badge badge-${node.circuit_breaker_state}">${node.circuit_breaker_state}</span>`;
+      const cbBadge = document.createElement("span");
+      cbBadge.className = `badge badge-${node.circuit_breaker_state}`;
+      cbBadge.textContent = node.circuit_breaker_state;
+      tdCb.appendChild(cbBadge);
       tr.appendChild(tdCb);
 
       tbody.appendChild(tr);

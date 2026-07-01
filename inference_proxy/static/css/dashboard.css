@@ -26,7 +26,8 @@ h1 {
 }
 
 .badge-draining,
-.badge-half_open {
+.badge-half_open,
+.badge-unknown {
   background-color: #ca8a04;
   color: #fff;
 }
