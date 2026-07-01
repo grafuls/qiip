@@ -64,8 +64,8 @@ mount_nfs_cache() {
         echo "NFS already mounted at ${NFS_MOUNT_POINT}, skipping"
         return 0
     fi
-    mkdir -p "${NFS_MOUNT_POINT}"
-    timeout --kill-after=5 30 \
+    sudo mkdir -p "${NFS_MOUNT_POINT}"
+    sudo timeout --kill-after=5 30 \
         mount -t nfs -o vers=3,soft,timeo=100,retrans=2 "${NFS_SERVER}" "${NFS_MOUNT_POINT}"
 }
 

@@ -2,12 +2,21 @@
 set -euo pipefail
 
 VLLM_PORT="${VLLM_PORT:-8000}"
+NFS_MOUNT_POINT="${NFS_MOUNT_POINT:-/srv/hf-cache}"
 
 detect_gpu_info() {
+    if ! command -v nvidia-smi &>/dev/null; then
+        echo "FATAL: nvidia-smi not found. Run setup.sh first or install NVIDIA drivers." >&2
+        exit 1
+    fi
+    if ! nvidia-smi &>/dev/null; then
+        echo "FATAL: nvidia-smi failed. NVIDIA driver may not be loaded." >&2
+        exit 1
+    fi
     GPU_MODEL=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1 | xargs)
     GPU_COUNT=$(nvidia-smi --list-gpus | wc -l)
     GPU_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
-    GPU_VRAM_GB=$((GPU_VRAM_MB / 1024))
+    GPU_VRAM_GB=$(( (GPU_VRAM_MB + 512) / 1024 ))
 }
 
 configure_vllm_params() {
@@ -124,7 +133,7 @@ EOF
     podman run -d --replace \
         --name "$CONTAINER_NAME" \
         --device nvidia.com/gpu=all \
-        -v /srv/hf-cache:/root/.cache/huggingface:ro \
+        -v "${NFS_MOUNT_POINT}:/root/.cache/huggingface:ro" \
         -p "${VLLM_PORT}:8000" \
         -e VLLM_MODEL="$MODEL" \
         -e VLLM_PORT=8000 \
