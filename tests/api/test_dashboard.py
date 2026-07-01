@@ -1,0 +1,111 @@
+"""Integration tests for the dashboard route and HTML content.
+
+Tests cover:
+- GET /dashboard returns 200 with text/html content type (DASH-01)
+- Dashboard served by same app as API (DASH-03)
+- HTML contains Simple.css CDN link and dashboard assets (TMPL-01, TMPL-02)
+- Table structure with 6 column headers (NODE-01)
+- Badge CSS classes for status and circuit breaker states (NODE-02)
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+
+class TestDashboardRoute:
+    """GET /dashboard returns 200 HTML from the same app (DASH-01, DASH-03, TMPL-01)."""
+
+    def test_dashboard_returns_200(self, client: TestClient) -> None:
+        """GET /dashboard returns status code 200."""
+        response = client.get("/dashboard")
+        assert response.status_code == 200
+
+    def test_dashboard_returns_html(self, client: TestClient) -> None:
+        """Response content-type contains text/html."""
+        response = client.get("/dashboard")
+        assert "text/html" in response.headers["content-type"]
+
+    def test_dashboard_served_by_same_app(self, client: TestClient) -> None:
+        """TestClient (wrapping create_app()) serves /dashboard -- proves DASH-03."""
+        # The client fixture uses the same FastAPI app that serves /admin/nodes.
+        # If this request succeeds, the dashboard shares the app.
+        admin_response = client.get("/admin/nodes")
+        dashboard_response = client.get("/dashboard")
+        assert admin_response.status_code == 200
+        assert dashboard_response.status_code == 200
+
+
+class TestDashboardTemplate:
+    """Dashboard HTML includes expected asset references (TMPL-01, TMPL-02)."""
+
+    def test_contains_simple_css_cdn_link(self, client: TestClient) -> None:
+        """HTML contains the Simple.css CDN link."""
+        response = client.get("/dashboard")
+        assert "cdn.simplecss.org/simple.css" in response.text
+
+    def test_contains_dashboard_css_link(self, client: TestClient) -> None:
+        """HTML contains link to dashboard.css."""
+        response = client.get("/dashboard")
+        assert "dashboard.css" in response.text
+
+    def test_contains_dashboard_js_script(self, client: TestClient) -> None:
+        """HTML contains script tag for dashboard.js."""
+        response = client.get("/dashboard")
+        assert "dashboard.js" in response.text
+
+    def test_simple_css_loaded_before_dashboard_css(self, client: TestClient) -> None:
+        """Simple.css CDN link appears before dashboard.css link in the HTML."""
+        response = client.get("/dashboard")
+        simple_pos = response.text.index("cdn.simplecss.org/simple.css")
+        dashboard_pos = response.text.index("dashboard.css")
+        assert simple_pos < dashboard_pos
+
+
+class TestDashboardTableStructure:
+    """Dashboard HTML contains the node fleet table structure (NODE-01)."""
+
+    def test_contains_all_six_column_headers(self, client: TestClient) -> None:
+        """HTML contains all 6 th elements for the node table."""
+        response = client.get("/dashboard")
+        headers = [
+            "Node ID",
+            "Endpoint",
+            "Model",
+            "Status",
+            "Active Connections",
+            "Circuit Breaker",
+        ]
+        for header in headers:
+            assert header in response.text, f"Missing column header: {header}"
+
+    def test_contains_table_body_id(self, client: TestClient) -> None:
+        """HTML contains tbody with id="node-table-body" for JS population."""
+        response = client.get("/dashboard")
+        assert 'id="node-table-body"' in response.text
+
+
+class TestDashboardBadgeCSS:
+    """Badge CSS contains classes for all status and circuit breaker states (NODE-02)."""
+
+    _css_path = (
+        Path(__file__).resolve().parent.parent.parent
+        / "inference_proxy"
+        / "static"
+        / "css"
+        / "dashboard.css"
+    )
+
+    def test_badge_css_contains_all_status_classes(self) -> None:
+        """dashboard.css contains .badge-healthy, .badge-unhealthy, .badge-draining."""
+        css = self._css_path.read_text()
+        for cls in (".badge-healthy", ".badge-unhealthy", ".badge-draining"):
+            assert cls in css, f"Missing CSS class: {cls}"
+
+    def test_badge_css_contains_all_cb_classes(self) -> None:
+        """dashboard.css contains .badge-closed, .badge-open, .badge-half_open."""
+        css = self._css_path.read_text()
+        for cls in (".badge-closed", ".badge-open", ".badge-half_open"):
+            assert cls in css, f"Missing CSS class: {cls}"
