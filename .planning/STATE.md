@@ -3,8 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Node Setup
 status: planning
-last_updated: "2026-07-01"
-last_activity: 2026-07-01
+stopped_at: Phase 10 context gathered
+last_updated: "2026-07-01T16:30:33.174Z"
+last_activity: 2026-07-01 — Roadmap created for v1.2 Node Setup (5 phases, 19 requirements)
 progress:
   total_phases: 5
   completed_phases: 0
@@ -90,6 +91,6 @@ Items acknowledged and deferred at milestone v1.0 close on 2026-06-25:
 
 ## Session Continuity
 
-Last session: 2026-07-01
-Stopped at: Roadmap created for v1.2 milestone
-Resume file: None
+Last session: 2026-07-01T16:30:33.169Z
+Stopped at: Phase 10 context gathered
+Resume file: .planning/phases/10-script-hardening/10-CONTEXT.md
