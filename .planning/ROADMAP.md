@@ -48,7 +48,10 @@
   2. setup.sh aborts immediately on any step failure with a non-zero exit code and clear error message
   3. NFS mount step completes or times out within a bounded period (never hangs indefinitely)
   4. start-vllm.sh replaces an existing container with the same name instead of failing on name collision
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 10-01-PLAN.md — Harden setup.sh (fail-fast, idempotency, NFS timeout, step markers)
+- [ ] 10-02-PLAN.md — Restructure container boundary (entrypoint.sh + host launcher + Containerfile)
 
 ### Phase 11: SSH Provisioning
 **Goal**: Gateway can connect to a remote host over SSH and execute the full provisioning sequence end-to-end
@@ -106,7 +109,7 @@
 | 7. Request Metrics and Admin API | v1.1 | 2/2 | Complete | 2026-06-29 |
 | 8. Dashboard and Node Fleet | v1.1 | 2/2 | Complete | 2026-07-01 |
 | 9. Live Metrics and Auto-Refresh | v1.1 | 1/1 | Complete | 2026-07-01 |
-| 10. Script Hardening | v1.2 | 0/0 | Not started | - |
+| 10. Script Hardening | v1.2 | 0/2 | Not started | - |
 | 11. SSH Provisioning | v1.2 | 0/0 | Not started | - |
 | 12. Provisioning Robustness | v1.2 | 0/0 | Not started | - |
 | 13. Teardown and Admin API | v1.2 | 0/0 | Not started | - |
