@@ -2,7 +2,7 @@
 
 ## What This Is
 
-An OpenAI-compatible inference gateway that proxies requests to vLLM nodes on QUADS lab servers with automatic service discovery, least-connections load balancing, circuit breaker resilience, and structured observability. Part of a larger system that dynamically provisions LLM inference capacity from unused GPU servers in Scale and Alias labs.
+An OpenAI-compatible inference gateway that proxies requests to vLLM nodes on QUADS lab servers with automatic service discovery, least-connections load balancing, circuit breaker resilience, structured observability, and an operations dashboard. Part of a larger system that dynamically provisions LLM inference capacity from unused GPU servers in Scale and Alias labs.
 
 ## Core Value
 
@@ -23,26 +23,20 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - [x] Structured request logging with target node tracking — v1.0
 - [x] Admin API for node fleet inspection — v1.0
 
-### Active
-
-None — all v1.1 requirements validated.
-
 ### Validated in v1.1
 
-- [x] Operations dashboard showing node fleet status and request metrics — validated Phase 8-9
-- [x] Node fleet overview with health state, model, connections, circuit breaker status — validated Phase 8
-- [x] Request metrics (counts, latencies, error rates) per-node and aggregate — validated Phase 7, 9
-- [x] Auto-refresh via polling to keep dashboard current — validated Phase 9
+- ✓ Operations dashboard showing node fleet status and request metrics — v1.1
+- ✓ Node fleet overview with health state, model, connections, circuit breaker status — v1.1
+- ✓ Request metrics (counts per-node, per-model, total) — v1.1
+- ✓ Auto-refresh via polling to keep dashboard current — v1.1
 
-## Current Milestone: v1.1 Web UI
+### Active
 
-**Goal:** Add an operations dashboard so operators can monitor the node fleet and request metrics at a glance.
+None — planning next milestone.
 
-**Target features:**
-- Node fleet overview — health state, model served, active connections, circuit breaker status
-- Request metrics — aggregate and per-node request counts, latencies, error rates
-- Auto-refresh via polling
-- FastAPI + Jinja2 server-rendered templates with vanilla JS
+## Current State
+
+Shipped v1.1 Web UI (2026-07-01). All milestones complete. Next milestone TBD via `/gsd:new-milestone`.
 
 ### Out of Scope
 
@@ -56,9 +50,8 @@ None — all v1.1 requirements validated.
 
 ## Context
 
-Shipped v1.0 with 6,830 LOC Python across 6 phases and 226 tests.
-Phase 7 complete — request metrics tracking (per-node, per-model, total) and enriched admin API (/admin/nodes with 6 fields, /admin/metrics endpoint). 247 tests.
-Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, structlog, Pydantic v2.
+Shipped v1.1 with 7,618 LOC (Python + HTML/CSS/JS) across 9 phases and 265 tests.
+Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, structlog, Pydantic v2, Jinja2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
 
@@ -67,7 +60,7 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 - Models are served from NFS shared storage (read-only mounts)
 - etcd provides service registry — nodes register with endpoint, model info, capabilities
 - The gateway is a FastAPI application using httpx for async proxying
-- v1.1 adds a Jinja2-rendered operations dashboard with vanilla JS polling for auto-refresh
+- Operations dashboard: Jinja2-rendered HTML with vanilla JS polling for auto-refresh
 - Future: control plane (SSH-based provisioning), NGINX (external access), Prometheus metrics
 
 ## Constraints
@@ -91,8 +84,9 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 | Graceful shutdown | 503 for new requests (except /health), drain in-flight up to timeout | Validated v1.0 |
 | BaseHTTPMiddleware for logging | Simpler than pure ASGI; accepted streaming duration trade-off | Validated v1.0 |
 | Separate admin router | /admin namespace for operational endpoints, distinct from proxy routes | Validated v1.0 |
-| Jinja2 + vanilla JS for Web UI | No build step, stays in Python ecosystem, minimal dependencies | — Pending |
-| Polling for auto-refresh | Simple JS interval vs SSE/WebSocket; sufficient for ops dashboard | — Pending |
+| Jinja2 + vanilla JS for Web UI | No build step, stays in Python ecosystem, minimal dependencies | ✓ Validated v1.1 |
+| Polling for auto-refresh | Simple JS interval vs SSE/WebSocket; sufficient for ops dashboard | ✓ Validated v1.1 |
+| In-memory counters only | No persistent metrics storage; Prometheus/Grafana is future work | ✓ Validated v1.1 |
 
 ## Evolution
 
@@ -112,4 +106,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-29 after v1.1 milestone start*
+*Last updated: 2026-07-01 after v1.1 milestone*
