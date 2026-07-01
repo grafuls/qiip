@@ -9,10 +9,10 @@ Requirements for milestone v1.2 Node Setup. Each maps to roadmap phases.
 
 ### Script Hardening
 
-- [ ] **SCRIPT-01**: setup.sh exits on first error (set -e) and validates prerequisites before starting
-- [ ] **SCRIPT-02**: setup.sh steps are idempotent (re-running skips already-completed steps)
-- [ ] **SCRIPT-03**: NFS mount uses timeout options to prevent indefinite hangs
-- [ ] **SCRIPT-04**: start-vllm.sh runs vLLM container detached (podman run -d) with --replace for name collisions
+- [x] **SCRIPT-01**: setup.sh exits on first error (set -e) and validates prerequisites before starting
+- [x] **SCRIPT-02**: setup.sh steps are idempotent (re-running skips already-completed steps)
+- [x] **SCRIPT-03**: NFS mount uses timeout options to prevent indefinite hangs
+- [x] **SCRIPT-04**: start-vllm.sh runs vLLM container detached (podman run -d) with --replace for name collisions
 
 ### Provisioning
 
@@ -71,10 +71,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCRIPT-01 | Phase 10 | Pending |
-| SCRIPT-02 | Phase 10 | Pending |
-| SCRIPT-03 | Phase 10 | Pending |
-| SCRIPT-04 | Phase 10 | Pending |
+| SCRIPT-01 | Phase 10 | Complete |
+| SCRIPT-02 | Phase 10 | Complete |
+| SCRIPT-03 | Phase 10 | Complete |
+| SCRIPT-04 | Phase 10 | Complete |
 | PROV-01 | Phase 11 | Pending |
 | PROV-02 | Phase 11 | Pending |
 | PROV-03 | Phase 11 | Pending |

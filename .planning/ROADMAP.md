@@ -109,7 +109,7 @@ Plans:
 | 7. Request Metrics and Admin API | v1.1 | 2/2 | Complete | 2026-06-29 |
 | 8. Dashboard and Node Fleet | v1.1 | 2/2 | Complete | 2026-07-01 |
 | 9. Live Metrics and Auto-Refresh | v1.1 | 1/1 | Complete | 2026-07-01 |
-| 10. Script Hardening | v1.2 | 2/2 | Complete   | 2026-07-01 |
+| 10. Script Hardening | v1.2 | 2/2 | Complete    | 2026-07-01 |
 | 11. SSH Provisioning | v1.2 | 0/0 | Not started | - |
 | 12. Provisioning Robustness | v1.2 | 0/0 | Not started | - |
 | 13. Teardown and Admin API | v1.2 | 0/0 | Not started | - |
