@@ -5,6 +5,8 @@ nested env var resolution works correctly through the root Settings class.
 Only the root Settings class inherits from BaseSettings.
 """
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -90,6 +92,28 @@ class DashboardSettings(BaseModel):
     poll_interval: int = Field(default=10, ge=1)
 
 
+class SSHSettings(BaseModel):
+    """SSH connection configuration (D-16).
+
+    All hosts use the same key and username per D-01, D-02.
+    """
+
+    key_path: Path = Path("~/.ssh/id_rsa")  # D-01
+    username: str = "root"  # D-02
+    connect_timeout: int = 10  # D-04
+
+
+class ProvisioningSettings(BaseModel):
+    """Node provisioning configuration (D-17).
+
+    Controls health polling after vLLM container startup.
+    """
+
+    health_poll_timeout: int = 600  # D-09: 10 minutes for large model loading
+    health_poll_interval: int = 10
+    vllm_port: int = 8000
+
+
 class Settings(BaseSettings):
     """Root application settings.
 
@@ -113,3 +137,5 @@ class Settings(BaseSettings):
     resilience: ResilienceSettings = ResilienceSettings()
     logging: LoggingSettings = LoggingSettings()
     dashboard: DashboardSettings = DashboardSettings()
+    ssh: SSHSettings = SSHSettings()
+    provisioning: ProvisioningSettings = ProvisioningSettings()

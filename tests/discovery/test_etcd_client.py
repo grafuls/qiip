@@ -153,6 +153,28 @@ class TestEtcdClientSchemelessEndpointRejected:
             EtcdClient(settings)
 
 
+class TestEtcdClientPut:
+    """EtcdClient.put() delegates to underlying etcd3gw client."""
+
+    @patch("inference_proxy.discovery.etcd_client.Etcd3Client")
+    def test_delegates_put(self, mock_etcd3_cls: MagicMock) -> None:
+        mock_instance = MagicMock()
+        mock_instance.put.return_value = True
+        mock_etcd3_cls.return_value = mock_instance
+
+        settings = EtcdSettings(
+            endpoints=["http://localhost:2379"],
+            node_prefix="/nodes/",
+        )
+        client = EtcdClient(settings)
+        result = client.put("/nodes/host-1", b'{"endpoint": "http://host-1:8000"}')
+
+        mock_instance.put.assert_called_once_with(
+            "/nodes/host-1", b'{"endpoint": "http://host-1:8000"}'
+        )
+        assert result is True
+
+
 class TestEtcdClientMultipleEndpointsWarning:
     """EtcdClient.__init__ logs warning when multiple endpoints configured."""
 
