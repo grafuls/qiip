@@ -71,31 +71,31 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| SCRIPT-01 | TBD | Pending |
-| SCRIPT-02 | TBD | Pending |
-| SCRIPT-03 | TBD | Pending |
-| SCRIPT-04 | TBD | Pending |
-| PROV-01 | TBD | Pending |
-| PROV-02 | TBD | Pending |
-| PROV-03 | TBD | Pending |
-| PROV-04 | TBD | Pending |
-| PROV-05 | TBD | Pending |
-| PROV-06 | TBD | Pending |
-| PROV-07 | TBD | Pending |
-| TEAR-01 | TBD | Pending |
-| TEAR-02 | TBD | Pending |
-| API-01 | TBD | Pending |
-| API-02 | TBD | Pending |
-| API-03 | TBD | Pending |
-| DASH-01 | TBD | Pending |
-| DASH-02 | TBD | Pending |
-| DASH-03 | TBD | Pending |
+| SCRIPT-01 | Phase 10 | Pending |
+| SCRIPT-02 | Phase 10 | Pending |
+| SCRIPT-03 | Phase 10 | Pending |
+| SCRIPT-04 | Phase 10 | Pending |
+| PROV-01 | Phase 11 | Pending |
+| PROV-02 | Phase 11 | Pending |
+| PROV-03 | Phase 11 | Pending |
+| PROV-04 | Phase 11 | Pending |
+| PROV-05 | Phase 12 | Pending |
+| PROV-06 | Phase 12 | Pending |
+| PROV-07 | Phase 12 | Pending |
+| TEAR-01 | Phase 13 | Pending |
+| TEAR-02 | Phase 13 | Pending |
+| API-01 | Phase 13 | Pending |
+| API-02 | Phase 13 | Pending |
+| API-03 | Phase 13 | Pending |
+| DASH-01 | Phase 14 | Pending |
+| DASH-02 | Phase 14 | Pending |
+| DASH-03 | Phase 14 | Pending |
 
 **Coverage:**
 - v1.2 requirements: 19 total
-- Mapped to phases: 0
-- Unmapped: 19 ⚠️
+- Mapped to phases: 19
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-01*
-*Last updated: 2026-07-01 after initial definition*
+*Last updated: 2026-07-01 after roadmap creation*

@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Node Setup
 status: planning
-last_updated: "2026-07-01T14:39:19.191Z"
+last_updated: "2026-07-01"
 last_activity: 2026-07-01
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -20,14 +20,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-01)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Planning next milestone
+**Current focus:** Phase 10 - Script Hardening
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-07-01 — Milestone v1.2 started
+Phase: 10 of 14 (Script Hardening)
+Plan: — (not yet planned)
+Status: Ready to plan
+Last activity: 2026-07-01 — Roadmap created for v1.2 Node Setup (5 phases, 19 requirements)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -65,9 +67,9 @@ Last activity: 2026-07-01 — Milestone v1.2 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Jinja2 + vanilla JS for Web UI (no build step, stays in Python ecosystem)
-- Polling for auto-refresh (simple JS interval, sufficient for ops dashboard)
-- In-memory counters only (no persistent metrics storage in v1.1)
+- asyncssh for SSH operations (native asyncio, no paramiko thread-wrapping)
+- Embed provisioning in gateway process (no Celery/task queue)
+- Write to etcd, let watcher propagate (never mutate NodeRegistry directly from provisioner)
 
 ### Pending Todos
 
@@ -88,10 +90,6 @@ Items acknowledged and deferred at milestone v1.0 close on 2026-06-25:
 
 ## Session Continuity
 
-Last session: 2026-07-01T09:45:23.772Z
-Stopped at: Phase 9 context gathered
-Resume file: .planning/phases/09-live-metrics-and-auto-refresh/09-CONTEXT.md
-
-## Operator Next Steps
-
-- Start the next milestone with /gsd-new-milestone
+Last session: 2026-07-01
+Stopped at: Roadmap created for v1.2 milestone
+Resume file: None
