@@ -249,3 +249,56 @@ class TestProbeExceptionDoesNotCrash:
         assert result_node.status == NodeStatus.HEALTHY
         # But the mock was called twice (2 iterations)
         assert mock_client.get.call_count == 2
+
+
+class TestProvisioningNodeSkipped:
+    """PROVISIONING nodes are not probed by the health checker (D-09)."""
+
+    def test_provisioning_node_not_probed(self) -> None:
+        """Only the HEALTHY node is probed; PROVISIONING node is skipped."""
+        registry = NodeRegistry()
+        provisioning_node = _make_node(
+            node_id="prov-1",
+            endpoint="10.0.1.200:8000",
+            status=NodeStatus.PROVISIONING,
+        )
+        healthy_node = _make_node(
+            node_id="healthy-1",
+            endpoint="10.0.1.100:8000",
+            status=NodeStatus.HEALTHY,
+        )
+        registry.add(provisioning_node)
+        registry.add(healthy_node)
+        cb_registry = CircuitBreakerRegistry()
+        stop_event = threading.Event()
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+
+        mock_client = MagicMock(spec=httpx.Client)
+        mock_client.get.return_value = mock_response
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+
+        iteration_count = 0
+
+        def stop_after_one_iteration(timeout: float | None = None) -> bool:
+            nonlocal iteration_count
+            iteration_count += 1
+            if iteration_count >= 1:
+                stop_event.set()
+                return True
+            return False
+
+        with patch("inference_proxy.resilience.health_checker.httpx.Client", return_value=mock_client):
+            stop_event.wait = stop_after_one_iteration  # type: ignore[assignment]
+            run_health_checker(registry, cb_registry, stop_event, interval=0.01)
+
+        # Only the healthy node was probed
+        assert mock_client.get.call_count == 1
+        mock_client.get.assert_called_once_with("http://10.0.1.100:8000/health")
+
+        # Provisioning node status unchanged
+        result_prov = registry.get("prov-1")
+        assert result_prov is not None
+        assert result_prov.status == NodeStatus.PROVISIONING
