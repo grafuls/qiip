@@ -16,10 +16,10 @@ Requirements for milestone v1.2 Node Setup. Each maps to roadmap phases.
 
 ### Provisioning
 
-- [ ] **PROV-01**: Gateway can SSH into a host via asyncssh using pre-configured keys
-- [ ] **PROV-02**: Gateway runs setup.sh remotely (NVIDIA drivers, NFS, container toolkit)
-- [ ] **PROV-03**: Gateway builds and starts vLLM container on remote host with GPU auto-detection
-- [ ] **PROV-04**: Gateway polls remote /health endpoint until vLLM is ready, then registers in etcd
+- [x] **PROV-01**: Gateway can SSH into a host via asyncssh using pre-configured keys
+- [x] **PROV-02**: Gateway runs setup.sh remotely (NVIDIA drivers, NFS, container toolkit)
+- [x] **PROV-03**: Gateway builds and starts vLLM container on remote host with GPU auto-detection
+- [x] **PROV-04**: Gateway polls remote /health endpoint until vLLM is ready, then registers in etcd
 - [ ] **PROV-05**: Pre-flight validation checks SSH reachable, GPU present, and disk space before setup
 - [ ] **PROV-06**: Setup tracks per-step progress via a state machine (PENDING → steps → COMPLETE/FAILED)
 - [ ] **PROV-07**: PROVISIONING node status prevents health checker from marking node unhealthy during setup
@@ -75,10 +75,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SCRIPT-02 | Phase 10 | Complete |
 | SCRIPT-03 | Phase 10 | Complete |
 | SCRIPT-04 | Phase 10 | Complete |
-| PROV-01 | Phase 11 | Pending |
-| PROV-02 | Phase 11 | Pending |
-| PROV-03 | Phase 11 | Pending |
-| PROV-04 | Phase 11 | Pending |
+| PROV-01 | Phase 11 | Complete |
+| PROV-02 | Phase 11 | Complete |
+| PROV-03 | Phase 11 | Complete |
+| PROV-04 | Phase 11 | Complete |
 | PROV-05 | Phase 12 | Pending |
 | PROV-06 | Phase 12 | Pending |
 | PROV-07 | Phase 12 | Pending |
