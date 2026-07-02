@@ -70,7 +70,6 @@ class NodeProvisioner:
 
     async def _run_setup(self, hostname: str) -> None:
         """Run setup.sh and parse step markers from stdout (D-05, D-06)."""
-        last_step: str | None = None
         async for stream, line in self._ssh_client.run_streaming(
             hostname, "bash auto-vllm-container/setup.sh"
         ):
@@ -78,7 +77,6 @@ class NodeProvisioner:
                 match = STEP_PATTERN.search(line)
                 if match:
                     step_name, status = match.group(1), match.group(2)
-                    last_step = step_name
                     if status == "FAIL":
                         logger.error("step_failed", step=step_name, hostname=hostname)
                     else:
@@ -109,7 +107,7 @@ class NodeProvisioner:
     async def _poll_health(self, hostname: str) -> None:
         """Poll /health endpoint until 200 OK or timeout (D-10, D-09)."""
         url = f"http://{hostname}:{self._settings.vllm_port}/health"
-        deadline = asyncio.get_event_loop().time() + self._settings.health_poll_timeout
+        deadline = asyncio.get_running_loop().time() + self._settings.health_poll_timeout
 
         async with httpx.AsyncClient() as client:
             while True:
@@ -119,10 +117,10 @@ class NodeProvisioner:
                         logger.info("health_poll_success", hostname=hostname)
                         return
                     logger.debug("health_poll_non_200", status=response.status_code, hostname=hostname)
-                except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                except httpx.HTTPError as exc:
                     logger.debug("health_poll_retry", hostname=hostname, error=str(exc))
 
-                if asyncio.get_event_loop().time() >= deadline:
+                if asyncio.get_running_loop().time() >= deadline:
                     raise ProvisioningError(
                         f"health poll timed out after {self._settings.health_poll_timeout}s for {hostname}"
                     )

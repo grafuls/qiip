@@ -103,7 +103,7 @@ class TestDefaultSSHSettings:
         from pathlib import Path
 
         settings = Settings(_env_file=None)
-        assert settings.ssh.key_path == Path("~/.ssh/id_rsa")
+        assert settings.ssh.key_path == Path("~/.ssh/id_rsa").expanduser()
 
     def test_default_username(self) -> None:
         settings = Settings(_env_file=None)

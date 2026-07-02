@@ -98,7 +98,7 @@ class SSHSettings(BaseModel):
     All hosts use the same key and username per D-01, D-02.
     """
 
-    key_path: Path = Path("~/.ssh/id_rsa")  # D-01
+    key_path: Path = Path("~/.ssh/id_rsa").expanduser()  # D-01
     username: str = "root"  # D-02
     connect_timeout: int = 10  # D-04
 
