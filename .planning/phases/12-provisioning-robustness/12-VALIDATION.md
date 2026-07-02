@@ -1,9 +1,9 @@
 ---
 phase: 12
 slug: provisioning-robustness
-status: draft
-nyquist_compliant: false
-wave_0_complete: false
+status: approved
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-07-02
 ---
 
@@ -38,9 +38,10 @@ created: 2026-07-02
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 12-01-01 | 01 | 1 | PROV-05 | — | N/A | unit | `uv run pytest tests/provisioning/test_preflight.py -x -q` | ❌ W0 | ⬜ pending |
-| 12-01-02 | 01 | 1 | PROV-06 | — | N/A | unit | `uv run pytest tests/provisioning/test_state.py -x -q` | ❌ W0 | ⬜ pending |
-| 12-02-01 | 02 | 1 | PROV-07 | — | N/A | unit | `uv run pytest tests/resilience/test_health_checker.py -x -q` | ✅ | ⬜ pending |
+| 12-01-01 | 01 | 1 | PROV-06, PROV-07 | — | N/A | unit | `uv run pytest tests/provisioning/test_state.py tests/models/test_node.py -x -q` | ✅ | ⬜ pending |
+| 12-01-02 | 01 | 1 | PROV-07 | — | N/A | unit | `uv run pytest tests/resilience/test_health_checker.py -x -q` | ✅ | ⬜ pending |
+| 12-02-01 | 02 | 2 | PROV-05 | — | N/A | unit | `uv run pytest tests/provisioning/test_provisioner.py::TestPreflight -x -q` | ✅ | ⬜ pending |
+| 12-02-02 | 02 | 2 | PROV-06, PROV-07 | — | N/A | unit | `uv run pytest tests/provisioning/test_provisioner.py -x -q` | ✅ | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -48,10 +49,7 @@ created: 2026-07-02
 
 ## Wave 0 Requirements
 
-- [ ] `tests/provisioning/test_preflight.py` — stubs for PROV-05 pre-flight checks
-- [ ] `tests/provisioning/test_state.py` — stubs for PROV-06 provisioning state machine
-
-*Existing test infrastructure (pytest, conftest.py) covers framework needs.*
+*Existing infrastructure covers all phase requirements. Plan 01 creates `tests/provisioning/test_state.py` as part of Task 1. Preflight tests are added to existing `tests/provisioning/test_provisioner.py` in Plan 02 Task 1. No separate Wave 0 needed.*
 
 ---
 
@@ -67,11 +65,11 @@ created: 2026-07-02
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 10s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 10s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-07-02
