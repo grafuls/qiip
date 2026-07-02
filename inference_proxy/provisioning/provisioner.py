@@ -35,6 +35,19 @@ class ProvisioningError(Exception):
     """Raised when any stage of provisioning fails."""
 
 
+class PreflightError(Exception):
+    """Raised when pre-flight validation fails (D-01 through D-04).
+
+    Collects all failures before raising so operators see every problem
+    at once (D-03).
+    """
+
+    def __init__(self, hostname: str, failures: list[str]) -> None:
+        self.hostname = hostname
+        self.failures = failures
+        super().__init__(f"Pre-flight failed on {hostname}: {'; '.join(failures)}")
+
+
 class NodeProvisioner:
     """Orchestrates full provisioning of a vLLM node on a remote host.
 
@@ -51,6 +64,68 @@ class NodeProvisioner:
         self._ssh_client = ssh_client
         self._etcd_client = etcd_client
         self._settings = settings
+
+    async def _ssh_run_command(self, hostname: str, command: str) -> str:
+        """Run a command via SSH and return collected stdout as a string."""
+        lines: list[str] = []
+        async for stream, line in self._ssh_client.run_streaming(hostname, command):
+            if stream == "stdout":
+                lines.append(line)
+        return "\n".join(lines)
+
+    async def preflight(self, hostname: str) -> None:
+        """Pre-flight validation: TCP probe + SSH diagnostics (D-01, D-04).
+
+        Stage 1: TCP probe to port 22.  If unreachable, raises immediately
+        (cannot proceed to SSH diagnostics).
+
+        Stage 2: GPU and disk checks via SSH.  All failures collected
+        before raising a single PreflightError (D-03).
+        """
+        failures: list[str] = []
+
+        # Stage 1: TCP probe (D-01)
+        try:
+            # ponytail: hardcoded 10s timeout matches SSHSettings default
+            _reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(hostname, 22), timeout=10
+            )
+            writer.close()
+            await writer.wait_closed()
+        except (OSError, TimeoutError, asyncio.TimeoutError) as exc:
+            failures.append(f"SSH port 22 unreachable: {exc}")
+            raise PreflightError(hostname, failures) from exc
+
+        # Stage 2: SSH diagnostics (D-01)
+        # GPU check
+        try:
+            gpu_output = await self._ssh_run_command(
+                hostname, "nvidia-smi --query-gpu=name --format=csv,noheader"
+            )
+            gpu_lines = [ln for ln in gpu_output.strip().splitlines() if ln.strip()]
+            if len(gpu_lines) == 0:
+                failures.append("No GPUs detected")
+        except (SSHConnectionError, RemoteCommandError) as exc:
+            failures.append(f"SSH diagnostic failed: {exc}")
+
+        # Disk check
+        try:
+            disk_output = await self._ssh_run_command(
+                hostname, "df --output=avail / | tail -1"
+            )
+            kb = int(disk_output.strip())
+            gb = kb / 1024 / 1024
+            if gb < self._settings.min_disk_gb:
+                failures.append(
+                    f"Insufficient disk: {gb:.1f}GB available, {self._settings.min_disk_gb}GB required"
+                )
+        except (SSHConnectionError, RemoteCommandError) as exc:
+            failures.append(f"SSH diagnostic failed: {exc}")
+        except (ValueError, IndexError) as exc:
+            failures.append(f"SSH diagnostic failed: could not parse disk output: {exc}")
+
+        if failures:
+            raise PreflightError(hostname, failures)
 
     async def provision(self, hostname: str) -> None:
         """Run full provisioning sequence on *hostname*.
