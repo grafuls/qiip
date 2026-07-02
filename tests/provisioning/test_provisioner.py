@@ -7,15 +7,20 @@ provisioning sequence: setup.sh -> start-vllm.sh -> health poll -> register.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import httpx
 import pytest
 
 from inference_proxy.config.settings import ProvisioningSettings
 from inference_proxy.models.node import NodeStatus
-from inference_proxy.provisioning.provisioner import NodeProvisioner, ProvisioningError
+from inference_proxy.provisioning.provisioner import (
+    NodeProvisioner,
+    PreflightError,
+    ProvisioningError,
+)
 from inference_proxy.provisioning.ssh_client import (
     RemoteCommandError,
     SSHConnectionError,
@@ -77,10 +82,11 @@ class TestProvisionSequence:
 
         provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
-        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
-            mock_to_thread.return_value = True
-            await provisioner.provision("host1")
-            call_order.append("register")
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                await provisioner.provision("host1")
+                call_order.append("register")
 
         assert "setup" in call_order
         assert "start_vllm" in call_order
@@ -220,20 +226,29 @@ class TestSetupFailure:
     @pytest.mark.asyncio
     async def test_remote_command_error_wraps(self) -> None:
         ssh = MagicMock()
+        etcd = MagicMock()
+        etcd.prefix = "/nodes/"
+        etcd.put = MagicMock(return_value=True)
 
         async def mock_streaming(host: str, command: str):
             yield ("stdout", "[STEP:nvidia_repo:START]")
             raise RemoteCommandError("host1", "bash setup.sh", 1)
 
         ssh.run_streaming = mock_streaming
-        provisioner = _make_provisioner(ssh_client=ssh)
+        provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
-        with pytest.raises(ProvisioningError):
-            await provisioner.provision("host1")
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                with pytest.raises(ProvisioningError):
+                    await provisioner.provision("host1")
 
     @pytest.mark.asyncio
     async def test_ssh_connection_error_wraps(self) -> None:
         ssh = MagicMock()
+        etcd = MagicMock()
+        etcd.prefix = "/nodes/"
+        etcd.put = MagicMock(return_value=True)
 
         async def mock_streaming(host: str, command: str):
             raise SSHConnectionError("host1", "connection refused")
@@ -241,7 +256,316 @@ class TestSetupFailure:
             yield  # pragma: no cover
 
         ssh.run_streaming = mock_streaming
-        provisioner = _make_provisioner(ssh_client=ssh)
+        provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
-        with pytest.raises(ProvisioningError):
-            await provisioner.provision("host1")
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                with pytest.raises(ProvisioningError):
+                    await provisioner.provision("host1")
+
+
+class TestPreflight:
+    """D-01 through D-04: Pre-flight validation with collected errors."""
+
+    @pytest.mark.asyncio
+    async def test_tcp_unreachable(self) -> None:
+        """TCP probe failure raises PreflightError immediately."""
+        provisioner = _make_provisioner()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", side_effect=OSError("Connection refused")):
+            with pytest.raises(PreflightError, match="SSH port 22 unreachable") as exc_info:
+                await provisioner.preflight("host1")
+            assert exc_info.value.hostname == "host1"
+            assert len(exc_info.value.failures) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_gpu(self) -> None:
+        """No GPUs detected raises PreflightError."""
+        provisioner = _make_provisioner()
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                mock_cmd.side_effect = lambda h, c: "" if "nvidia-smi" in c else "20971520"
+                with pytest.raises(PreflightError, match="No GPUs detected"):
+                    await provisioner.preflight("host1")
+
+    @pytest.mark.asyncio
+    async def test_insufficient_disk(self) -> None:
+        """Insufficient disk space raises PreflightError."""
+        settings = ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0, min_disk_gb=20)
+        provisioner = _make_provisioner(settings=settings)
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                # nvidia-smi returns one GPU, df returns 5GB in KB (5*1024*1024)
+                mock_cmd.side_effect = lambda h, c: "Tesla V100" if "nvidia-smi" in c else "5242880"
+                with pytest.raises(PreflightError, match="Insufficient disk") as exc_info:
+                    await provisioner.preflight("host1")
+                assert "5.0" in str(exc_info.value) or "5" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_collects_all_failures(self) -> None:
+        """D-03: All failures collected before raising single PreflightError."""
+        settings = ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0, min_disk_gb=20)
+        provisioner = _make_provisioner(settings=settings)
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                # Both GPU and disk fail
+                mock_cmd.side_effect = lambda h, c: "" if "nvidia-smi" in c else "5242880"
+                with pytest.raises(PreflightError) as exc_info:
+                    await provisioner.preflight("host1")
+                assert len(exc_info.value.failures) == 2
+
+    @pytest.mark.asyncio
+    async def test_standalone_preflight(self) -> None:
+        """D-04: preflight() works independently when all checks pass."""
+        provisioner = _make_provisioner()
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                # 1 GPU, 50GB disk in KB
+                mock_cmd.side_effect = lambda h, c: "Tesla V100" if "nvidia-smi" in c else "52428800"
+                await provisioner.preflight("host1")  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_ssh_diagnostic_failure(self) -> None:
+        """SSH diagnostic errors are collected as failures."""
+        provisioner = _make_provisioner()
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                mock_cmd.side_effect = SSHConnectionError("host1", "connection reset")
+                with pytest.raises(PreflightError, match="SSH diagnostic failed") as exc_info:
+                    await provisioner.preflight("host1")
+                assert len(exc_info.value.failures) >= 1
+
+
+def _make_full_provisioner(etcd: MagicMock) -> tuple[NodeProvisioner, MagicMock]:
+    """Build a provisioner with mocks suitable for full provision() tests."""
+    ssh = MagicMock()
+
+    async def mock_streaming(host: str, command: str):
+        if "setup.sh" in command:
+            for item in [("stdout", "[STEP:nvidia_repo:START]"), ("stdout", "[STEP:nvidia_repo:OK]")]:
+                yield item
+        elif "start-vllm.sh" in command:
+            for item in [("stdout", "# Model:              Qwen/Qwen2.5-72B-Instruct")]:
+                yield item
+
+    ssh.run_streaming = mock_streaming
+    etcd.prefix = "/nodes/"
+    etcd.put = MagicMock(return_value=True)
+
+    settings = ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0)
+    provisioner = NodeProvisioner(ssh_client=ssh, etcd_client=etcd, settings=settings)
+    return provisioner, ssh
+
+
+class TestStateTracking:
+    """D-05 through D-11: State machine tracking and PROVISIONING registration."""
+
+    @pytest.mark.asyncio
+    @patch("inference_proxy.provisioning.provisioner.httpx.AsyncClient")
+    async def test_full_success_transitions(self, mock_httpx_cls: MagicMock) -> None:
+        """State writes go PENDING -> PREFLIGHT -> steps -> ... -> COMPLETE."""
+        etcd = MagicMock()
+        provisioner, _ = _make_full_provisioner(etcd)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_httpx_cls.return_value = mock_client
+
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                await provisioner.provision("host1")
+
+        # Collect all etcd put calls -- both via to_thread and direct mock
+        put_calls = mock_to_thread.call_args_list
+        state_keys = []
+        node_keys = []
+        for c in put_calls:
+            args = c[0]  # positional args: (etcd.put, key, value)
+            if len(args) >= 3:
+                key = args[1]
+                if "/provisioning/" in key:
+                    value = json.loads(args[2])
+                    state_keys.append(value["current_step"])
+                elif "/nodes/" in key:
+                    node_keys.append(key)
+
+        assert "pending" in state_keys
+        assert "complete" in state_keys
+        assert len(node_keys) >= 1  # PROVISIONING registration
+
+    @pytest.mark.asyncio
+    async def test_failed_state(self) -> None:
+        """On failure, last state write has current_step=failed with details."""
+        etcd = MagicMock()
+        ssh = MagicMock()
+
+        async def mock_streaming(host: str, command: str):
+            if "setup.sh" in command:
+                raise RemoteCommandError("host1", "bash setup.sh", 1)
+                yield  # pragma: no cover
+
+        ssh.run_streaming = mock_streaming
+        etcd.prefix = "/nodes/"
+        etcd.put = MagicMock(return_value=True)
+
+        settings = ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0)
+        provisioner = NodeProvisioner(ssh_client=ssh, etcd_client=etcd, settings=settings)
+
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                with pytest.raises(ProvisioningError):
+                    await provisioner.provision("host1")
+
+        # Find the last /provisioning/ state write
+        state_writes = []
+        for c in mock_to_thread.call_args_list:
+            args = c[0]
+            if len(args) >= 3 and "/provisioning/" in str(args[1]):
+                state_writes.append(json.loads(args[2]))
+
+        assert len(state_writes) > 0
+        last_state = state_writes[-1]
+        assert last_state["current_step"] == "failed"
+        assert last_state["failed_step"] is not None
+        assert last_state["error"] is not None
+
+    @pytest.mark.asyncio
+    async def test_etcd_prefix(self) -> None:
+        """State writes use /provisioning/{hostname}, not /nodes/ prefix (D-05)."""
+        etcd = MagicMock()
+        provisioner, _ = _make_full_provisioner(etcd)
+
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                # provision() will fail at _poll_health without httpx mock, but
+                # we only need to check early state writes
+                with patch("inference_proxy.provisioning.provisioner.httpx.AsyncClient") as mock_httpx:
+                    mock_resp = MagicMock()
+                    mock_resp.status_code = 200
+                    mock_cl = AsyncMock()
+                    mock_cl.get = AsyncMock(return_value=mock_resp)
+                    mock_cl.__aenter__ = AsyncMock(return_value=mock_cl)
+                    mock_cl.__aexit__ = AsyncMock(return_value=False)
+                    mock_httpx.return_value = mock_cl
+                    await provisioner.provision("host1")
+
+        # All state writes should use /provisioning/ prefix
+        for c in mock_to_thread.call_args_list:
+            args = c[0]
+            if len(args) >= 3:
+                key = str(args[1])
+                if "provisioning" in key.lower() and "nodes" not in key:
+                    assert key.startswith("/provisioning/")
+
+    @pytest.mark.asyncio
+    @patch("inference_proxy.provisioning.provisioner.httpx.AsyncClient")
+    async def test_state_write_failure_continues(self, mock_httpx_cls: MagicMock) -> None:
+        """State write exceptions are swallowed -- provisioning continues (Pitfall 3)."""
+        etcd = MagicMock()
+        provisioner, _ = _make_full_provisioner(etcd)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_httpx_cls.return_value = mock_client
+
+        call_count = 0
+
+        async def flaky_to_thread(fn, *args):
+            nonlocal call_count
+            call_count += 1
+            key = args[0] if args else ""
+            # Fail all /provisioning/ writes, allow /nodes/ writes
+            if isinstance(key, str) and "/provisioning/" in key:
+                raise ConnectionError("etcd down")
+            return True
+
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=flaky_to_thread):
+                # Should complete despite state write failures
+                await provisioner.provision("host1")
+
+    @pytest.mark.asyncio
+    @patch("inference_proxy.provisioning.provisioner.httpx.AsyncClient")
+    async def test_registers_provisioning_before_setup(self, mock_httpx_cls: MagicMock) -> None:
+        """D-09: First /nodes/ write creates node with status=provisioning."""
+        etcd = MagicMock()
+        provisioner, _ = _make_full_provisioner(etcd)
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_httpx_cls.return_value = mock_client
+
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                with patch("inference_proxy.provisioning.provisioner.node_to_etcd") as mock_ser:
+                    mock_ser.return_value = ("/nodes/host1", b'{"status":"provisioning"}')
+                    await provisioner.provision("host1")
+
+                    # Find the first call to node_to_etcd
+                    first_call = mock_ser.call_args_list[0]
+                    node = first_call[0][0]
+                    assert node.status == NodeStatus.PROVISIONING
+
+    @pytest.mark.asyncio
+    async def test_preflight_called_before_setup(self) -> None:
+        """Preflight failure prevents _run_setup from running."""
+        etcd = MagicMock()
+        etcd.prefix = "/nodes/"
+        etcd.put = MagicMock(return_value=True)
+        provisioner, ssh = _make_full_provisioner(etcd)
+
+        setup_called = False
+        original_run_setup = provisioner._run_setup
+
+        async def tracking_setup(hostname: str) -> None:
+            nonlocal setup_called
+            setup_called = True
+            await original_run_setup(hostname)
+
+        provisioner._run_setup = tracking_setup
+
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock) as mock_pf:
+            mock_pf.side_effect = PreflightError("host1", ["no gpus"])
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                with pytest.raises(PreflightError):
+                    await provisioner.provision("host1")
+
+        assert not setup_called
