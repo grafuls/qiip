@@ -94,7 +94,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 12-01-PLAN.md — Foundation types (ProvisioningStep, ProvisioningState, NodeStatus.PROVISIONING) and health checker guard
+- [x] 12-01-PLAN.md — Foundation types (ProvisioningStep, ProvisioningState, NodeStatus.PROVISIONING) and health checker guard
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -152,6 +152,6 @@ Plans:
 | 9. Live Metrics and Auto-Refresh | v1.1 | 1/1 | Complete | 2026-07-01 |
 | 10. Script Hardening | v1.2 | 2/2 | Complete    | 2026-07-01 |
 | 11. SSH Provisioning | v1.2 | 2/2 | Complete    | 2026-07-02 |
-| 12. Provisioning Robustness | v1.2 | 0/2 | Planning | - |
+| 12. Provisioning Robustness | v1.2 | 1/2 | In Progress|  |
 | 13. Teardown and Admin API | v1.2 | 0/0 | Not started | - |
 | 14. Dashboard Operations | v1.2 | 0/0 | Not started | - |
