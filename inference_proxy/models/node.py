@@ -23,6 +23,7 @@ class NodeStatus(StrEnum):
     HEALTHY = "healthy"
     UNHEALTHY = "unhealthy"
     DRAINING = "draining"
+    PROVISIONING = "provisioning"
     UNKNOWN = "unknown"
 
 

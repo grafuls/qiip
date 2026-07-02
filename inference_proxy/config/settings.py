@@ -112,6 +112,7 @@ class ProvisioningSettings(BaseModel):
     health_poll_timeout: int = 600  # D-09: 10 minutes for large model loading
     health_poll_interval: int = 10
     vllm_port: int = 8000
+    min_disk_gb: int = 20  # D-02: minimum free disk for provisioning
 
 
 class Settings(BaseSettings):
