@@ -15,7 +15,11 @@ import pytest
 
 from inference_proxy.config.settings import ProvisioningSettings
 from inference_proxy.models.node import NodeStatus
-from inference_proxy.provisioning.provisioner import NodeProvisioner, ProvisioningError
+from inference_proxy.provisioning.provisioner import (
+    NodeProvisioner,
+    PreflightError,
+    ProvisioningError,
+)
 from inference_proxy.provisioning.ssh_client import (
     RemoteCommandError,
     SSHConnectionError,
@@ -245,3 +249,95 @@ class TestSetupFailure:
 
         with pytest.raises(ProvisioningError):
             await provisioner.provision("host1")
+
+
+class TestPreflight:
+    """D-01 through D-04: Pre-flight validation with collected errors."""
+
+    @pytest.mark.asyncio
+    async def test_tcp_unreachable(self) -> None:
+        """TCP probe failure raises PreflightError immediately."""
+        provisioner = _make_provisioner()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", side_effect=OSError("Connection refused")):
+            with pytest.raises(PreflightError, match="SSH port 22 unreachable") as exc_info:
+                await provisioner.preflight("host1")
+            assert exc_info.value.hostname == "host1"
+            assert len(exc_info.value.failures) == 1
+
+    @pytest.mark.asyncio
+    async def test_no_gpu(self) -> None:
+        """No GPUs detected raises PreflightError."""
+        provisioner = _make_provisioner()
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                mock_cmd.side_effect = lambda h, c: "" if "nvidia-smi" in c else "20971520"
+                with pytest.raises(PreflightError, match="No GPUs detected"):
+                    await provisioner.preflight("host1")
+
+    @pytest.mark.asyncio
+    async def test_insufficient_disk(self) -> None:
+        """Insufficient disk space raises PreflightError."""
+        settings = ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0, min_disk_gb=20)
+        provisioner = _make_provisioner(settings=settings)
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                # nvidia-smi returns one GPU, df returns 5GB in KB (5*1024*1024)
+                mock_cmd.side_effect = lambda h, c: "Tesla V100" if "nvidia-smi" in c else "5242880"
+                with pytest.raises(PreflightError, match="Insufficient disk") as exc_info:
+                    await provisioner.preflight("host1")
+                assert "5.0" in str(exc_info.value) or "5" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_collects_all_failures(self) -> None:
+        """D-03: All failures collected before raising single PreflightError."""
+        settings = ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0, min_disk_gb=20)
+        provisioner = _make_provisioner(settings=settings)
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                # Both GPU and disk fail
+                mock_cmd.side_effect = lambda h, c: "" if "nvidia-smi" in c else "5242880"
+                with pytest.raises(PreflightError) as exc_info:
+                    await provisioner.preflight("host1")
+                assert len(exc_info.value.failures) == 2
+
+    @pytest.mark.asyncio
+    async def test_standalone_preflight(self) -> None:
+        """D-04: preflight() works independently when all checks pass."""
+        provisioner = _make_provisioner()
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                # 1 GPU, 50GB disk in KB
+                mock_cmd.side_effect = lambda h, c: "Tesla V100" if "nvidia-smi" in c else "52428800"
+                await provisioner.preflight("host1")  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_ssh_diagnostic_failure(self) -> None:
+        """SSH diagnostic errors are collected as failures."""
+        provisioner = _make_provisioner()
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
+            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
+                mock_cmd.side_effect = SSHConnectionError("host1", "connection reset")
+                with pytest.raises(PreflightError, match="SSH diagnostic failed") as exc_info:
+                    await provisioner.preflight("host1")
+                assert len(exc_info.value.failures) >= 1
