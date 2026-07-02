@@ -92,9 +92,13 @@ Plans:
 
 **Plans**: 2 plans
 Plans:
+**Wave 1**
 
-- [x] 11-01-PLAN.md — SSHClient wrapper, settings, EtcdClient.put() with tests
-- [x] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
+- [ ] 12-01-PLAN.md — Foundation types (ProvisioningStep, ProvisioningState, NodeStatus.PROVISIONING) and health checker guard
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 12-02-PLAN.md — Pre-flight validation, state machine tracking, and PROVISIONING registration in provisioner
 
 ### Phase 13: Teardown and Admin API
 
@@ -111,8 +115,8 @@ Plans:
 **Plans**: 2 plans
 Plans:
 
-- [x] 11-01-PLAN.md — SSHClient wrapper, settings, EtcdClient.put() with tests
-- [ ] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
+- [ ] 13-01-PLAN.md — To be planned
+- [ ] 13-02-PLAN.md — To be planned
 
 ### Phase 14: Dashboard Operations
 
@@ -128,8 +132,8 @@ Plans:
 **Plans**: 2 plans
 Plans:
 
-- [ ] 11-01-PLAN.md — SSHClient wrapper, settings, EtcdClient.put() with tests
-- [ ] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
+- [ ] 14-01-PLAN.md — To be planned
+- [ ] 14-02-PLAN.md — To be planned
 
 **UI hint**: yes
 
@@ -148,6 +152,6 @@ Plans:
 | 9. Live Metrics and Auto-Refresh | v1.1 | 1/1 | Complete | 2026-07-01 |
 | 10. Script Hardening | v1.2 | 2/2 | Complete    | 2026-07-01 |
 | 11. SSH Provisioning | v1.2 | 2/2 | Complete    | 2026-07-02 |
-| 12. Provisioning Robustness | v1.2 | 0/0 | Not started | - |
+| 12. Provisioning Robustness | v1.2 | 0/2 | Planning | - |
 | 13. Teardown and Admin API | v1.2 | 0/0 | Not started | - |
 | 14. Dashboard Operations | v1.2 | 0/0 | Not started | - |
