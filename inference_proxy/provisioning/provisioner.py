@@ -9,6 +9,7 @@ Per D-15: Concrete class, no protocol/interface.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import datetime, timezone
 
@@ -24,6 +25,7 @@ from inference_proxy.provisioning.ssh_client import (
     SSHClient,
     SSHConnectionError,
 )
+from inference_proxy.provisioning.state import ProvisioningState, ProvisioningStep
 
 logger = structlog.get_logger()
 
@@ -64,6 +66,32 @@ class NodeProvisioner:
         self._ssh_client = ssh_client
         self._etcd_client = etcd_client
         self._settings = settings
+        self._provision_started_at: datetime | None = None
+
+    async def _update_state(
+        self,
+        hostname: str,
+        step: ProvisioningStep,
+        *,
+        failed_step: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        """Write provisioning state to etcd (D-05). Best-effort (Pitfall 3)."""
+        now = datetime.now(timezone.utc)
+        state = ProvisioningState(
+            hostname=hostname,
+            current_step=step,
+            started_at=self._provision_started_at or now,
+            updated_at=now,
+            failed_step=failed_step,
+            error=error,
+        )
+        key = f"/provisioning/{hostname}"
+        value = json.dumps(state.model_dump(mode="json")).encode("utf-8")
+        try:
+            await asyncio.to_thread(self._etcd_client.put, key, value)
+        except Exception:
+            logger.warning("state_write_failed", hostname=hostname, step=step)
 
     async def _ssh_run_command(self, hostname: str, command: str) -> str:
         """Run a command via SSH and return collected stdout as a string."""
@@ -130,17 +158,56 @@ class NodeProvisioner:
     async def provision(self, hostname: str) -> None:
         """Run full provisioning sequence on *hostname*.
 
-        Sequence: setup.sh -> start-vllm.sh -> health poll -> register.
-        On failure, raises ProvisioningError with no cleanup (D-08).
+        Sequence: preflight -> register PROVISIONING -> setup.sh ->
+        start-vllm.sh -> health poll -> register HEALTHY.
+        Tracks state in etcd at each step (D-05 through D-11).
         """
+        self._provision_started_at = datetime.now(timezone.utc)
         logger.info("provisioning_start", hostname=hostname)
+
+        await self._update_state(hostname, ProvisioningStep.PENDING)
+        await self._update_state(hostname, ProvisioningStep.PREFLIGHT)
+
+        # D-04: preflight before any setup work
+        try:
+            await self.preflight(hostname)
+        except PreflightError:
+            await self._update_state(
+                hostname, ProvisioningStep.FAILED,
+                failed_step="preflight", error="pre-flight validation failed",
+            )
+            raise
+
+        # D-09: Register node as PROVISIONING before setup
+        node = Node(
+            node_id=hostname,
+            endpoint=f"{hostname}:{self._settings.vllm_port}",
+            status=NodeStatus.PROVISIONING,
+            model="",
+            last_heartbeat=datetime.now(timezone.utc),
+        )
+        key, value = node_to_etcd(node, self._etcd_client.prefix)
+        try:
+            await asyncio.to_thread(self._etcd_client.put, key, value)
+        except Exception:
+            logger.warning("provisioning_registration_failed", hostname=hostname)
+
         try:
             await self._run_setup(hostname)
+            await self._update_state(hostname, ProvisioningStep.STARTING_VLLM)
             model = await self._run_start_vllm(hostname)
+            await self._update_state(hostname, ProvisioningStep.HEALTH_POLL)
             await self._poll_health(hostname)
+            await self._update_state(hostname, ProvisioningStep.REGISTERING)
             await self._register_node(hostname, model)
-        except (RemoteCommandError, SSHConnectionError) as exc:
+            await self._update_state(hostname, ProvisioningStep.COMPLETE)
+        except (RemoteCommandError, SSHConnectionError, ProvisioningError) as exc:
+            await self._update_state(
+                hostname, ProvisioningStep.FAILED,
+                failed_step=type(exc).__name__, error=str(exc),
+            )
             raise ProvisioningError(str(exc)) from exc
+
         logger.info("provisioning_complete", hostname=hostname)
 
     async def _run_setup(self, hostname: str) -> None:
@@ -152,6 +219,12 @@ class NodeProvisioner:
                 match = STEP_PATTERN.search(line)
                 if match:
                     step_name, status = match.group(1), match.group(2)
+                    if status == "START":
+                        # D-06: step_name matches ProvisioningStep member names
+                        try:
+                            await self._update_state(hostname, ProvisioningStep(step_name))
+                        except ValueError:
+                            pass  # Unknown step name, skip state update
                     if status == "FAIL":
                         logger.error("step_failed", step=step_name, hostname=hostname)
                     else:

@@ -82,10 +82,11 @@ class TestProvisionSequence:
 
         provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
-        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
-            mock_to_thread.return_value = True
-            await provisioner.provision("host1")
-            call_order.append("register")
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                await provisioner.provision("host1")
+                call_order.append("register")
 
         assert "setup" in call_order
         assert "start_vllm" in call_order
@@ -225,20 +226,29 @@ class TestSetupFailure:
     @pytest.mark.asyncio
     async def test_remote_command_error_wraps(self) -> None:
         ssh = MagicMock()
+        etcd = MagicMock()
+        etcd.prefix = "/nodes/"
+        etcd.put = MagicMock(return_value=True)
 
         async def mock_streaming(host: str, command: str):
             yield ("stdout", "[STEP:nvidia_repo:START]")
             raise RemoteCommandError("host1", "bash setup.sh", 1)
 
         ssh.run_streaming = mock_streaming
-        provisioner = _make_provisioner(ssh_client=ssh)
+        provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
-        with pytest.raises(ProvisioningError):
-            await provisioner.provision("host1")
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                with pytest.raises(ProvisioningError):
+                    await provisioner.provision("host1")
 
     @pytest.mark.asyncio
     async def test_ssh_connection_error_wraps(self) -> None:
         ssh = MagicMock()
+        etcd = MagicMock()
+        etcd.prefix = "/nodes/"
+        etcd.put = MagicMock(return_value=True)
 
         async def mock_streaming(host: str, command: str):
             raise SSHConnectionError("host1", "connection refused")
@@ -246,10 +256,13 @@ class TestSetupFailure:
             yield  # pragma: no cover
 
         ssh.run_streaming = mock_streaming
-        provisioner = _make_provisioner(ssh_client=ssh)
+        provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
-        with pytest.raises(ProvisioningError):
-            await provisioner.provision("host1")
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                mock_to_thread.return_value = True
+                with pytest.raises(ProvisioningError):
+                    await provisioner.provision("host1")
 
 
 class TestPreflight:
