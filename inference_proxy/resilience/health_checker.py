@@ -100,6 +100,9 @@ def _probe_all_nodes(
     """
     nodes = registry.get_all()
     for node in nodes:
+        if node.status == NodeStatus.PROVISIONING:
+            logger.debug("skipping_provisioning_node", node_id=node.node_id)
+            continue
         _probe_node(
             node_id=node.node_id,
             endpoint=node.endpoint,
