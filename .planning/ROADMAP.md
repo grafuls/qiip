@@ -32,7 +32,7 @@
 ### v1.2 Node Setup
 
 - [x] **Phase 10: Script Hardening** - Harden setup and start scripts for safe automated execution (completed 2026-07-01)
-- [ ] **Phase 11: SSH Provisioning** - Gateway can SSH into a host and run the full setup sequence
+- [x] **Phase 11: SSH Provisioning** - Gateway can SSH into a host and run the full setup sequence (completed 2026-07-02)
 - [ ] **Phase 12: Provisioning Robustness** - Pre-flight checks, state machine tracking, and health checker coordination
 - [ ] **Phase 13: Teardown and Admin API** - Operators can provision and teardown nodes via REST API
 - [ ] **Phase 14: Dashboard Operations** - Dashboard UI for triggering setup/teardown and monitoring progress
@@ -77,7 +77,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
+- [x] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
 
 ### Phase 12: Provisioning Robustness
 
@@ -93,7 +93,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 
-- [ ] 11-01-PLAN.md — SSHClient wrapper, settings, EtcdClient.put() with tests
+- [x] 11-01-PLAN.md — SSHClient wrapper, settings, EtcdClient.put() with tests
 - [ ] 11-02-PLAN.md — NodeProvisioner orchestrating full provisioning sequence
 
 ### Phase 13: Teardown and Admin API
@@ -147,7 +147,7 @@ Plans:
 | 8. Dashboard and Node Fleet | v1.1 | 2/2 | Complete | 2026-07-01 |
 | 9. Live Metrics and Auto-Refresh | v1.1 | 1/1 | Complete | 2026-07-01 |
 | 10. Script Hardening | v1.2 | 2/2 | Complete    | 2026-07-01 |
-| 11. SSH Provisioning | v1.2 | 1/2 | In Progress|  |
+| 11. SSH Provisioning | v1.2 | 2/2 | Complete   | 2026-07-02 |
 | 12. Provisioning Robustness | v1.2 | 0/0 | Not started | - |
 | 13. Teardown and Admin API | v1.2 | 0/0 | Not started | - |
 | 14. Dashboard Operations | v1.2 | 0/0 | Not started | - |
