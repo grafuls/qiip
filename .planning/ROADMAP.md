@@ -34,7 +34,7 @@
 - [x] **Phase 10: Script Hardening** - Harden setup and start scripts for safe automated execution (completed 2026-07-01)
 - [x] **Phase 11: SSH Provisioning** - Gateway can SSH into a host and run the full setup sequence (completed 2026-07-02)
 - [x] **Phase 12: Provisioning Robustness** - Pre-flight checks, state machine tracking, and health checker coordination (completed 2026-07-02)
-- [ ] **Phase 13: Teardown and Admin API** - Operators can provision and teardown nodes via REST API
+- [x] **Phase 13: Teardown and Admin API** - Operators can provision and teardown nodes via REST API (completed 2026-07-07)
 - [ ] **Phase 14: Dashboard Operations** - Dashboard UI for triggering setup/teardown and monitoring progress
 
 ## Phase Details
@@ -117,11 +117,11 @@ Plans:
 
 **Wave 1**
 
-- [ ] 13-01-PLAN.md — Teardown implementation (types, EtcdClient, NodeProvisioner.teardown)
+- [x] 13-01-PLAN.md — Teardown implementation (types, EtcdClient, NodeProvisioner.teardown)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 13-02-PLAN.md — Admin API endpoints (setup, tasks, teardown REST)
+- [x] 13-02-PLAN.md — Admin API endpoints (setup, tasks, teardown REST)
 
 ### Phase 14: Dashboard Operations
 
