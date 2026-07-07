@@ -115,7 +115,12 @@ Plans:
 **Plans**: 2 plans
 Plans:
 
+**Wave 1**
+
 - [ ] 13-01-PLAN.md — Teardown implementation (types, EtcdClient, NodeProvisioner.teardown)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 13-02-PLAN.md — Admin API endpoints (setup, tasks, teardown REST)
 
 ### Phase 14: Dashboard Operations
