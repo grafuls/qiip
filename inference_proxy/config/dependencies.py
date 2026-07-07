@@ -17,6 +17,7 @@ from functools import lru_cache
 from fastapi import Request
 
 from inference_proxy.discovery.registry import NodeRegistry
+from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.node_selector import NodeSelector
@@ -80,3 +81,8 @@ def get_node_selector(request: Request) -> NodeSelector:
     FastAPI route handlers via ``Depends(get_node_selector)``.
     """
     return request.app.state.node_selector  # type: ignore[no-any-return]
+
+
+def get_provisioner(request: Request) -> NodeProvisioner:
+    """Return the node provisioner from the current application state."""
+    return request.app.state.provisioner  # type: ignore[no-any-return]

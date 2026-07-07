@@ -6,6 +6,8 @@ connections, and circuit breaker state for the operations dashboard.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -40,3 +42,40 @@ class AdminMetricsResponse(BaseModel):
     total_requests: int
     per_model: dict[str, int]
     per_node: dict[str, int]
+
+
+class SetupRequest(BaseModel):
+    """Request body for POST /admin/nodes/setup."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hostname: str
+
+
+class SetupResponse(BaseModel):
+    """Response body for POST /admin/nodes/setup (202)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    task_id: str
+
+
+class TeardownResponse(BaseModel):
+    """Response body for DELETE /admin/nodes/{id} (202)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    task_id: str
+
+
+class TaskStatusResponse(BaseModel):
+    """Provisioning task status from etcd."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hostname: str
+    current_step: str
+    started_at: datetime
+    updated_at: datetime
+    failed_step: str | None = None
+    error: str | None = None

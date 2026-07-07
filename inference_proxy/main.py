@@ -38,6 +38,8 @@ from inference_proxy.discovery.serializer import node_from_etcd
 from inference_proxy.discovery.watcher import run_watcher
 from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
+from inference_proxy.provisioning.provisioner import NodeProvisioner
+from inference_proxy.provisioning.ssh_client import SSHClient
 from inference_proxy.resilience.health_checker import run_health_checker
 from inference_proxy.resilience.shutdown import ShutdownMiddleware
 from inference_proxy.routing.connection_tracker import ConnectionTracker
@@ -152,6 +154,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         request_metrics = RequestMetrics()
         app.state.request_metrics = request_metrics
+
+        ssh_client = SSHClient(resolved_settings.ssh)
+        provisioner = NodeProvisioner(
+            ssh_client=ssh_client,
+            etcd_client=etcd_client,
+            settings=resolved_settings.provisioning,
+            registry=registry,
+            connection_tracker=connection_tracker,
+        )
+        app.state.provisioner = provisioner
 
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(
