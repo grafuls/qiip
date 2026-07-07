@@ -60,14 +60,18 @@ class EtcdClient:
         """Return the configured node key prefix."""
         return self._prefix
 
-    def get_prefix(self) -> list[tuple[bytes, dict[str, Any]]]:
-        """Fetch all key-value pairs under the configured node prefix.
+    def get_prefix(self, prefix: str | None = None) -> list[tuple[bytes, dict[str, Any]]]:
+        """Fetch all key-value pairs under a prefix.
+
+        Args:
+            prefix: The key prefix to scan.  Defaults to the configured
+                node prefix when ``None``.
 
         Returns:
             A list of ``(value_bytes, metadata_dict)`` tuples where
             ``metadata_dict`` contains the key under ``metadata["key"]``.
         """
-        return self._client.get_prefix(self._prefix)  # type: ignore[no-any-return]
+        return self._client.get_prefix(prefix or self._prefix)  # type: ignore[no-any-return]
 
     def put(self, key: str, value: str | bytes) -> bool:
         """Put a key-value pair into etcd.
@@ -80,6 +84,17 @@ class EtcdClient:
             True on success.
         """
         return self._client.put(key, value)  # type: ignore[no-any-return]
+
+    def delete(self, key: str) -> bool:
+        """Delete a key from etcd.
+
+        Args:
+            key: The full key to delete (e.g., ``/nodes/hostname``).
+
+        Returns:
+            True if the key was deleted.
+        """
+        return self._client.delete(key)  # type: ignore[no-any-return]
 
     def watch_prefix(self) -> tuple[Any, Any]:
         """Start watching for changes under the configured node prefix.

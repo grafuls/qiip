@@ -175,6 +175,45 @@ class TestEtcdClientPut:
         assert result is True
 
 
+class TestEtcdClientDelete:
+    """EtcdClient.delete() delegates to underlying etcd3gw client."""
+
+    @patch("inference_proxy.discovery.etcd_client.Etcd3Client")
+    def test_delegates_delete(self, mock_etcd3_cls: MagicMock) -> None:
+        mock_instance = MagicMock()
+        mock_instance.delete.return_value = True
+        mock_etcd3_cls.return_value = mock_instance
+
+        settings = EtcdSettings(
+            endpoints=["http://localhost:2379"],
+            node_prefix="/nodes/",
+        )
+        client = EtcdClient(settings)
+        result = client.delete("/nodes/host-1")
+
+        mock_instance.delete.assert_called_once_with("/nodes/host-1")
+        assert result is True
+
+
+class TestEtcdClientGetPrefixCustomPrefix:
+    """get_prefix() accepts an optional custom prefix."""
+
+    @patch("inference_proxy.discovery.etcd_client.Etcd3Client")
+    def test_custom_prefix(self, mock_etcd3_cls: MagicMock) -> None:
+        mock_instance = MagicMock()
+        mock_instance.get_prefix.return_value = []
+        mock_etcd3_cls.return_value = mock_instance
+
+        settings = EtcdSettings(
+            endpoints=["http://localhost:2379"],
+            node_prefix="/nodes/",
+        )
+        client = EtcdClient(settings)
+        client.get_prefix("/provisioning/")
+
+        mock_instance.get_prefix.assert_called_once_with("/provisioning/")
+
+
 class TestEtcdClientMultipleEndpointsWarning:
     """EtcdClient.__init__ logs warning when multiple endpoints configured."""
 

@@ -30,6 +30,10 @@ class ProvisioningStep(StrEnum):
     STARTING_VLLM = "starting_vllm"
     HEALTH_POLL = "health_poll"
     REGISTERING = "registering"
+    DRAINING = "draining"
+    STOPPING_CONTAINER = "stopping_container"
+    DEREGISTERING = "deregistering"
+    TEARDOWN_COMPLETE = "teardown_complete"
     COMPLETE = "complete"
     FAILED = "failed"
 

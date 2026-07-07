@@ -113,6 +113,7 @@ class ProvisioningSettings(BaseModel):
     health_poll_interval: int = 10
     vllm_port: int = 8000
     min_disk_gb: int = 20  # D-02: minimum free disk for provisioning
+    drain_timeout: int = 30  # D-10: seconds to wait for connections to drain
 
 
 class Settings(BaseSettings):
