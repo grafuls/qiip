@@ -9,9 +9,12 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from unittest.mock import MagicMock
+
 from inference_proxy.config.dependencies import (
     get_circuit_breaker_registry,
     get_node_selector,
+    get_provisioner,
     get_proxy_client,
     get_request_metrics,
     get_settings,
@@ -114,9 +117,19 @@ def app(
     application.dependency_overrides[get_request_metrics] = (
         lambda: request_metrics
     )
+    mock_provisioner = MagicMock()
+    mock_provisioner._etcd_client = MagicMock()
+    application.state.provisioner = mock_provisioner
+    application.dependency_overrides[get_provisioner] = lambda: mock_provisioner
     yield application
     application.dependency_overrides.clear()
     get_settings.cache_clear()
+
+
+@pytest.fixture
+def mock_provisioner(app: FastAPI) -> MagicMock:
+    """Return the mock provisioner from the test app."""
+    return app.state.provisioner  # type: ignore[no-any-return]
 
 
 @pytest.fixture

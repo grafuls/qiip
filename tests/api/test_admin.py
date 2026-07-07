@@ -9,9 +9,15 @@ Tests cover:
 - GET /admin/nodes active_connections reflects ConnectionTracker state
 - GET /admin/nodes circuit_breaker_state reflects CircuitBreaker state
 - GET /admin/metrics returns aggregate request counter data
+- POST /admin/nodes/setup returns 202 and fires provisioning
+- GET /admin/provisioning/tasks returns task status from etcd
+- DELETE /admin/nodes/{id} returns 202 for known nodes, 404 for unknown
 """
 
 from __future__ import annotations
+
+import json
+from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 
@@ -233,3 +239,93 @@ class TestAdminMetrics:
         assert data["total_requests"] == 1
         assert data["per_model"] == {"llama-3": 1}
         assert data["per_node"] == {"node-1": 1}
+
+
+class TestSetupEndpoint:
+    """POST /admin/nodes/setup triggers provisioning."""
+
+    def test_returns_202_with_task_id(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        response = client.post("/admin/nodes/setup", json={"hostname": "gpu01"})
+        assert response.status_code == 202
+        assert response.json() == {"task_id": "gpu01"}
+
+    def test_calls_fire_background(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        client.post("/admin/nodes/setup", json={"hostname": "gpu01"})
+        mock_provisioner.fire_background.assert_called_once()
+
+
+class TestTasksEndpoint:
+    """GET /admin/provisioning/tasks returns task status from etcd."""
+
+    def test_returns_tasks_from_etcd(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        task_data = {
+            "hostname": "gpu01",
+            "current_step": "registering",
+            "started_at": "2026-07-07T12:00:00Z",
+            "updated_at": "2026-07-07T12:05:00Z",
+        }
+        mock_provisioner._etcd_client.get_prefix.return_value = [
+            (json.dumps(task_data).encode(), {"key": b"/provisioning/gpu01"}),
+        ]
+
+        response = client.get("/admin/provisioning/tasks")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["hostname"] == "gpu01"
+        assert data[0]["current_step"] == "registering"
+
+    def test_empty_tasks_returns_empty_list(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        mock_provisioner._etcd_client.get_prefix.return_value = []
+        response = client.get("/admin/provisioning/tasks")
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+class TestTeardownEndpoint:
+    """DELETE /admin/nodes/{id} triggers teardown."""
+
+    def test_returns_202_for_known_node(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        test_registry.add(_make_node(node_id="gpu01"))
+        response = client.delete("/admin/nodes/gpu01")
+        assert response.status_code == 202
+        assert response.json() == {"task_id": "gpu01"}
+
+    def test_force_param_passed(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        test_registry.add(_make_node(node_id="gpu01"))
+        client.delete("/admin/nodes/gpu01?force=true")
+        mock_provisioner.fire_background.assert_called_once()
+
+    def test_unknown_node_returns_404(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        response = client.delete("/admin/nodes/unknown")
+        assert response.status_code == 404
