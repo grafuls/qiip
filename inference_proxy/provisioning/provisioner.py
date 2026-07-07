@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Coroutine
 from datetime import datetime, timezone
 
 import httpx
@@ -18,6 +19,7 @@ import structlog
 
 from inference_proxy.config.settings import ProvisioningSettings
 from inference_proxy.discovery.etcd_client import EtcdClient
+from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.discovery.serializer import node_to_etcd
 from inference_proxy.models.node import Node, NodeStatus
 from inference_proxy.provisioning.ssh_client import (
@@ -26,11 +28,18 @@ from inference_proxy.provisioning.ssh_client import (
     SSHConnectionError,
 )
 from inference_proxy.provisioning.state import ProvisioningState, ProvisioningStep
+from inference_proxy.routing.connection_tracker import ConnectionTracker
 
 logger = structlog.get_logger()
 
 STEP_PATTERN = re.compile(r"\[STEP:(\w+):(START|OK|FAIL)\]")
 MODEL_PATTERN = re.compile(r"#\s*Model:\s+(.+)")
+
+
+def _derive_container_name(model: str) -> str:
+    """Replicate start-vllm.sh container name derivation."""
+    suffix = model.rsplit("/", 1)[-1].lower()
+    return f"vllm-{suffix}"
 
 
 class ProvisioningError(Exception):
@@ -62,11 +71,16 @@ class NodeProvisioner:
         ssh_client: SSHClient,
         etcd_client: EtcdClient,
         settings: ProvisioningSettings,
+        registry: NodeRegistry | None = None,
+        connection_tracker: ConnectionTracker | None = None,
     ) -> None:
         self._ssh_client = ssh_client
         self._etcd_client = etcd_client
         self._settings = settings
+        self._registry = registry
+        self._tracker = connection_tracker
         self._provision_started_at: datetime | None = None
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def _update_state(
         self,
@@ -287,3 +301,72 @@ class NodeProvisioner:
         # ponytail: etcd3gw is sync, asyncio.to_thread wraps it (Pitfall 5)
         await asyncio.to_thread(self._etcd_client.put, key, value)
         logger.info("node_registered", hostname=hostname, model=model, key=key)
+
+    def fire_background(self, coro: Coroutine[object, object, None]) -> asyncio.Task[None]:
+        """Schedule a coroutine as a background task, preventing GC."""
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def _drain_wait(self, hostname: str) -> None:
+        """Wait for active connections to reach zero or timeout (D-08, D-09)."""
+        if self._tracker is None:
+            logger.warning("drain_skip_no_tracker", hostname=hostname)
+            return
+        deadline = asyncio.get_running_loop().time() + self._settings.drain_timeout
+        while True:
+            if self._tracker.get(hostname) == 0:
+                return
+            if asyncio.get_running_loop().time() >= deadline:
+                logger.warning("drain_timeout_expired", hostname=hostname)
+                return
+            await asyncio.sleep(1)
+
+    async def teardown(self, hostname: str, *, force: bool = False) -> None:
+        """Teardown a provisioned node (D-01, D-03).
+
+        Graceful: drain -> stop -> rm -> deregister.
+        Force: rm --force -> deregister.
+        """
+        self._provision_started_at = datetime.now(timezone.utc)
+        logger.info("teardown_start", hostname=hostname, force=force)
+
+        # Derive container name from registry model, fallback to hostname
+        container_name = f"vllm-{hostname}"
+        if self._registry is not None:
+            node = self._registry.get(hostname)
+            if node and node.model:
+                container_name = _derive_container_name(node.model)
+            else:
+                logger.warning("teardown_model_unknown", hostname=hostname)
+
+        try:
+            if not force:
+                await self._update_state(hostname, ProvisioningStep.DRAINING)
+                if self._registry is not None:
+                    self._registry.drain(hostname)
+                await self._drain_wait(hostname)
+
+            await self._update_state(hostname, ProvisioningStep.STOPPING_CONTAINER)
+            if force:
+                await self._ssh_run_command(hostname, f"podman rm --force {container_name}")
+            else:
+                await self._ssh_run_command(
+                    hostname, f"podman stop {container_name} && podman rm {container_name}"
+                )
+
+            await self._update_state(hostname, ProvisioningStep.DEREGISTERING)
+            await asyncio.to_thread(
+                self._etcd_client.delete, f"{self._etcd_client.prefix}{hostname}"
+            )
+
+            await self._update_state(hostname, ProvisioningStep.TEARDOWN_COMPLETE)
+        except (RemoteCommandError, SSHConnectionError) as exc:
+            await self._update_state(
+                hostname, ProvisioningStep.FAILED,
+                failed_step="teardown", error=str(exc),
+            )
+            raise ProvisioningError(str(exc)) from exc
+
+        logger.info("teardown_complete", hostname=hostname)

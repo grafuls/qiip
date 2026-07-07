@@ -20,11 +20,13 @@ from inference_proxy.provisioning.provisioner import (
     NodeProvisioner,
     PreflightError,
     ProvisioningError,
+    _derive_container_name,
 )
 from inference_proxy.provisioning.ssh_client import (
     RemoteCommandError,
     SSHConnectionError,
 )
+from inference_proxy.provisioning.state import ProvisioningStep
 
 
 def _make_provisioner(
@@ -32,12 +34,16 @@ def _make_provisioner(
     ssh_client: MagicMock | None = None,
     etcd_client: MagicMock | None = None,
     settings: ProvisioningSettings | None = None,
+    registry: MagicMock | None = None,
+    connection_tracker: MagicMock | None = None,
 ) -> NodeProvisioner:
     """Build a NodeProvisioner with mock dependencies."""
     return NodeProvisioner(
         ssh_client=ssh_client or MagicMock(),
         etcd_client=etcd_client or MagicMock(),
         settings=settings or ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0),
+        registry=registry,
+        connection_tracker=connection_tracker,
     )
 
 
@@ -569,3 +575,268 @@ class TestStateTracking:
                     await provisioner.provision("host1")
 
         assert not setup_called
+
+
+class TestContainerNameDerivation:
+    """Container name derived from model name per start-vllm.sh convention."""
+
+    def test_model_with_org(self) -> None:
+        assert _derive_container_name("Qwen/Qwen2.5-72B-Instruct") == "vllm-qwen2.5-72b-instruct"
+
+    def test_model_without_org(self) -> None:
+        assert _derive_container_name("some-model") == "vllm-some-model"
+
+    def test_model_multiple_slashes(self) -> None:
+        assert _derive_container_name("org/sub/Model-Name") == "vllm-model-name"
+
+
+def _make_teardown_provisioner(
+    *,
+    model: str = "Qwen/Qwen2.5-72B-Instruct",
+    tracker_get_returns: int | list[int] = 0,
+    force: bool = False,
+) -> tuple[NodeProvisioner, MagicMock, MagicMock, MagicMock, list[str]]:
+    """Build a provisioner wired for teardown testing.
+
+    Returns (provisioner, ssh_mock, etcd_mock, registry_mock, state_steps).
+    state_steps is populated during the test via side_effect on to_thread.
+    """
+    from inference_proxy.models.node import Node, NodeStatus
+
+    ssh = MagicMock()
+    etcd = MagicMock()
+    etcd.prefix = "/nodes/"
+    etcd.put = MagicMock(return_value=True)
+    etcd.delete = MagicMock(return_value=True)
+
+    registry = MagicMock()
+    node = Node(
+        node_id="host1",
+        endpoint="host1:8000",
+        status=NodeStatus.HEALTHY,
+        model=model,
+        last_heartbeat=datetime.now(timezone.utc),
+    )
+    registry.get.return_value = node
+    registry.drain.return_value = True
+
+    tracker = MagicMock()
+    if isinstance(tracker_get_returns, list):
+        tracker.get.side_effect = tracker_get_returns
+    else:
+        tracker.get.return_value = tracker_get_returns
+
+    async def mock_streaming(host: str, command: str):
+        for item in [("stdout", "container stopped")]:
+            yield item
+
+    ssh.run_streaming = mock_streaming
+
+    provisioner = _make_provisioner(
+        ssh_client=ssh,
+        etcd_client=etcd,
+        registry=registry,
+        connection_tracker=tracker,
+        settings=ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0, drain_timeout=2),
+    )
+    return provisioner, ssh, etcd, registry, tracker
+
+
+class TestTeardownGraceful:
+    """D-01, D-08, D-11, D-12: Graceful teardown drains, stops, deregisters."""
+
+    @pytest.mark.asyncio
+    async def test_graceful_teardown_sequence(self) -> None:
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+        state_steps: list[str] = []
+
+        async def capture_to_thread(fn, *args):
+            # Capture state writes to track step progression
+            if fn == etcd.put and len(args) >= 2:
+                key = args[0]
+                if "/provisioning/" in str(key):
+                    data = json.loads(args[1])
+                    state_steps.append(data["current_step"])
+            return True
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
+            await provisioner.teardown("host1")
+
+        # Verify drain was called
+        registry.drain.assert_called_once_with("host1")
+        # Verify state progression: DRAINING -> STOPPING_CONTAINER -> DEREGISTERING -> TEARDOWN_COMPLETE
+        assert "draining" in state_steps
+        assert "stopping_container" in state_steps
+        assert "deregistering" in state_steps
+        assert "teardown_complete" in state_steps
+
+    @pytest.mark.asyncio
+    async def test_graceful_teardown_ssh_command(self) -> None:
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+        commands: list[str] = []
+
+        async def mock_streaming(host: str, command: str):
+            commands.append(command)
+            for item in [("stdout", "ok")]:
+                yield item
+
+        ssh.run_streaming = mock_streaming
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_tt:
+            mock_tt.return_value = True
+            await provisioner.teardown("host1")
+
+        # Should use podman stop + podman rm (graceful)
+        assert any("podman stop" in c for c in commands)
+        assert any("podman rm" in c for c in commands) or any("podman stop" in c and "podman rm" in c for c in commands)
+
+    @pytest.mark.asyncio
+    async def test_etcd_node_key_deleted(self) -> None:
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+        deleted_keys: list[str] = []
+
+        async def capture_to_thread(fn, *args):
+            if fn == etcd.delete:
+                deleted_keys.append(args[0])
+            return True
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
+            await provisioner.teardown("host1")
+
+        # D-11: should delete /nodes/host1
+        assert "/nodes/host1" in deleted_keys
+
+
+class TestTeardownForce:
+    """D-03: Force teardown skips drain, uses podman rm --force."""
+
+    @pytest.mark.asyncio
+    async def test_force_skips_drain(self) -> None:
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+        state_steps: list[str] = []
+
+        async def capture_to_thread(fn, *args):
+            if fn == etcd.put and len(args) >= 2 and "/provisioning/" in str(args[0]):
+                data = json.loads(args[1])
+                state_steps.append(data["current_step"])
+            return True
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
+            await provisioner.teardown("host1", force=True)
+
+        # Force mode should NOT have DRAINING step
+        assert "draining" not in state_steps
+        # But should still have the rest
+        assert "stopping_container" in state_steps
+        assert "deregistering" in state_steps
+        assert "teardown_complete" in state_steps
+        # registry.drain should NOT be called
+        registry.drain.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_force_uses_podman_rm_force(self) -> None:
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+        commands: list[str] = []
+
+        async def mock_streaming(host: str, command: str):
+            commands.append(command)
+            for item in [("stdout", "ok")]:
+                yield item
+
+        ssh.run_streaming = mock_streaming
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_tt:
+            mock_tt.return_value = True
+            await provisioner.teardown("host1", force=True)
+
+        assert any("podman rm --force" in c for c in commands)
+
+
+class TestDrainTimeout:
+    """D-09: Drain timeout expiry proceeds to container stop."""
+
+    @pytest.mark.asyncio
+    async def test_timeout_proceeds_to_stop(self) -> None:
+        """Connections never reach 0 but teardown still completes after timeout."""
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner(
+            tracker_get_returns=5,  # always 5 connections
+        )
+        state_steps: list[str] = []
+
+        async def capture_to_thread(fn, *args):
+            if fn == etcd.put and len(args) >= 2 and "/provisioning/" in str(args[0]):
+                data = json.loads(args[1])
+                state_steps.append(data["current_step"])
+            return True
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
+            await provisioner.teardown("host1")
+
+        # Should still complete despite never draining
+        assert "stopping_container" in state_steps
+        assert "teardown_complete" in state_steps
+
+
+class TestTeardownStateProgression:
+    """D-05: State tracked step-by-step in etcd."""
+
+    @pytest.mark.asyncio
+    async def test_graceful_state_order(self) -> None:
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+        state_steps: list[str] = []
+
+        async def capture_to_thread(fn, *args):
+            if fn == etcd.put and len(args) >= 2 and "/provisioning/" in str(args[0]):
+                data = json.loads(args[1])
+                state_steps.append(data["current_step"])
+            return True
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
+            await provisioner.teardown("host1")
+
+        expected_order = ["draining", "stopping_container", "deregistering", "teardown_complete"]
+        assert state_steps == expected_order
+
+    @pytest.mark.asyncio
+    async def test_force_state_order(self) -> None:
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+        state_steps: list[str] = []
+
+        async def capture_to_thread(fn, *args):
+            if fn == etcd.put and len(args) >= 2 and "/provisioning/" in str(args[0]):
+                data = json.loads(args[1])
+                state_steps.append(data["current_step"])
+            return True
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
+            await provisioner.teardown("host1", force=True)
+
+        expected_order = ["stopping_container", "deregistering", "teardown_complete"]
+        assert state_steps == expected_order
+
+
+class TestTeardownSSHFailure:
+    """Teardown with SSH failure updates state to FAILED."""
+
+    @pytest.mark.asyncio
+    async def test_ssh_failure_sets_failed_state(self) -> None:
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+        state_steps: list[str] = []
+
+        async def failing_streaming(host: str, command: str):
+            raise SSHConnectionError("host1", "connection refused")
+            yield  # pragma: no cover
+
+        ssh.run_streaming = failing_streaming
+
+        async def capture_to_thread(fn, *args):
+            if fn == etcd.put and len(args) >= 2 and "/provisioning/" in str(args[0]):
+                data = json.loads(args[1])
+                state_steps.append(data["current_step"])
+            return True
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
+            with pytest.raises(ProvisioningError):
+                await provisioner.teardown("host1", force=True)
+
+        assert "failed" in state_steps
