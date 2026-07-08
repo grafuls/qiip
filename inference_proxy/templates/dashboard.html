@@ -13,6 +13,11 @@
         <p id="node-count">Loading node data...</p>
     </header>
     <main>
+        <form id="setup-form" method="post">
+            <input type="text" id="setup-hostname" placeholder="Hostname" required>
+            <button type="submit" id="setup-btn">Setup</button>
+            <span id="setup-status"></span>
+        </form>
         <table>
             <thead>
                 <tr>
@@ -23,14 +28,32 @@
                     <th scope="col">Active Connections</th>
                     <th scope="col">Circuit Breaker</th>
                     <th scope="col">Requests</th>
+                    <th scope="col">Actions</th>
                 </tr>
             </thead>
             <tbody id="node-table-body">
-                <tr><td colspan="7">Loading node data...</td></tr>
+                <tr><td colspan="8">Loading node data...</td></tr>
             </tbody>
         </table>
         <p id="last-updated"></p>
         <p id="poll-warning"></p>
+        <section id="tasks-panel">
+            <h2>Provisioning Tasks</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th scope="col">Hostname</th>
+                        <th scope="col">Current Step</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Started</th>
+                        <th scope="col">Updated</th>
+                    </tr>
+                </thead>
+                <tbody id="tasks-table-body">
+                    <tr><td colspan="5">No provisioning tasks</td></tr>
+                </tbody>
+            </table>
+        </section>
     </main>
     <footer>
         <p>QUADS Inference Proxy</p>

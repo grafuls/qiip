@@ -14,13 +14,16 @@ h1 {
 }
 
 .badge-healthy,
-.badge-closed {
+.badge-closed,
+.badge-complete,
+.badge-teardown_complete {
   background-color: #16a34a;
   color: #fff;
 }
 
 .badge-unhealthy,
-.badge-open {
+.badge-open,
+.badge-failed {
   background-color: #dc2626;
   color: #fff;
 }
@@ -29,6 +32,12 @@ h1 {
 .badge-half_open,
 .badge-unknown {
   background-color: #ca8a04;
+  color: #fff;
+}
+
+.badge-in-progress,
+.badge-provisioning {
+  background-color: #2563eb;
   color: #fff;
 }
 

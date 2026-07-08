@@ -4,8 +4,8 @@ Tests cover:
 - GET /dashboard returns 200 with text/html content type (DASH-01)
 - Dashboard served by same app as API (DASH-03)
 - HTML contains Simple.css CDN link and dashboard assets (TMPL-01, TMPL-02)
-- Table structure with 7 column headers (NODE-01, METR-02)
-- Badge CSS classes for status and circuit breaker states (NODE-02)
+- Table structure with 8 column headers including Actions (NODE-01, METR-02)
+- Badge CSS classes for status, circuit breaker, and provisioning states (NODE-02)
 """
 
 from __future__ import annotations
@@ -67,8 +67,8 @@ class TestDashboardTemplate:
 class TestDashboardTableStructure:
     """Dashboard HTML contains the node fleet table structure (NODE-01)."""
 
-    def test_contains_all_seven_column_headers(self, client: TestClient) -> None:
-        """HTML contains all 7 th elements for the node table."""
+    def test_contains_all_eight_column_headers(self, client: TestClient) -> None:
+        """HTML contains all 8 th elements for the node table."""
         response = client.get("/dashboard")
         headers = [
             "Node ID",
@@ -78,6 +78,7 @@ class TestDashboardTableStructure:
             "Active Connections",
             "Circuit Breaker",
             "Requests",
+            "Actions",
         ]
         for header in headers:
             assert header in response.text, f"Missing column header: {header}"
@@ -139,3 +140,42 @@ class TestDashboardBadgeCSS:
         css = self._css_path.read_text()
         for cls in (".badge-closed", ".badge-open", ".badge-half_open"):
             assert cls in css, f"Missing CSS class: {cls}"
+
+    def test_badge_css_contains_provisioning_classes(self) -> None:
+        """dashboard.css contains .badge-complete, .badge-failed, .badge-in-progress."""
+        css = self._css_path.read_text()
+        for cls in (".badge-complete", ".badge-failed", ".badge-in-progress"):
+            assert cls in css, f"Missing CSS class: {cls}"
+
+
+class TestSetupForm:
+    """Dashboard HTML contains the setup form elements (DASH-01)."""
+
+    def test_contains_setup_form(self, client: TestClient) -> None:
+        """HTML contains form with id='setup-form'."""
+        response = client.get("/dashboard")
+        assert 'id="setup-form"' in response.text
+
+    def test_contains_hostname_input(self, client: TestClient) -> None:
+        """HTML contains input with id='setup-hostname'."""
+        response = client.get("/dashboard")
+        assert 'id="setup-hostname"' in response.text
+
+    def test_contains_setup_button(self, client: TestClient) -> None:
+        """HTML contains button with id='setup-btn'."""
+        response = client.get("/dashboard")
+        assert 'id="setup-btn"' in response.text
+
+
+class TestTasksPanel:
+    """Dashboard HTML contains the provisioning tasks panel (DASH-03)."""
+
+    def test_contains_tasks_panel(self, client: TestClient) -> None:
+        """HTML contains section with id='tasks-panel'."""
+        response = client.get("/dashboard")
+        assert 'id="tasks-panel"' in response.text
+
+    def test_contains_tasks_table_body(self, client: TestClient) -> None:
+        """HTML contains tbody with id='tasks-table-body'."""
+        response = client.get("/dashboard")
+        assert 'id="tasks-table-body"' in response.text
