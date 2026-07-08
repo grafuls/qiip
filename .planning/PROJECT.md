@@ -30,23 +30,18 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - ✓ Request metrics (counts per-node, per-model, total) — v1.1
 - ✓ Auto-refresh via polling to keep dashboard current — v1.1
 
+### Validated in v1.2
+
+- ✓ SSH-based node setup from gateway (connect, install deps, start vLLM, register) — v1.2
+- ✓ Node teardown (stop container, deregister from etcd) — v1.2
+- ✓ Admin API for node provisioning (POST setup, DELETE teardown) — v1.2
+- ✓ Dashboard UI for setup/teardown operations — v1.2
+- ✓ Pre-flight validation (SSH, GPU, disk checks) — v1.2
+- ✓ Step-by-step state machine tracking for provisioning — v1.2
+
 ### Active
 
-- [ ] SSH-based node setup from gateway (connect, install deps, start vLLM, register)
-- [ ] Node teardown (stop container, deregister from etcd)
-- [ ] Admin API for node provisioning (POST setup, DELETE teardown)
-- [ ] Dashboard UI for setup/teardown operations
-
-## Current Milestone: v1.2 Node Setup
-
-**Goal:** Operators can provision and decommission vLLM nodes on idle QUADS servers from the dashboard or API.
-
-**Target features:**
-- SSH-based node setup: connect to host, run setup.sh, build container, start vLLM with GPU auto-detection, poll /health, register in etcd
-- Node teardown: stop container, deregister from etcd
-- Admin API endpoints: POST /admin/nodes/setup, DELETE /admin/nodes/{id}
-- Dashboard UI: setup/teardown buttons on the node fleet page
-- Pre-configured SSH keys (operator ensures ~/.ssh access)
+(No active requirements — next milestone TBD)
 
 ### Out of Scope
 
@@ -60,8 +55,8 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ## Context
 
-Shipped v1.1 with 7,618 LOC (Python + HTML/CSS/JS) across 9 phases and 265 tests.
-Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, structlog, Pydantic v2, Jinja2.
+Shipped v1.2 with 9,635 LOC (Python + HTML/CSS/JS) across 14 phases and 338 tests.
+Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
 
@@ -98,6 +93,10 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 | Jinja2 + vanilla JS for Web UI | No build step, stays in Python ecosystem, minimal dependencies | ✓ Validated v1.1 |
 | Polling for auto-refresh | Simple JS interval vs SSE/WebSocket; sufficient for ops dashboard | ✓ Validated v1.1 |
 | In-memory counters only | No persistent metrics storage; Prometheus/Grafana is future work | ✓ Validated v1.1 |
+| asyncssh for SSH operations | Native asyncio, no paramiko thread-wrapping needed | ✓ Validated v1.2 |
+| Embed provisioning in gateway process | No Celery/task queue — asyncio tasks suffice for stateless proxy | ✓ Validated v1.2 |
+| Write to etcd, let watcher propagate | Never mutate NodeRegistry directly from provisioner | ✓ Validated v1.2 |
+| Graceful teardown default, force optional | Drain connections before stop; force skips drain | ✓ Validated v1.2 |
 
 ## Evolution
 
@@ -117,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-01 after v1.2 milestone start*
+*Last updated: 2026-07-08 after v1.2 milestone completion*

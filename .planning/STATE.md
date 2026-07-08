@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Node Setup
-status: executing
-stopped_at: Phase 14 execution complete
-last_updated: "2026-07-08T10:30:00.000Z"
-last_activity: 2026-07-08 -- Phase 14 execution complete
+status: milestone_complete
+stopped_at: v1.2 milestone archived
+last_updated: "2026-07-08T12:00:00.000Z"
+last_activity: 2026-07-08 -- v1.2 Node Setup milestone complete
 progress:
   total_phases: 5
   completed_phases: 5
@@ -21,14 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-01)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Phase 14 — dashboard operations (complete)
+**Current focus:** v1.2 milestone complete — planning next milestone
 
 ## Current Position
 
-Phase: 14
-Plan: 14-01 complete
-Status: Phase execution complete
-Last activity: 2026-07-08 -- Phase 14 execution complete
+Milestone: v1.2 Node Setup — SHIPPED 2026-07-08
+Status: Milestone complete
+Last activity: 2026-07-08 -- v1.2 archived
 
 Progress: [██████████] 100%
 

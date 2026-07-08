@@ -1,5 +1,28 @@
 # Milestones
 
+## v1.2 Node Setup — SHIPPED 2026-07-08
+
+**Phases:** 5 | **Plans:** 9 | **Tests:** 338 | **LOC:** 9,635 (Python + HTML/CSS/JS)
+**Timeline:** 2026-07-01 to 2026-07-08 (7 days)
+**Commits:** 16 feat commits
+
+### Key Accomplishments
+
+1. Hardened setup.sh and start-vllm.sh for idempotent, fail-fast automated execution
+2. SSH provisioning via asyncssh — remote setup, container build, GPU auto-detection, health poll, etcd registration
+3. Pre-flight validation (SSH, GPU, disk), state machine tracking (16-step ProvisioningStep), health checker coordination
+4. Teardown lifecycle with graceful drain and force modes, etcd deregistration
+5. Admin REST API — POST /admin/nodes/setup, GET /admin/provisioning/tasks, DELETE /admin/nodes/{id}
+6. Dashboard operations UI — setup form, teardown buttons, provisioning tasks panel with step badges
+
+### Known Deferred Items
+
+- 2 verification gaps from v1.0 still open (Phases 3, 6 — require live vLLM/etcd)
+
+**Archive:** [v1.2-ROADMAP.md](milestones/v1.2-ROADMAP.md) | [v1.2-REQUIREMENTS.md](milestones/v1.2-REQUIREMENTS.md)
+
+---
+
 ## v1.1 Web UI — SHIPPED 2026-07-01
 
 **Phases:** 3 | **Plans:** 5 | **Tests:** 265 | **LOC:** 7,618 (Python + HTML/CSS/JS)
