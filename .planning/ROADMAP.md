@@ -137,7 +137,7 @@ Plans:
 **Plans**: 1 plan
 Plans:
 
-- [ ] 14-01-PLAN.md — Setup form, teardown buttons, and provisioning tasks panel
+- [x] 14-01-PLAN.md — Setup form, teardown buttons, and provisioning tasks panel
 
 **UI hint**: yes
 
@@ -157,5 +157,5 @@ Plans:
 | 10. Script Hardening | v1.2 | 2/2 | Complete    | 2026-07-01 |
 | 11. SSH Provisioning | v1.2 | 2/2 | Complete    | 2026-07-02 |
 | 12. Provisioning Robustness | v1.2 | 2/2 | Complete    | 2026-07-02 |
-| 13. Teardown and Admin API | v1.2 | 0/0 | Not started | - |
-| 14. Dashboard Operations | v1.2 | 0/0 | Not started | - |
+| 13. Teardown and Admin API | v1.2 | 2/2 | Complete    | 2026-07-07 |
+| 14. Dashboard Operations | v1.2 | 1/1 | Complete    | 2026-07-08 |
