@@ -134,11 +134,10 @@ Plans:
   2. Each node row in the fleet table has a teardown button that triggers removal
   3. Dashboard displays setup/teardown progress with per-step status updates via polling
 
-**Plans**: 2 plans
+**Plans**: 1 plan
 Plans:
 
-- [ ] 14-01-PLAN.md — To be planned
-- [ ] 14-02-PLAN.md — To be planned
+- [ ] 14-01-PLAN.md — Setup form, teardown buttons, and provisioning tasks panel
 
 **UI hint**: yes
 
