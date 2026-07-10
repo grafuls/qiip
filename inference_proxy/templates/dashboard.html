@@ -8,56 +8,79 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.css') }}">
 </head>
 <body>
-    <header>
-        <h1>Node Fleet Dashboard</h1>
-        <p id="node-count">Loading node data...</p>
-    </header>
-    <main>
-        <form id="setup-form" method="post">
-            <input type="text" id="setup-hostname" placeholder="Hostname" required>
-            <button type="submit" id="setup-btn">Setup</button>
-            <span id="setup-status"></span>
-        </form>
-        <table>
-            <thead>
-                <tr>
-                    <th scope="col">Node ID</th>
-                    <th scope="col">Endpoint</th>
-                    <th scope="col">Model</th>
-                    <th scope="col">Status</th>
-                    <th scope="col">Active Connections</th>
-                    <th scope="col">Circuit Breaker</th>
-                    <th scope="col">Requests</th>
-                    <th scope="col">Actions</th>
-                </tr>
-            </thead>
-            <tbody id="node-table-body">
-                <tr><td colspan="8">Loading node data...</td></tr>
-            </tbody>
-        </table>
-        <p id="last-updated"></p>
-        <p id="poll-warning"></p>
-        <section id="tasks-panel">
-            <h2>Provisioning Tasks</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th scope="col">Hostname</th>
-                        <th scope="col">Current Step</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Started</th>
-                        <th scope="col">Updated</th>
-                    </tr>
-                </thead>
-                <tbody id="tasks-table-body">
-                    <tr><td colspan="5">No provisioning tasks</td></tr>
-                </tbody>
-            </table>
-        </section>
-    </main>
+    <div class="dashboard">
+        <header class="dashboard-header">
+            <div>
+                <h1>Node Fleet Dashboard</h1>
+                <p id="node-count">Loading node data...</p>
+            </div>
+            <div class="header-right">
+                <p id="last-updated"></p>
+                <p id="poll-warning"></p>
+            </div>
+        </header>
+
+        <main>
+            <section class="card">
+                <h2 class="card-title">Provision Node</h2>
+                <form id="setup-form" method="post" class="setup-form">
+                    <input type="text" id="setup-hostname" placeholder="Enter hostname" required>
+                    <button type="submit" id="setup-btn">Setup</button>
+                </form>
+            </section>
+
+            <section class="card">
+                <h2 class="card-title">Node Fleet</h2>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th scope="col">Node ID</th>
+                                <th scope="col">Endpoint</th>
+                                <th scope="col">Model</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Active Connections</th>
+                                <th scope="col">Circuit Breaker</th>
+                                <th scope="col">Requests</th>
+                                <th scope="col">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="node-table-body">
+                            <tr><td colspan="8">Loading node data...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="card" id="tasks-panel">
+                <h2 class="card-title">Provisioning Tasks</h2>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th scope="col">Hostname</th>
+                                <th scope="col">Current Step</th>
+                                <th scope="col">Status</th>
+                                <th scope="col">Error</th>
+                                <th scope="col">Started</th>
+                                <th scope="col">Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tasks-table-body">
+                            <tr><td colspan="6">No provisioning tasks</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <div id="toast-container"></div>
+
     <footer>
         <p>QUADS Inference Proxy</p>
     </footer>
+
     <script>const POLL_INTERVAL_MS = {{ poll_interval * 1000 }};</script>
     <script src="{{ url_for('static', path='js/dashboard.js') }}"></script>
 </body>

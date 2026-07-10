@@ -1,5 +1,18 @@
 // ponytail: vanilla fetch + DOM, no framework needed
 
+function showToast(message, type) {
+  const container = document.getElementById("toast-container");
+  const toast = document.createElement("div");
+  toast.className = "toast toast-" + (type || "info");
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add("toast-visible"));
+  setTimeout(() => {
+    toast.classList.remove("toast-visible");
+    setTimeout(() => toast.remove(), 300);
+  }, 4000);
+}
+
 function stepBadgeClass(step) {
   if (step === "complete" || step === "teardown_complete") return "badge-complete";
   if (step === "failed") return "badge-failed";
@@ -9,7 +22,7 @@ function stepBadgeClass(step) {
 function renderTasks(tasks) {
   const tbody = document.getElementById("tasks-table-body");
   if (!tasks || tasks.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5">No provisioning tasks</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6">No provisioning tasks</td></tr>';
     return;
   }
   tbody.innerHTML = "";
@@ -29,13 +42,31 @@ function renderTasks(tasks) {
 
     const tdStatus = document.createElement("td");
     if (task.failed_step) {
-      tdStatus.textContent = "failed";
+      const failBadge = document.createElement("span");
+      failBadge.className = "badge badge-failed";
+      failBadge.textContent = "failed at " + task.failed_step;
+      tdStatus.appendChild(failBadge);
     } else if (task.current_step === "complete" || task.current_step === "teardown_complete") {
-      tdStatus.textContent = task.current_step;
+      const doneBadge = document.createElement("span");
+      doneBadge.className = "badge badge-complete";
+      doneBadge.textContent = task.current_step;
+      tdStatus.appendChild(doneBadge);
     } else {
-      tdStatus.textContent = "in progress";
+      const progBadge = document.createElement("span");
+      progBadge.className = "badge badge-in-progress";
+      progBadge.textContent = "in progress";
+      tdStatus.appendChild(progBadge);
     }
     tr.appendChild(tdStatus);
+
+    const tdError = document.createElement("td");
+    if (task.error) {
+      tdError.className = "error-text";
+      tdError.textContent = task.error;
+    } else {
+      tdError.textContent = "—";
+    }
+    tr.appendChild(tdError);
 
     const tdStarted = document.createElement("td");
     tdStarted.textContent = new Date(task.started_at).toLocaleString();
@@ -55,11 +86,13 @@ async function handleTeardown(nodeId) {
   }
   try {
     const resp = await fetch(`/admin/nodes/${nodeId}`, { method: "DELETE" });
-    if (!resp.ok) {
-      alert(`Teardown failed: HTTP ${resp.status}`);
+    if (resp.ok) {
+      showToast(`Teardown started for ${nodeId}`, "success");
+    } else {
+      showToast(`Teardown failed: HTTP ${resp.status}`, "error");
     }
   } catch (err) {
-    alert(`Teardown failed: ${err.message}`);
+    showToast(`Teardown failed: ${err.message}`, "error");
   }
 }
 
@@ -148,10 +181,10 @@ async function refreshDashboard() {
     renderTasks(tasks);
 
     lastUpdatedEl.textContent =
-      "Last updated: " + new Date().toLocaleTimeString();
+      "Updated " + new Date().toLocaleTimeString();
     lastUpdatedEl.className = "last-updated";
   } catch (err) {
-    warningEl.textContent = "Update failed -- retrying...";
+    warningEl.textContent = "Update failed — retrying...";
     warningEl.className = "poll-warning";
   }
 }
@@ -165,7 +198,6 @@ document.addEventListener("DOMContentLoaded", function () {
     e.preventDefault();
     const input = document.getElementById("setup-hostname");
     const btn = document.getElementById("setup-btn");
-    const status = document.getElementById("setup-status");
     const hostname = input.value.trim();
     if (!hostname) return;
     btn.disabled = true;
@@ -176,16 +208,16 @@ document.addEventListener("DOMContentLoaded", function () {
         body: JSON.stringify({ hostname }),
       });
       if (resp.ok) {
-        status.textContent = `Setup started for ${hostname}`;
+        showToast(`Setup started for ${hostname}`, "success");
         input.value = "";
         setTimeout(function () { btn.disabled = false; }, 2000);
       } else {
-        const err = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
-        status.textContent = err.detail || `Error: HTTP ${resp.status}`;
+        const data = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+        showToast(data.detail || `Error: HTTP ${resp.status}`, "error");
         btn.disabled = false;
       }
     } catch (err) {
-      status.textContent = `Error: ${err.message}`;
+      showToast(`Error: ${err.message}`, "error");
       btn.disabled = false;
     }
   });
