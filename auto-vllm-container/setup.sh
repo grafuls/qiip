@@ -70,13 +70,22 @@ mount_nfs_cache() {
 }
 
 configure_firewall() {
-    if sudo iptables -C INPUT -p tcp --dport "${VLLM_PORT}" -j ACCEPT 2>/dev/null; then
-        echo "Firewall rule already exists for port ${VLLM_PORT}, skipping"
-        return 0
+    if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld; then
+        if sudo firewall-cmd --query-port="${VLLM_PORT}/tcp" &>/dev/null; then
+            echo "Firewall rule already exists for port ${VLLM_PORT}, skipping"
+            return 0
+        fi
+        sudo firewall-cmd --add-port="${VLLM_PORT}/tcp" --permanent
+        sudo firewall-cmd --reload
+    else
+        if sudo iptables -C INPUT -p tcp --dport "${VLLM_PORT}" -j ACCEPT 2>/dev/null; then
+            echo "Firewall rule already exists for port ${VLLM_PORT}, skipping"
+            return 0
+        fi
+        sudo iptables -I INPUT -p tcp --dport "${VLLM_PORT}" -j ACCEPT
+        sudo iptables-save | sudo tee /etc/sysconfig/iptables > /dev/null
+        sudo systemctl restart iptables
     fi
-    sudo iptables -I INPUT -p tcp --dport "${VLLM_PORT}" -j ACCEPT
-    sudo iptables-save | sudo tee /etc/sysconfig/iptables > /dev/null
-    sudo systemctl restart iptables
 }
 
 # --- Main (D-11: 6 step names) ---
