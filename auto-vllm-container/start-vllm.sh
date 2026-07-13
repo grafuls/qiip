@@ -132,11 +132,11 @@ EOF
 
     podman run -d --replace \
         --name "$CONTAINER_NAME" \
+        --network=host \
         --device nvidia.com/gpu=all \
         -v "${NFS_MOUNT_POINT}:/root/.cache/huggingface" \
-        -p "${VLLM_PORT}:8000" \
         -e VLLM_MODEL="$MODEL" \
-        -e VLLM_PORT=8000 \
+        -e VLLM_PORT="${VLLM_PORT}" \
         -e VLLM_TENSOR_PARALLEL="$TENSOR_PARALLEL" \
         -e VLLM_GPU_MEM_UTIL="$GPU_MEM_UTIL" \
         -e VLLM_MAX_MODEL_LEN="$MAX_MODEL_LEN" \
