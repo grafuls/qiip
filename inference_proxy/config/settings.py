@@ -114,6 +114,7 @@ class ProvisioningSettings(BaseModel):
     vllm_port: int = 8000
     min_disk_gb: int = 20  # D-02: minimum free disk for provisioning
     drain_timeout: int = 30  # D-10: seconds to wait for connections to drain
+    scripts_dir: Path = Path("auto-vllm-container")
 
 
 class Settings(BaseSettings):

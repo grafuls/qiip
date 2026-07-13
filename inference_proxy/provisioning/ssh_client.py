@@ -10,6 +10,7 @@ Per D-14: Mirrors the EtcdClient wrapper pattern.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import asyncssh
 import structlog
@@ -90,6 +91,35 @@ class SSHClient:
                         raise RemoteCommandError(
                             host, command, process.exit_status
                         )
+        except asyncssh.PermissionDenied as exc:
+            raise SSHConnectionError(
+                host, f"authentication failed: {exc}"
+            ) from exc
+        except asyncssh.DisconnectError as exc:
+            raise SSHConnectionError(
+                host, f"disconnected: {exc.reason}"
+            ) from exc
+        except OSError as exc:
+            raise SSHConnectionError(host, str(exc)) from exc
+
+    async def upload(
+        self, host: str, local_path: Path, remote_path: str = ".",
+    ) -> None:
+        """Copy *local_path* to *host* via SCP.
+
+        Directories are copied recursively.
+        """
+        try:
+            async with asyncssh.connect(
+                host,
+                username=self._username,
+                client_keys=[str(self._key_path)],
+                known_hosts=None,
+                connect_timeout=self._connect_timeout,
+            ) as conn:
+                await asyncssh.scp(
+                    str(local_path), (conn, remote_path), recurse=True,
+                )
         except asyncssh.PermissionDenied as exc:
             raise SSHConnectionError(
                 host, f"authentication failed: {exc}"

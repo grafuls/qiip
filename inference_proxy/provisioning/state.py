@@ -21,6 +21,7 @@ class ProvisioningStep(StrEnum):
 
     PENDING = "pending"
     PREFLIGHT = "preflight"
+    UPLOADING_SCRIPTS = "uploading_scripts"
     NVIDIA_REPO = "nvidia_repo"
     SYSTEM_UPDATE = "system_update"
     NVIDIA_DRIVER = "nvidia_driver"

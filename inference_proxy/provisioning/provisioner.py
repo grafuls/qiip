@@ -207,6 +207,8 @@ class NodeProvisioner:
             logger.warning("provisioning_registration_failed", hostname=hostname)
 
         try:
+            await self._update_state(hostname, ProvisioningStep.UPLOADING_SCRIPTS)
+            await self._upload_scripts(hostname)
             await self._run_setup(hostname)
             await self._update_state(hostname, ProvisioningStep.STARTING_VLLM)
             model = await self._run_start_vllm(hostname)
@@ -223,6 +225,10 @@ class NodeProvisioner:
             raise ProvisioningError(str(exc)) from exc
 
         logger.info("provisioning_complete", hostname=hostname)
+
+    async def _upload_scripts(self, hostname: str) -> None:
+        """Copy provisioning scripts to the remote host via SCP."""
+        await self._ssh_client.upload(hostname, self._settings.scripts_dir)
 
     async def _run_setup(self, hostname: str) -> None:
         """Run setup.sh and parse step markers from stdout (D-05, D-06)."""

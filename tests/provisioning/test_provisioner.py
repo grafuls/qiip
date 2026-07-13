@@ -77,6 +77,7 @@ class TestProvisionSequence:
                     yield item
 
         ssh.run_streaming = mock_streaming
+        ssh.upload = AsyncMock()
 
         mock_response = MagicMock()
         mock_response.status_code = 200
@@ -97,6 +98,71 @@ class TestProvisionSequence:
         assert "setup" in call_order
         assert "start_vllm" in call_order
         assert call_order.index("setup") < call_order.index("start_vllm")
+
+
+class TestScriptUpload:
+    """Scripts are uploaded to remote host before setup."""
+
+    @pytest.mark.asyncio
+    @patch("inference_proxy.provisioning.provisioner.httpx.AsyncClient")
+    async def test_upload_called_before_setup(self, mock_httpx_cls: MagicMock) -> None:
+        ssh = MagicMock()
+        etcd = MagicMock()
+        etcd.prefix = "/nodes/"
+        etcd.put = MagicMock(return_value=True)
+
+        call_order: list[str] = []
+
+        async def mock_upload(host, local_path, remote_path="."):
+            call_order.append("upload")
+
+        async def mock_streaming(host: str, command: str):
+            if "setup.sh" in command:
+                call_order.append("setup")
+                for item in [("stdout", "[STEP:nvidia_repo:START]")]:
+                    yield item
+            elif "start-vllm.sh" in command:
+                for item in [("stdout", "# Model:              Qwen/Qwen2.5-72B-Instruct")]:
+                    yield item
+
+        ssh.upload = mock_upload
+        ssh.run_streaming = mock_streaming
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_client = AsyncMock()
+        mock_client.get = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_httpx_cls.return_value = mock_client
+
+        provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
+
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_tt:
+                mock_tt.return_value = True
+                await provisioner.provision("host1")
+
+        assert call_order.index("upload") < call_order.index("setup")
+
+    @pytest.mark.asyncio
+    async def test_upload_failure_sets_failed_state(self) -> None:
+        ssh = MagicMock()
+        etcd = MagicMock()
+        etcd.prefix = "/nodes/"
+        etcd.put = MagicMock(return_value=True)
+
+        async def mock_upload(host, local_path, remote_path="."):
+            raise SSHConnectionError("host1", "upload failed")
+
+        ssh.upload = mock_upload
+        provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
+
+        with patch.object(provisioner, "preflight", new_callable=AsyncMock):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_tt:
+                mock_tt.return_value = True
+                with pytest.raises(ProvisioningError):
+                    await provisioner.provision("host1")
 
 
 class TestStepMarkerParsing:
@@ -241,6 +307,7 @@ class TestSetupFailure:
             raise RemoteCommandError("host1", "bash setup.sh", 1)
 
         ssh.run_streaming = mock_streaming
+        ssh.upload = AsyncMock()
         provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
         with patch.object(provisioner, "preflight", new_callable=AsyncMock):
@@ -262,6 +329,7 @@ class TestSetupFailure:
             yield  # pragma: no cover
 
         ssh.run_streaming = mock_streaming
+        ssh.upload = AsyncMock()
         provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
         with patch.object(provisioner, "preflight", new_callable=AsyncMock):
@@ -376,6 +444,7 @@ def _make_full_provisioner(etcd: MagicMock) -> tuple[NodeProvisioner, MagicMock]
                 yield item
 
     ssh.run_streaming = mock_streaming
+    ssh.upload = AsyncMock()
     etcd.prefix = "/nodes/"
     etcd.put = MagicMock(return_value=True)
 
@@ -437,6 +506,7 @@ class TestStateTracking:
                 yield  # pragma: no cover
 
         ssh.run_streaming = mock_streaming
+        ssh.upload = AsyncMock()
         etcd.prefix = "/nodes/"
         etcd.put = MagicMock(return_value=True)
 
