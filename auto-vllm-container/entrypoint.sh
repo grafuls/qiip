@@ -14,4 +14,6 @@ exec vllm serve "${VLLM_MODEL}" \
     --gpu-memory-utilization "${VLLM_GPU_MEM_UTIL:-0.90}" \
     --max-model-len "${VLLM_MAX_MODEL_LEN:-32768}" \
     --max-num-batched-tokens "${VLLM_MAX_BATCHED_TOKENS:-32768}" \
+    --enable-auto-tool-choice \
+    --tool-call-parser hermes \
     ${VLLM_EXTRA_ARGS:-}
