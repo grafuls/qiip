@@ -41,7 +41,16 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Active
 
-(No active requirements — next milestone TBD)
+## Current Milestone: v1.3 QUADS Integration
+
+**Goal:** Integrate with the QUADS REST API to show all available GPU hosts in a unified node list with inline provisioning controls, replacing the separate setup form.
+
+**Target features:**
+- QUADS REST API client to discover available GPU hosts
+- Periodic background polling to keep QUADS host list fresh
+- Unified node list showing all systems (available, provisioned, healthy, unhealthy)
+- Inline action buttons per node state (Available→Setup, Healthy→Teardown, Unhealthy→Teardown+Retry)
+- Remove separate setup input form and setup buttons — everything through the node list
 
 ### Out of Scope
 
@@ -116,4 +125,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-08 after v1.2 milestone completion*
+*Last updated: 2026-07-15 — v1.3 QUADS Integration milestone started*
