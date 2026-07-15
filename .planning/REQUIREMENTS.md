@@ -67,26 +67,26 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| QUADS-01 | — | Pending |
-| QUADS-02 | — | Pending |
-| QUADS-03 | — | Pending |
-| QUADS-04 | — | Pending |
-| NODES-01 | — | Pending |
-| NODES-02 | — | Pending |
-| NODES-03 | — | Pending |
-| NODES-04 | — | Pending |
-| NODES-05 | — | Pending |
-| DASH-01 | — | Pending |
-| DASH-02 | — | Pending |
-| DASH-03 | — | Pending |
-| DASH-04 | — | Pending |
-| DASH-05 | — | Pending |
+| QUADS-01 | Phase 15 | Pending |
+| QUADS-02 | Phase 16 | Pending |
+| QUADS-03 | Phase 15 | Pending |
+| QUADS-04 | Phase 15 | Pending |
+| NODES-01 | Phase 17 | Pending |
+| NODES-02 | Phase 17 | Pending |
+| NODES-03 | Phase 17 | Pending |
+| NODES-04 | Phase 17 | Pending |
+| NODES-05 | Phase 17 | Pending |
+| DASH-01 | Phase 18 | Pending |
+| DASH-02 | Phase 18 | Pending |
+| DASH-03 | Phase 18 | Pending |
+| DASH-04 | Phase 18 | Pending |
+| DASH-05 | Phase 18 | Pending |
 
 **Coverage:**
 - v1.3 requirements: 14 total
-- Mapped to phases: 0
-- Unmapped: 14 ⚠️
+- Mapped to phases: 14
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-15*
-*Last updated: 2026-07-15 after initial definition*
+*Last updated: 2026-07-15 after roadmap creation*
