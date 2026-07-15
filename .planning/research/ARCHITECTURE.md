@@ -1,348 +1,474 @@
-# Architecture Patterns: SSH Node Provisioning (v1.2)
+# Architecture: QUADS API Integration (v1.3)
 
-**Domain:** SSH-based node setup/teardown integrated into existing LLM inference gateway
-**Researched:** 2026-07-01
+**Domain:** QUADS REST API integration into existing LLM inference gateway
+**Researched:** 2026-07-15
 **Overall confidence:** HIGH
 
-## Decision: Embedded, Not Separate Service
+## Decision: QUADS Client as a New Service Layer, Not an Extension of Provisioner
 
-**Embed provisioning inside the existing FastAPI gateway.** Do not create a separate service.
+Add a `QUADSClient` in a new `inference_proxy/quads/` package. Do NOT bolt QUADS calls onto `NodeProvisioner` -- the provisioner orchestrates SSH setup sequences; the QUADS client discovers what hosts exist in the lab. Different responsibilities, different change frequencies.
 
-**Why:**
-- The gateway already owns the NodeRegistry, etcd client, and dashboard -- provisioning needs to read/write all three.
-- A separate service would need its own etcd client, its own health state, and an IPC mechanism to talk to the gateway. That is more code than embedding.
-- The provisioning workload is light (operators set up a handful of nodes per day, not thousands). It does not justify a separate deployment.
-- The existing codebase already runs background threads (watcher, health checker) managed via lifespan. Provisioning is one more background concern (asyncio tasks, not threads).
+The unified node list is a **read-side merge** in the admin API layer. The QUADS client provides "what hosts exist," the NodeRegistry provides "what nodes are running." The admin endpoint merges them. No new data store needed.
 
-**Ceiling:** If provisioning volume grows to the point where SSH sessions compete with proxy request handling for CPU/memory, extract to a sidecar. That is unlikely for internal QUADS lab usage.
+**Why not extend NodeProvisioner?** The provisioner already has a clear job: run SSH sequences and register nodes in etcd. Adding QUADS polling and host discovery to it violates SRP and creates a class that changes for two unrelated reasons (QUADS API changes vs SSH setup changes).
 
-## Recommended Architecture
+**Why not a separate microservice?** Same reasoning as v1.2 -- the gateway already owns the NodeRegistry, dashboard, and admin API. A separate service would need IPC just to produce a merged view. YAGNI.
+
+## Architecture Overview
 
 ```
-              +--------------------------------------------+
-              |             FastAPI Gateway                 |
-              |                                            |
-              |  +----------+  +----------+  +-----------+ |
-              |  | /v1/*    |  | /admin/* |  | /dashboard| |
-              |  | (proxy)  |  | (fleet)  |  | (UI)      | |
-              |  +----------+  +----+-----+  +-----+-----+ |
-              |                     |              |        |
-              |         +-----------v--------------v---+    |
-              |         |  NEW: /admin/nodes/setup     |    |
-              |         |  NEW: /admin/nodes/{id} DEL  |    |
-              |         |  NEW: /admin/provisioning/*   |    |
-              |         +-----------+------------------+    |
-              |                     |                       |
-              |         +-----------v------------------+    |
-              |         | ProvisioningManager           |    |
-              |         | (in-memory task registry)     |    |
-              |         +--+---------------------+-----+    |
-              |            |                     |          |
-              |   +--------v--------+  +---------v-------+ |
-              |   | NodeProvisioner |  | NodeTeardown    | |
-              |   | (asyncio.Task)  |  | (asyncio.Task)  | |
-              |   +--------+--------+  +---------+-------+ |
-              |            |                     |          |
-              |   +--------v--------+            |          |
-              |   | asyncssh conn   |            |          |
-              |   | (per-host)      |            |          |
-              |   +-----------------+            |          |
-              |                                  |          |
-              |  +------------+  +----------+    |          |
-              |  | NodeRegistry|  | EtcdClient|<--+          |
-              |  +------------+  +----------+              |
-              +--------------------------------------------+
+              +----------------------------------------------------+
+              |               FastAPI Gateway                      |
+              |                                                    |
+              |  +----------+  +-----------+  +------------------+ |
+              |  | /v1/*    |  | /admin/*  |  | /dashboard       | |
+              |  | (proxy)  |  | (fleet)   |  | (UI)             | |
+              |  +----------+  +-----+-----+  +--------+---------+ |
+              |                      |                 |           |
+              |          +-----------v-----------------v------+    |
+              |          | /admin/nodes  (MODIFIED)            |    |
+              |          |   Merges QUADS hosts + etcd nodes   |    |
+              |          +-----+-------------------+-----------+    |
+              |                |                   |               |
+              |     +----------v------+  +---------v-----------+   |
+              |     | QUADSClient     |  | NodeRegistry        |   |
+              |     | (HTTP to QUADS) |  | (etcd-backed)       |   |
+              |     +----------+------+  +---------------------+   |
+              |                |                                   |
+              |     +----------v------+                            |
+              |     | QUADSPoller     |                            |
+              |     | (background     |                            |
+              |     |  asyncio.Task)  |                            |
+              |     +-----------------+                            |
+              |                                                    |
+              |  Existing unchanged:                               |
+              |  +------------+ +----------+ +------------------+  |
+              |  | Watcher    | | HealthChk| | NodeProvisioner  |  |
+              |  | (thread)   | | (thread) | | (asyncio tasks)  |  |
+              |  +------------+ +----------+ +------------------+  |
+              +----------------------------------------------------+
+                     |                              |
+              +------v------+              +--------v--------+
+              | etcd        |              | QUADS API       |
+              | /nodes/*    |              | /api/v3/hosts   |
+              +-------------+              | /api/v3/available|
+                                           +-----------------+
 ```
 
-### New Components
+## New Components
 
 | Component | Responsibility | Lives In | Communicates With |
 |-----------|---------------|----------|-------------------|
-| **ProvisioningManager** | Track in-progress setup/teardown tasks, enforce one-task-per-host | `inference_proxy/provisioning/manager.py` | Admin API, NodeProvisioner, NodeTeardown |
-| **NodeProvisioner** | Run SSH setup sequence on a single host (connect, run setup.sh, poll /health, register in etcd) | `inference_proxy/provisioning/provisioner.py` | asyncssh, EtcdClient, NodeRegistry |
-| **NodeTeardown** | Stop container, deregister from etcd | `inference_proxy/provisioning/teardown.py` | asyncssh, EtcdClient, NodeRegistry |
-| **ProvisioningSettings** | SSH key paths, setup script path, timeouts, container image | `inference_proxy/config/settings.py` (add nested model) | Settings |
-| **Provisioning models** | TaskStatus enum, ProvisioningTask Pydantic model, API request/response models | `inference_proxy/models/provisioning.py` | Admin API, ProvisioningManager |
-| **Admin provisioning routes** | POST /admin/nodes/setup, DELETE /admin/nodes/{id}, GET /admin/provisioning/tasks | `inference_proxy/api/admin.py` (extend existing router) | ProvisioningManager |
+| **QUADSClient** | HTTP calls to QUADS REST API. Get hosts, check availability, filter by cloud. Stateless. | `inference_proxy/quads/client.py` | QUADS API server (external) |
+| **QUADSPoller** | Background asyncio.Task that periodically calls QUADSClient and caches results in-memory | `inference_proxy/quads/poller.py` | QUADSClient |
+| **QUADSHost** | Pydantic model for a QUADS host (name, model, cloud, broken, retired, etc.) | `inference_proxy/models/quads.py` | QUADSClient, admin API, dashboard |
+| **QUADSSettings** | QUADS API URL, poll interval, cloud filter, auth token | `inference_proxy/config/settings.py` (add nested model) | Settings |
+| **UnifiedNodeResponse** | Admin response model merging QUADS host info + etcd node info | `inference_proxy/models/admin.py` (extend) | Admin API, dashboard |
 
 ### Modified Components
 
 | Component | Change | Why |
 |-----------|--------|-----|
-| `settings.py` | Add `ProvisioningSettings` nested model | SSH key path, timeouts, container config |
-| `admin.py` | Add 3-4 new endpoints on existing `admin_router` | Same `/admin` namespace, same DI pattern |
-| `dependencies.py` | Add `get_provisioning_manager()` | Follow existing DI pattern |
-| `main.py` lifespan | Create ProvisioningManager, store in `app.state` | Follow existing lifespan pattern |
-| `dashboard.html` | Add setup/teardown buttons, task status display | JS fetches new `/admin/provisioning/*` endpoints |
+| `settings.py` | Add `QUADSSettings` nested model | QUADS API URL, poll interval, spare pool cloud name |
+| `admin.py` | Modify `GET /admin/nodes` to merge QUADS + etcd data | Unified node list is the core v1.3 deliverable |
+| `dependencies.py` | Add `get_quads_poller()` | Follow existing DI pattern |
+| `main.py` lifespan | Create QUADSClient, QUADSPoller, store in `app.state` | Follow existing lifespan pattern |
+| `dashboard.html` | Replace setup form with inline actions per node, show QUADS hosts as "available" rows | v1.3 UI redesign |
+| `models/admin.py` | Add `UnifiedNodeResponse` model | Merged view needs a richer response model |
 
----
+## Data Flow: Unified Node List
 
-## Handling Long-Running SSH Operations
+This is the central design question. Two data sources produce one merged view.
 
-Node setup can take minutes (driver install, container build, vLLM startup). This is the central design challenge.
+### Source 1: QUADS API (all lab hosts)
 
-### Approach: asyncio.create_task + In-Memory Task Registry
+```
+QUADS API /api/v3/hosts  -->  QUADSClient.get_hosts()
+QUADS API /api/v3/available  -->  QUADSClient.get_available()
+```
 
-**Why not threads?** The existing codebase uses threads for the watcher and health checker because those wrap a synchronous library (etcd3gw, httpx sync client). AsyncSSH is natively async -- it runs on the asyncio event loop without blocking. No threads needed.
+Returns: hostname, model, cloud assignment, broken/retired flags. The `/available` endpoint returns hostnames of hosts not currently scheduled (in the spare pool).
 
-**Why not Celery/RQ?** YAGNI. The gateway provisions a handful of nodes per day on an internal network. Adding Redis + Celery for this is a new deployment dependency for no gain. The in-memory approach is sufficient.
+### Source 2: etcd NodeRegistry (provisioned nodes)
 
-**Why not FastAPI BackgroundTasks?** `BackgroundTasks` is fire-and-forget. We need progress tracking, error capture, and task listing for the dashboard. `asyncio.create_task` gives us handles to track.
+```
+etcd /nodes/*  -->  NodeRegistry.get_all()
+```
 
-### Pattern: ProvisioningManager
+Returns: node_id (hostname), endpoint, model, status (HEALTHY/UNHEALTHY/PROVISIONING/DRAINING).
+
+### Merge Logic
+
+The merge happens at request time in the admin endpoint. No persistent merged store.
 
 ```python
-class ProvisioningManager:
-    """Track provisioning tasks. One per app, created in lifespan."""
+def merge_node_list(
+    quads_hosts: list[QUADSHost],
+    registry_nodes: list[Node],
+    provisioning_tasks: list[ProvisioningState],
+) -> list[UnifiedNodeResponse]:
+    """Merge QUADS hosts with etcd-registered nodes.
 
-    def __init__(self) -> None:
-        self._tasks: dict[str, ProvisioningTask] = {}  # task_id -> task state
-        self._active_hosts: dict[str, str] = {}  # hostname -> task_id (prevent duplicates)
-        self._lock = asyncio.Lock()
+    Priority: etcd node data wins over QUADS data for provisioned hosts.
+    QUADS hosts not in etcd appear as "available".
+    etcd nodes not in QUADS appear as-is (manually registered).
+    """
+    etcd_by_hostname: dict[str, Node] = {n.node_id: n for n in registry_nodes}
+    provisioning_by_hostname: dict[str, ProvisioningState] = {
+        t.hostname: t for t in provisioning_tasks
+    }
 
-    async def start_setup(self, hostname: str, model: str, ...) -> str:
-        """Start a setup task. Returns task_id. Raises if host already provisioning."""
-        async with self._lock:
-            if hostname in self._active_hosts:
-                raise ValueError(f"Host {hostname} already has active task")
-            task_id = ...  # uuid4
-            task = ProvisioningTask(id=task_id, hostname=hostname, status=TaskStatus.PENDING, ...)
-            self._tasks[task_id] = task
-            self._active_hosts[hostname] = task_id
-        # Launch the actual work as a background task
-        asyncio.create_task(self._run_setup(task_id, hostname, model, ...))
-        return task_id
+    result = []
+    seen_hostnames: set[str] = set()
 
-    async def _run_setup(self, task_id: str, hostname: str, ...) -> None:
-        """The actual SSH setup sequence. Updates task status as it progresses."""
-        try:
-            self._update_status(task_id, TaskStatus.CONNECTING)
-            async with asyncssh.connect(hostname, ...) as conn:
-                self._update_status(task_id, TaskStatus.RUNNING_SETUP)
-                result = await conn.run('/path/to/setup.sh', check=True, timeout=600)
-                self._update_status(task_id, TaskStatus.STARTING_VLLM)
-                # ... start container, poll health ...
-                self._update_status(task_id, TaskStatus.REGISTERING)
-                # ... register in etcd ...
-                self._update_status(task_id, TaskStatus.COMPLETED)
-        except Exception as exc:
-            self._update_status(task_id, TaskStatus.FAILED, error=str(exc))
-        finally:
-            async with self._lock:
-                self._active_hosts.pop(hostname, None)
+    for host in quads_hosts:
+        seen_hostnames.add(host.name)
+        node = etcd_by_hostname.get(host.name)
+        task = provisioning_by_hostname.get(host.name)
 
-    def get_task(self, task_id: str) -> ProvisioningTask | None: ...
-    def get_all_tasks(self) -> list[ProvisioningTask]: ...
+        if node is not None:
+            # Provisioned -- use etcd status, enrich with QUADS metadata
+            result.append(UnifiedNodeResponse(
+                hostname=host.name,
+                source="etcd",
+                status=node.status.value,
+                model=node.model or host.model,
+                cloud=host.cloud,
+                endpoint=node.endpoint,
+                # ... circuit breaker, connections, etc.
+            ))
+        elif task is not None and task.current_step not in ("complete", "failed"):
+            # Currently provisioning
+            result.append(UnifiedNodeResponse(
+                hostname=host.name,
+                source="provisioning",
+                status="provisioning",
+                provisioning_step=task.current_step,
+                model=host.model,
+                cloud=host.cloud,
+            ))
+        else:
+            # Available in QUADS, not provisioned
+            result.append(UnifiedNodeResponse(
+                hostname=host.name,
+                source="quads",
+                status="available" if host.available else "assigned",
+                model=host.model,
+                cloud=host.cloud,
+                broken=host.broken,
+                retired=host.retired,
+            ))
+
+    # etcd nodes not in QUADS (manually registered or QUADS unavailable)
+    for node_id, node in etcd_by_hostname.items():
+        if node_id not in seen_hostnames:
+            result.append(UnifiedNodeResponse(
+                hostname=node_id,
+                source="etcd",
+                status=node.status.value,
+                model=node.model,
+                endpoint=node.endpoint,
+            ))
+
+    return result
 ```
 
-**Key properties:**
-- One task per host enforced (prevents double-provisioning).
-- Status transitions are synchronous dict writes -- no race conditions within a single asyncio loop because status updates happen between `await` points.
-- Task history persists in memory for the lifetime of the gateway process (sufficient -- operators can see recent tasks on the dashboard).
-- `asyncio.Lock` only guards the host-dedup check, not the SSH operations themselves.
+### Node States in the Unified View
 
-### Task Status State Machine
+| State | Source | Available Actions | UI Treatment |
+|-------|--------|-------------------|-------------|
+| `available` | QUADS (in spare pool, not provisioned) | Setup | Green "Available" badge, Setup button |
+| `assigned` | QUADS (scheduled to a cloud, not spare pool) | None | Grey "Assigned" badge, no actions |
+| `provisioning` | etcd (PROVISIONING status) or in-flight task | Cancel (future) | Yellow "Provisioning" badge + step name |
+| `healthy` | etcd (HEALTHY) | Teardown | Green "Healthy" badge, Teardown button |
+| `unhealthy` | etcd (UNHEALTHY) | Teardown, Retry | Red "Unhealthy" badge, Teardown button |
+| `draining` | etcd (DRAINING) | None (in progress) | Orange "Draining" badge |
+| `broken` | QUADS (broken=true) | None | Red "Broken" badge |
+| `retired` | QUADS (retired=true) | None | Grey "Retired" badge |
 
-```
-PENDING -> CONNECTING -> RUNNING_SETUP -> STARTING_VLLM -> POLLING_HEALTH -> REGISTERING -> COMPLETED
-                \            \                \                \                \
-                 +----------->+--------------->+--------------->+--------------->+-> FAILED
-```
+## QUADSClient Design
 
-Each status transition is a log event with structlog. The dashboard polls `/admin/provisioning/tasks` to get current status.
+### HTTP Client
 
----
-
-## SSH Library: asyncssh
-
-**Use asyncssh because it is native asyncio.** The gateway is already async-first. Paramiko would require wrapping every call in `asyncio.to_thread()` -- more code, worse concurrency, and the threading overhead is unnecessary for I/O-bound SSH operations.
-
-| Criterion | asyncssh | paramiko + to_thread |
-|-----------|----------|---------------------|
-| Async native | Yes | No (wrapped) |
-| Streaming output | `create_process` + async readline | Blocking recv() in thread |
-| Timeout support | Built-in `timeout=` parameter | Manual threading.Timer |
-| Connection pooling | Reuse `SSHClientConnection` | Manual |
-| License | EPL 2.0 OR GPL 2.0+ | LGPL |
-| Maturity | Active since 2013, v2.24.0 | Active since 2003 |
-
-**Confidence:** HIGH (PyPI-verified API, active maintenance, well-documented)
-
-### SSH Connection Pattern
+Use `httpx.AsyncClient` -- already in the stack, no new dependency. The QUADS API is standard REST/JSON.
 
 ```python
-async with asyncssh.connect(
-    hostname,
-    username='root',
-    client_keys=[settings.provisioning.ssh_key_path],
-    known_hosts=None,  # ponytail: internal network only, add known_hosts when external
-    connect_timeout=30,
-    keepalive_interval=60,
-) as conn:
-    result = await conn.run(command, check=True, timeout=timeout)
+class QUADSClient:
+    """Async client for the QUADS REST API (v3).
+
+    Stateless. All methods are async and return parsed Pydantic models.
+    """
+
+    def __init__(self, settings: QUADSSettings) -> None:
+        self._base_url = settings.api_url.rstrip("/")
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0),
+            # ponytail: auth token header if QUADS v3 RBAC is enabled
+            headers={"Authorization": f"Bearer {settings.token}"} if settings.token else {},
+        )
+
+    async def get_hosts(self, **filters: str) -> list[QUADSHost]:
+        """GET /api/v3/hosts with optional filters."""
+        response = await self._client.get("/api/v3/hosts", params=filters)
+        response.raise_for_status()
+        return [QUADSHost.model_validate(h) for h in response.json()]
+
+    async def get_available(
+        self, start: str | None = None, end: str | None = None
+    ) -> set[str]:
+        """GET /api/v3/available -- returns set of available hostnames."""
+        params: dict[str, str] = {}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        response = await self._client.get("/api/v3/available", params=params)
+        response.raise_for_status()
+        return set(response.json())  # API returns list of hostname strings
+
+    async def close(self) -> None:
+        await self._client.aclose()
 ```
 
-**known_hosts=None** is acceptable here because PROJECT.md explicitly states "internal network only, no external-facing endpoints in v1." Add known_hosts validation when/if external access is added.
+**Key detail:** The QUADS `/api/v3/available` endpoint returns a list of hostname strings (not full host objects). The client must call `get_hosts()` separately for full metadata, then cross-reference with `get_available()` to mark which hosts are available. This matches how the QUADS Python client itself works (`filter_available` makes N+1 calls).
 
-### Streaming Setup Output for Progress
+### Optimization: Single Call Strategy
 
-For long-running setup scripts, use `conn.create_process()` to read stdout line-by-line and update task log:
+Instead of calling both `/hosts` and `/available`, call `/hosts` once (gets all hosts with their cloud assignment), then determine availability by checking if the host's current cloud equals the spare pool cloud (typically `cloud01`). This avoids the N+1 problem in the QUADS client.
 
 ```python
-async with conn.create_process(setup_command) as process:
-    async for line in process.stdout:
-        task.append_log(line.rstrip())
-        # ponytail: log lines stored in-memory, capped at ~1000 lines
+async def get_hosts_with_availability(self, spare_pool_cloud: str = "cloud01") -> list[QUADSHost]:
+    """Get all hosts and infer availability from cloud assignment."""
+    hosts = await self.get_hosts()
+    available = await self.get_available()
+    for host in hosts:
+        host.available = host.name in available
+    return hosts
 ```
 
-This lets the dashboard show real-time output from the setup script without waiting for completion.
+This keeps it to 2 API calls per poll cycle regardless of host count.
 
----
+## QUADSPoller Design
 
-## Integration with Existing Components
+### Why a Poller Instead of On-Demand Calls
 
-### NodeRegistry Integration
+The dashboard polls `/admin/nodes` every N seconds. If each poll triggered QUADS API calls, the gateway would make 2 HTTP requests to QUADS per dashboard poll. With multiple dashboard tabs open, this multiplies. A background poller decouples QUADS fetch frequency from dashboard request frequency.
 
-After successful setup, the provisioner registers the new node in etcd. The existing watcher thread will pick up the PUT event and add the node to the in-memory NodeRegistry automatically. **Do not add the node to NodeRegistry directly** -- let it flow through etcd so all gateway instances (if scaled) see it.
-
-```
-Provisioner completes setup
-    |
-    v
-Provisioner writes to etcd: PUT /nodes/{node-id} -> {endpoint, model, ...}
-    |
-    v
-Existing watcher thread detects PUT event
-    |
-    v
-Watcher calls registry.add(node)
-    |
-    v
-Node is now routable
-```
-
-For teardown, the reverse: provisioner DELETEs the etcd key, watcher detects it, calls registry.remove().
-
-### EtcdClient Extension
-
-The existing `EtcdClient` may need `put()` and `delete()` if not already present. These are synchronous (etcd3gw is sync). Wrap in `asyncio.to_thread()` when called from async context, following the existing pattern.
-
-### Dashboard Integration
-
-The dashboard currently polls `/admin/nodes` for the fleet table. Add:
-
-1. **Setup form:** hostname input. POST to `/admin/nodes/setup`.
-2. **Task list:** Poll `/admin/provisioning/tasks` alongside the node list. Show status, elapsed time, last log line.
-3. **Teardown button:** On each node row, a "Teardown" button that calls DELETE `/admin/nodes/{node_id}`.
-
-Follow the existing pattern: Jinja2 renders the HTML shell, vanilla JS does the fetching and DOM updates. No new frontend dependencies.
-
-### DI Integration
-
-Follow the exact pattern of existing dependencies:
+### Implementation
 
 ```python
-# In dependencies.py
-def get_provisioning_manager(request: Request) -> ProvisioningManager:
-    return request.app.state.provisioning_manager
+class QUADSPoller:
+    """Background poller that caches QUADS host data in memory.
 
-# In main.py lifespan
-provisioning_manager = ProvisioningManager(etcd_client, settings.provisioning)
-app.state.provisioning_manager = provisioning_manager
+    Runs as an asyncio.Task started in lifespan. Caches the latest
+    successful response. On QUADS API failure, serves stale data.
+    """
+
+    def __init__(self, client: QUADSClient, settings: QUADSSettings) -> None:
+        self._client = client
+        self._interval = settings.poll_interval
+        self._hosts: list[QUADSHost] = []
+        self._last_fetch: datetime | None = None
+        self._task: asyncio.Task[None] | None = None
+
+    def get_hosts(self) -> list[QUADSHost]:
+        """Return cached QUADS hosts. Non-async, thread-safe read."""
+        return list(self._hosts)  # shallow copy
+
+    async def start(self) -> None:
+        self._task = asyncio.create_task(self._poll_loop())
+
+    async def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+
+    async def _poll_loop(self) -> None:
+        while True:
+            try:
+                hosts = await self._client.get_hosts_with_availability()
+                self._hosts = hosts
+                self._last_fetch = datetime.now(timezone.utc)
+            except Exception:
+                logger.warning("quads_poll_failed", exc_info=True)
+                # Serve stale data on failure -- better than empty
+            await asyncio.sleep(self._interval)
 ```
 
----
+### Coordination with Existing Background Tasks
 
-## API Design
+| Background Task | Runs As | Interval | Shares State With |
+|----------------|---------|----------|-------------------|
+| etcd watcher | `threading.Thread` | Continuous (blocking watch) | NodeRegistry (thread-safe) |
+| Health checker | `threading.Thread` | 30s (configurable) | NodeRegistry, CircuitBreakerRegistry |
+| **QUADS poller** | `asyncio.Task` | 60s (configurable) | Internal cache only |
 
-### POST /admin/nodes/setup
+The QUADS poller does NOT write to NodeRegistry. It maintains its own cache. This means:
+- No lock contention with the watcher or health checker.
+- No risk of QUADS data overwriting etcd-sourced data.
+- The merge happens at read time in the admin endpoint, not at write time.
 
-Starts an async provisioning task. Returns immediately with a task ID.
+**Why asyncio.Task, not threading.Thread?** The QUADS client uses httpx.AsyncClient (async). No need for a thread. This is different from the etcd watcher and health checker, which use threads because etcd3gw and the health check httpx.Client are synchronous.
 
-**Request:**
-```json
-{
-    "hostname": "gpu-server-42.lab.example.com"
-}
+### Failure Modes
+
+| Failure | Behavior | Recovery |
+|---------|----------|----------|
+| QUADS API unreachable | Serve stale cached data. Log warning. | Next successful poll refreshes cache. |
+| QUADS API returns error | Same as unreachable -- stale data. | Automatic on next poll. |
+| Gateway restart | Cache starts empty. First poll fills it. | Automatic within one poll interval. |
+| QUADS returns empty list | Cache becomes empty. Dashboard shows only etcd nodes. | Normal -- QUADS may have no hosts. |
+
+## Settings Addition
+
+```python
+class QUADSSettings(BaseModel):
+    """QUADS API integration configuration."""
+
+    api_url: str = "http://quads.example.com:8080"
+    poll_interval: int = Field(default=60, ge=10)  # seconds
+    spare_pool_cloud: str = "cloud01"  # hosts in this cloud are "available"
+    token: str = ""  # QUADS v3 auth token, empty = no auth
+    enabled: bool = True  # disable QUADS integration entirely
 ```
 
-**Response (202 Accepted):**
-```json
-{
-    "task_id": "abc-123",
-    "status": "pending",
-    "hostname": "gpu-server-42.lab.example.com"
-}
+Added to root `Settings`:
+```python
+quads: QUADSSettings = QUADSSettings()
 ```
 
-**Why 202?** The operation is not complete when the response is sent. 202 Accepted is the correct HTTP status for async operations.
+Env var example: `INFERENCE_PROXY_QUADS__API_URL=http://quads.lab:8080`
 
-### GET /admin/provisioning/tasks
+## Lifespan Changes
 
-Returns all provisioning tasks (recent history).
+```python
+# In main.py lifespan, after existing setup:
 
-### GET /admin/provisioning/tasks/{task_id}
+if resolved_settings.quads.enabled:
+    quads_http_client = httpx.AsyncClient(...)
+    quads_client = QUADSClient(resolved_settings.quads)
+    quads_poller = QUADSPoller(quads_client, resolved_settings.quads)
+    await quads_poller.start()
+    app.state.quads_poller = quads_poller
+else:
+    app.state.quads_poller = None
 
-Returns a single task with full log output.
+# In shutdown:
+if app.state.quads_poller:
+    await app.state.quads_poller.stop()
+    await quads_client.close()
+```
 
-### DELETE /admin/nodes/{node_id}
+## Admin API Changes
 
-Starts an async teardown task. Returns 202 with task ID.
+The existing `GET /admin/nodes` returns `list[AdminNodeResponse]` with only etcd-registered nodes. This changes to return `list[UnifiedNodeResponse]` with merged QUADS + etcd data.
 
----
+```python
+@admin_router.get("/admin/nodes")
+async def list_nodes(
+    registry: NodeRegistry = Depends(get_registry),
+    quads_poller: QUADSPoller | None = Depends(get_quads_poller),
+    node_selector: NodeSelector = Depends(get_node_selector),
+    cb_registry: CircuitBreakerRegistry = Depends(get_circuit_breaker_registry),
+    provisioner: NodeProvisioner = Depends(get_provisioner),
+) -> list[UnifiedNodeResponse]:
+    quads_hosts = quads_poller.get_hosts() if quads_poller else []
+    registry_nodes = registry.get_all()
+    # ... merge and return
+```
+
+**Backward compatibility note:** The response schema changes from `AdminNodeResponse` to `UnifiedNodeResponse`. Since the only consumer is the dashboard JS, and we are modifying that too, this is not a breaking change for external clients (there are none -- internal network only).
+
+## Dashboard UI Changes
+
+### Remove
+- The standalone "Provision Node" form (`<section class="card">` with hostname input)
+
+### Modify
+- Node table gains a "Source" column (QUADS / etcd / both)
+- Status column shows the unified state (available, assigned, healthy, unhealthy, etc.)
+- Actions column shows state-appropriate buttons:
+  - Available: "Setup" button (calls `POST /admin/nodes/setup`)
+  - Healthy: "Teardown" button (calls `DELETE /admin/nodes/{id}`)
+  - Unhealthy: "Teardown" button
+  - Provisioning: step progress text, no action buttons
+  - Assigned/Broken/Retired: no action buttons
+
+### JS Changes
+- Fetch loop already calls `/admin/nodes` -- no new endpoint needed
+- Node row rendering function gains state-based action button logic
+- Toast notifications already exist from v1.2 -- reuse for setup/teardown feedback
 
 ## File Layout
 
 ```
 inference_proxy/
-    provisioning/
+    quads/                       # NEW package
         __init__.py
-        manager.py          # ProvisioningManager (task registry)
-        provisioner.py       # NodeProvisioner (SSH setup logic)
-        teardown.py          # NodeTeardown (SSH teardown logic)
+        client.py                # QUADSClient (async HTTP to QUADS API)
+        poller.py                # QUADSPoller (background cache)
     models/
-        provisioning.py      # TaskStatus, ProvisioningTask, request/response models
+        quads.py                 # NEW: QUADSHost Pydantic model
+        admin.py                 # MODIFY: add UnifiedNodeResponse
     config/
-        settings.py          # Add ProvisioningSettings (modify existing)
-        dependencies.py      # Add get_provisioning_manager (modify existing)
+        settings.py              # MODIFY: add QUADSSettings
+        dependencies.py          # MODIFY: add get_quads_poller()
     api/
-        admin.py             # Add provisioning endpoints (modify existing)
+        admin.py                 # MODIFY: merge logic in GET /admin/nodes
+        merge.py                 # NEW: merge_node_list() function
     templates/
-        dashboard.html       # Add setup/teardown UI (modify existing)
-    main.py                  # Add ProvisioningManager to lifespan (modify existing)
+        dashboard.html           # MODIFY: unified table, inline actions
+    main.py                      # MODIFY: create QUADSClient/Poller in lifespan
 ```
 
-New files: 4 (manager, provisioner, teardown, models). Modified files: 5 (settings, dependencies, admin, dashboard, main).
-
----
+New files: 4 (`client.py`, `poller.py`, `quads.py`, `merge.py`).
+Modified files: 5 (`settings.py`, `dependencies.py`, `admin.py`, `dashboard.html`, `main.py`).
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern: Blocking SSH in the Event Loop
-**What:** Using paramiko or subprocess.run() for SSH in an async handler.
-**Why bad:** Blocks the entire event loop. All proxy requests stall during SSH operations.
-**Instead:** Use asyncssh (native async) or wrap sync calls in asyncio.to_thread().
+### Anti-Pattern: Writing QUADS Data to etcd or NodeRegistry
+**What:** Syncing QUADS hosts into etcd so the watcher picks them up.
+**Why bad:** etcd is the source of truth for provisioned nodes. Mixing QUADS discovery data into it conflates "what exists" with "what is running." Creates ghost nodes that the health checker tries to probe.
+**Instead:** Keep QUADS data in a separate in-memory cache. Merge at read time.
 
-### Anti-Pattern: Direct NodeRegistry Mutation from Provisioner
-**What:** Calling `registry.add(node)` directly after setup completes.
-**Why bad:** Bypasses etcd. If the gateway restarts, the node is lost. If multiple gateways exist, only one knows about the node.
-**Instead:** Write to etcd, let the watcher propagate to all registries.
+### Anti-Pattern: Calling QUADS API on Every Dashboard Poll
+**What:** Making HTTP calls to QUADS inside the `/admin/nodes` handler.
+**Why bad:** Couples dashboard latency to QUADS API latency. Multiple dashboard tabs multiply QUADS API load. QUADS outage makes the entire node list fail.
+**Instead:** Background poller with cached results. Dashboard reads from cache.
 
-### Anti-Pattern: Unbounded Task History
-**What:** Keeping all provisioning tasks in memory forever.
-**Why bad:** Memory leak over weeks/months of operation.
-**Instead:** Cap task history (e.g., keep last 100 tasks, or prune tasks older than 24 hours).
+### Anti-Pattern: Making QUADSClient Synchronous
+**What:** Using `requests` or sync httpx for QUADS API calls.
+**Why bad:** Would need `asyncio.to_thread()` wrapping (like etcd3gw). httpx.AsyncClient is already in the stack and the poller runs on the event loop.
+**Instead:** Use httpx.AsyncClient natively. The poller is an asyncio.Task, not a thread.
 
-### Anti-Pattern: No Host Deduplication
-**What:** Allowing two setup tasks for the same hostname simultaneously.
-**Why bad:** Both try to install drivers, start containers, register in etcd. Race conditions, wasted resources, corrupted state.
-**Instead:** ProvisioningManager maintains hostname-to-task mapping, rejects duplicates.
+### Anti-Pattern: Tight Coupling Between Merge Logic and Admin Route
+**What:** Putting all merge logic inline in the route handler.
+**Why bad:** Merge logic is testable business logic. Inline in the handler makes it harder to test without HTTP fixtures.
+**Instead:** Extract `merge_node_list()` into `api/merge.py`. Pure function, easy to unit test.
 
----
+## Build Order (Suggested Phase Structure)
+
+Based on dependency analysis:
+
+1. **QUADSClient + QUADSHost model + QUADSSettings** -- Foundation. No integration with existing code yet. Fully testable in isolation with httpx mocking.
+
+2. **QUADSPoller + lifespan wiring** -- Depends on QUADSClient. Adds background polling. Dashboard still shows old data at this point.
+
+3. **UnifiedNodeResponse model + merge function** -- Pure data transformation. Testable without HTTP. Depends on QUADSHost existing.
+
+4. **Admin API modification** -- Wire merge into `GET /admin/nodes`. Depends on poller and merge function. Existing dashboard JS breaks at this point (schema changed).
+
+5. **Dashboard UI update** -- Remove setup form, add inline actions, update table rendering for unified response. Fix the JS to match new schema. This is the user-visible deliverable.
+
+Each phase can be tested and committed independently. Phase 4-5 should ship together to avoid a broken dashboard window.
 
 ## Sources
 
-- [AsyncSSH documentation](https://asyncssh.readthedocs.io/) - HIGH confidence
-- [AsyncSSH PyPI](https://pypi.org/project/asyncssh/) - HIGH confidence
-- [AsyncSSH GitHub](https://github.com/ronf/asyncssh) - HIGH confidence
-- [AsyncSSH vs Paramiko comparison](https://elegantnetwork.github.io/posts/comparing-ssh/) - MEDIUM confidence
+- [QUADS API documentation](https://github.com/redhat-performance/quads/blob/master/docs/quads-api.md) - HIGH confidence
+- [QUADS server blueprints (hosts)](https://github.com/redhat-performance/quads/blob/latest/src/quads/server/blueprints/hosts.py) - HIGH confidence
+- [QUADS server blueprints (available)](https://github.com/redhat-performance/quads/blob/latest/src/quads/server/blueprints/available.py) - HIGH confidence
+- [QUADS Python client (quads_api.py)](https://github.com/redhat-performance/quads/blob/latest/src/quads/quads_api.py) - HIGH confidence
+- [QUADS 2.2 release (GPU awareness)](https://github.com/redhat-performance/quads/releases/tag/v2.2.4) - MEDIUM confidence
+- Existing codebase: `inference_proxy/` source files - HIGH confidence

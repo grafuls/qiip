@@ -1,146 +1,135 @@
 # Domain Pitfalls
 
-**Domain:** SSH-Based Node Provisioning for LLM Inference Gateway
-**Researched:** 2026-07-01
-**Confidence:** HIGH (verified against codebase architecture, upstream library issues, and production provisioning patterns)
+**Domain:** QUADS REST API Integration and Unified Node List for LLM Inference Gateway
+**Researched:** 2026-07-15
+**Confidence:** HIGH (verified against existing codebase architecture, QUADS API documentation, and real integration patterns)
 
-**Scope:** Pitfalls specific to adding SSH-based node setup/teardown to the existing async gateway (v1.2). Prior pitfalls (v1.0 streaming, etcd, load balancing) are in git history.
+**Scope:** Pitfalls specific to adding QUADS API integration, unified node list, and inline provisioning controls to the existing v1.2 gateway. Prior pitfalls (v1.0 streaming/etcd, v1.2 SSH provisioning) are in git history.
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause outages, data loss, or require architectural rework.
+Mistakes that cause outages, data corruption, or require architectural rework.
 
-### Pitfall 1: Blocking the Event Loop with SSH Operations
+### Pitfall 1: Race Between QUADS "Available" State and Provisioning Transition
 
-**What goes wrong:** SSH operations (connecting, running `setup.sh`, polling `/health`, building containers) take minutes. Running them on the FastAPI event loop freezes all proxy traffic -- health checks stop, streaming responses stall, the dashboard hangs. A single `POST /admin/nodes/setup` call takes down the entire gateway for the duration of the provisioning.
+**What goes wrong:** QUADS reports host-A as available. Operator clicks "Setup" in the unified node list. The gateway fires `POST /admin/nodes/setup` (background task, returns 202). The QUADS poller runs its next cycle before the provisioner registers the node in etcd as PROVISIONING. The unified node list still shows host-A as "available" because QUADS still reports it as available and etcd has no entry yet. The operator (or a different operator) sees it as available and clicks "Setup" again. Two concurrent provisioning tasks now race on the same host.
 
-**Why it happens:** The gateway is a single-threaded async application. The existing codebase already uses `threading.Thread` for the etcd watcher and health checker (see `main.py` lines 122-146). An SSH library like AsyncSSH is native async, but its long-running commands (NVIDIA driver install: 2-5 minutes, container build: 1-3 minutes) still monopolize the event loop if the result is awaited in the request handler. Paramiko is worse -- it's fully synchronous and will block the loop directly if called from an `async def` handler.
+The existing v1.2 code has no guard against this. `POST /admin/nodes/setup` (admin.py line 78-85) fires `provisioner.fire_background()` with no deduplication. The provisioner registers the node in etcd as PROVISIONING only AFTER preflight passes (provisioner.py line 196-206) -- a gap of 10+ seconds where the host appears in neither etcd nor any in-progress tracking visible to the UI.
+
+**Why it happens:** Two independent data sources (QUADS and etcd) with no shared state. The transition from "QUADS available" to "etcd PROVISIONING" is not atomic. During the gap, the UI shows stale state from the QUADS source.
 
 **Consequences:**
-- All proxy traffic (chat completions, streaming) blocks for the duration of setup (5-15 minutes).
-- Health checker thread continues but the event loop cannot process its results.
-- Dashboard auto-refresh polls timeout, making it look like the gateway crashed.
-- Liveness probes fail, orchestrators may restart the gateway mid-provisioning.
-
-**Warning signs:**
-- `GET /health` latency spikes to seconds during provisioning.
-- Streaming requests timeout while a setup is in progress.
-- asyncio slow callback warnings in logs (`Executing <Task ... took X.XXX seconds>`).
+- Concurrent SSH sessions running setup.sh on the same host (Pitfall 9 from v1.2).
+- Corrupted package state, driver install races.
+- Two background tasks for the same host, only one can succeed, the other fails with confusing errors.
+- Dashboard flickers between "available" and "provisioning" on subsequent poll cycles.
 
 **Prevention:**
-- Use AsyncSSH (native asyncio) and run provisioning as a background `asyncio.Task`, not in the request handler. The `POST /admin/nodes/setup` endpoint should return 202 Accepted immediately with a task ID, then the provisioning runs asynchronously.
-- Set `connect_timeout` on AsyncSSH connections (10-15 seconds) to fail fast on unreachable hosts.
-- For CPU-bound parts of SSH output parsing, use `asyncio.to_thread()`.
-- Do NOT use Paramiko -- it's synchronous and the open GitHub issue (#2363) confirms no async support is planned. AsyncSSH is the only production-grade async SSH library for Python.
+- Add a client-side in-memory set of "in-flight" hostnames. When setup is triggered, add the hostname to this set BEFORE firing the background task. The unified node list API must check this set and report the host as "provisioning" even before the etcd write.
+- The existing `_background_tasks` set in NodeProvisioner tracks tasks but not hostnames. Add a `pending_hosts: set[str]` that is populated on setup request and cleared on provisioning completion (success or failure). The admin endpoint checks this set and returns 409 Conflict on duplicate setup requests.
+- The `/admin/nodes` response (or a new unified endpoint) must merge three sources: QUADS available hosts, in-flight provisioning set, and etcd registry. A host present in the in-flight set is shown as "provisioning" regardless of what QUADS says.
+- This is the same per-host lock pattern from v1.2 Pitfall 9, but now it must also be visible to the UI merge logic.
 
-**Detection:** Enable asyncio debug mode in development (`PYTHONASYNCIODEBUG=1`). Any callback taking >100ms is logged. Monitor `/health` response time during provisioning operations.
-
-**Phase:** Architecture must be decided before any SSH code is written. Background task pattern is non-negotiable.
+**Phase:** Must be in the unified API endpoint design. The merge logic and the guard are the same feature.
 
 ---
 
-### Pitfall 2: Partially Provisioned Servers After Setup Script Failure
+### Pitfall 2: Stale QUADS Cache Showing Hosts That Are No Longer Available
 
-**What goes wrong:** `setup.sh` fails at step 5 of 8 (e.g., NVIDIA driver install fails). The server now has packages installed, nouveau blacklisted, initramfs rebuilt -- but no working GPU driver, no CDI config, no NFS mount, no container. The server is in a state that neither the old setup script nor a re-run can cleanly handle.
+**What goes wrong:** The QUADS poller fetches available hosts every N seconds (e.g., 60s). Between polls, a host gets assigned to another team's cloud in QUADS. The gateway's cache still shows it as "available." An operator clicks "Setup." The SSH connection succeeds (the host is reachable), setup.sh runs, vLLM starts -- on a host that was just allocated to someone else. That team's workload is now competing with or displaced by vLLM.
 
-**Why it happens:** Looking at the actual `setup.sh`:
-1. `curl ... | sudo tee ...` -- NVIDIA repo (can fail: DNS, network)
-2. `sudo dnf -y update` -- system update (can fail: disk space, broken deps)
-3. `sudo dnf -y install ...` -- packages including `kernel-devel-$(uname -r)` (can fail: kernel mismatch after update in step 2)
-4. `echo 'blacklist nouveau' | sudo tee ...` -- blacklist (unlikely to fail)
-5. `sudo dracut --force` -- initramfs rebuild (can fail: disk space)
-6. `sudo modprobe -r nouveau` -- remove module (can fail: module in use)
-7. NVIDIA driver `.run` installer (can fail: kernel mismatch, existing driver, gcc missing)
-8. `nvidia-ctk cdi generate` (can fail: driver not loaded)
-9. NFS mount (can fail: network, server down, path doesn't exist)
-10. iptables rules (can fail: iptables not installed, rules conflict)
+Worse: QUADS moves the host to a different network/VLAN as part of the cloud assignment. SSH works briefly (cached ARP), then fails mid-setup. The host is partially provisioned on a network it's being pulled off of.
 
-The script has no `set -e`, no error checking, no idempotency guards. Every `dnf install` is NOT idempotent if packages were partially installed. The NVIDIA `.run` installer will refuse to run if a previous partial install exists. `dracut --force` after a `dnf update` that changed the kernel but before reboot creates a mismatch.
+**Why it happens:** QUADS is the source of truth for host allocation. The gateway's QUADS cache is a snapshot that ages. The longer the poll interval, the larger the window for stale data. But even a 5-second poll interval cannot eliminate the race -- only shrink it.
 
 **Consequences:**
-- Server is unusable for inference AND unusable for its original purpose.
-- Manual SSH into the server to diagnose and clean up.
-- Re-running setup.sh makes things worse (double-installs, conflicting drivers).
-- The gateway reports the setup "failed" but has no idea what state the server is in.
+- Provisioning a host allocated to another team -- operational conflict, potential data loss on the other team's workload.
+- Partially provisioned host on a transitioning network -- unreachable after QUADS moves it.
+- Trust erosion: operators stop trusting the "available" status in the dashboard.
 
 **Prevention:**
-- Make each step idempotent: check if the package is already installed before installing, check if nouveau is already blacklisted before writing the conf, check if the NVIDIA driver is already loaded before running the installer.
-- Add `set -euo pipefail` to the script (it's already in `start-vllm.sh` but missing from `setup.sh`).
-- Track setup progress in a state file on the remote host (e.g., `/var/lib/vllm-setup/state`). Each step writes its completion. On re-run, skip completed steps.
-- Implement a corresponding `cleanup.sh` that reverses each step. On setup failure, offer a "retry" (re-run from failed step) or "abort" (run cleanup) option.
-- The gateway must store per-host provisioning state: `PENDING`, `SETUP_IN_PROGRESS`, `SETUP_FAILED(step=N)`, `READY`, `TEARDOWN_IN_PROGRESS`, `TORN_DOWN`.
-- Validate prerequisites before starting: check SSH connectivity, check disk space, check kernel version, check if GPU hardware is present (`lspci | grep NVIDIA`).
+- Re-validate availability with a fresh QUADS API call at setup time, not from cache. The `POST /admin/nodes/setup` handler (or the provisioner's preflight) should call QUADS `/api/v3/available` (or equivalent) synchronously before firing the background task. If the host is no longer available, return 409 with a clear message.
+- Display the cache age in the UI. Show "Last QUADS sync: 45s ago" so operators know how fresh the data is.
+- Use a short poll interval (30s) but accept that it is not a guarantee. The fresh check at setup time is the real guard.
+- Consider adding a QUADS schedule check: query the host's current cloud assignment, not just availability. A host in `cloud01` (spare pool) is truly idle. A host in `cloud15` is assigned.
 
-**Detection:** Each step in the script should emit structured output (e.g., `STEP:nvidia-driver:OK` or `STEP:nvidia-driver:FAIL:exit_code=1`) that the gateway parses to track progress.
-
-**Phase:** Setup script refactoring should be the FIRST phase of v1.2. Building SSH integration on top of the current non-idempotent `setup.sh` is building on sand.
+**Phase:** QUADS client implementation. The fresh-check-at-setup-time is part of the provisioning flow, not a separate feature.
 
 ---
 
-### Pitfall 3: Race Condition Between Provisioning, Health Checker, and etcd Watcher
+### Pitfall 3: QUADS API Unavailability Degrading the Entire Dashboard
 
-**What goes wrong:** Setup completes, the node is registered in etcd, the etcd watcher picks it up and adds it to the `NodeRegistry`. The health checker immediately probes it -- but vLLM is still loading the model (30-120 seconds for large models). The health checker marks it UNHEALTHY after 3 failed probes (90 seconds at 30-second intervals). When vLLM finally starts responding, the circuit breaker may already be tripped.
+**What goes wrong:** QUADS API goes down (service restart, network issue, maintenance). The unified node list endpoint tries to fetch QUADS hosts, gets a connection error or timeout, and either: (a) returns 500 to the dashboard, breaking the entire UI, or (b) blocks for the full timeout duration, making the dashboard sluggish.
 
-Worse scenario: teardown is initiated for a node. The gateway sends `podman stop` via SSH, then removes the node from etcd. But between the etcd removal event and the watcher processing it, the health checker is probing the dying node, getting errors, and tripping the circuit breaker for a node that's about to be removed anyway.
+The existing dashboard fetches three endpoints in parallel (dashboard.js lines 105-108): `/admin/nodes`, `/admin/metrics`, `/admin/provisioning/tasks`. If the unified endpoint adds QUADS as a fourth dependency, a QUADS outage takes down the dashboard that was previously working fine for monitoring etcd-registered nodes.
 
-**Why it happens:** Three independent systems interact with no coordination:
-1. **Provisioning** (new in v1.2): SSH-driven setup that registers the node in etcd at the end.
-2. **etcd watcher** (existing, `discovery/watcher.py`): Background thread that updates `NodeRegistry` on etcd changes.
-3. **Health checker** (existing, `resilience/health_checker.py`): Background thread that probes all nodes in the registry every 30 seconds.
-
-The health checker (line 74 of `health_checker.py`) iterates `registry.get_all()` on every cycle. There's no concept of "this node is still being provisioned, skip it" or "this node is being torn down, skip it."
+**Why it happens:** Coupling two independent data sources into a single API response without graceful degradation. The dashboard worked perfectly without QUADS in v1.2. Adding QUADS as a hard dependency is a regression.
 
 **Consequences:**
-- Newly provisioned nodes are immediately marked UNHEALTHY and may never recover if the circuit breaker trips.
-- Teardown races produce spurious error logs and stale circuit breaker state.
-- Operators see confusing dashboard state: node shows as UNHEALTHY right after supposedly successful setup.
+- Dashboard shows "Update failed -- retrying..." (dashboard.js line 187) during QUADS outage.
+- Operators cannot see the health of currently running nodes during a QUADS outage.
+- All operational visibility lost because a non-critical feature (host discovery) failed.
+- If the QUADS call blocks for 30s (httpx default timeout), dashboard polling backs up and the UI appears frozen.
 
 **Prevention:**
-- Add a `PROVISIONING` status to `NodeStatus` enum. Nodes in `PROVISIONING` state are in the registry (visible on dashboard) but skipped by the health checker and node selector.
-- Register the node in etcd with `PROVISIONING` status BEFORE starting setup. Update to `HEALTHY` only after the gateway's own health probe succeeds post-setup. This way the watcher sees the node but the health checker and router ignore it.
-- For teardown: mark the node as `DRAINING` (already exists in `NodeStatus`) first, wait for in-flight connections to finish, THEN stop the container and remove from etcd. The existing `registry.drain()` method already supports this.
-- Add a startup grace period to the health checker: skip probing any node whose `last_heartbeat` is None (never been probed) for the first N seconds after it appears.
+- QUADS data is supplementary, not required. The unified endpoint must return etcd-registered nodes even when QUADS is unreachable. QUADS hosts are merged in when available, omitted when not.
+- Return a degradation indicator in the API response: `{"quads_status": "unavailable", "quads_last_sync": "2026-07-15T10:30:00Z", "nodes": [...]}`. The UI shows a warning banner but still renders the node list.
+- Set a short httpx timeout for QUADS calls (5s connect, 10s read). QUADS is a supplementary data source, not on the critical path.
+- Cache the last successful QUADS response in memory. On failure, serve the cached response with a staleness indicator. This is the standard stale-while-revalidate pattern.
+- Do NOT make the unified node list endpoint await QUADS synchronously. Serve QUADS data from the background poller's cache. The endpoint just reads the cache, never calls QUADS directly.
 
-**Detection:** Log provisioning state transitions with timestamps. Alert if a node stays in `PROVISIONING` for more than a configurable maximum (e.g., 20 minutes).
-
-**Phase:** Must be addressed in the same phase as the SSH integration. Cannot be deferred -- the race exists from the moment the first node is provisioned.
+**Phase:** QUADS client and unified endpoint design. The degradation pattern must be in the initial architecture, not bolted on later.
 
 ---
 
-### Pitfall 4: SSH Disconnection During Long-Running Operations Leaves Orphaned Processes
+### Pitfall 4: Identity Mismatch Between QUADS Hosts and etcd Nodes
 
-**What goes wrong:** The NVIDIA driver installation takes 3+ minutes. Mid-install, the SSH connection drops (network hiccup, gateway restart, operator cancels the setup). The `NVIDIA-Linux-x86_64-*.run` installer continues running on the remote host as an orphaned process. When SSH reconnects and tries to re-run setup, the installer is still running, holding locks on kernel modules.
+**What goes wrong:** QUADS returns hosts as FQDNs: `host-01.scalelab.redhat.com`. The existing system uses short hostnames as `node_id` in etcd (provisioner.py line 298: `node_id=hostname`). The setup form in v1.2 accepts whatever the operator types. If an operator typed `host-01` (short) in the old form, but QUADS returns `host-01.scalelab.redhat.com` (FQDN), the unified node list shows the same physical host twice: once as a QUADS available host and once as an etcd provisioned node.
 
-Similarly: `podman build` is running, SSH drops, the build continues consuming resources. The gateway has no idea whether the build succeeded, failed, or is still running.
+The merge logic cannot match them because the keys differ. The dashboard shows "host-01.scalelab.redhat.com (Available)" and "host-01 (Healthy)" side by side -- same host, different identities.
 
-**Why it happens:**
-- SSH channels deliver SIGHUP to the remote process when the connection drops, BUT sudo-invoked processes and processes that have changed their process group may not receive it.
-- The `.run` installer spawns subprocesses (compiler, linker, DKMS) that may survive the parent.
-- `podman build` runs in its own namespace and is not killed by SSH disconnect.
-- AsyncSSH's `conn.run()` timeout only applies to data received from the channel, not to the underlying process on the remote host. If the connection drops, `conn.run()` raises `ConnectionLost` but the remote process keeps running.
+**Why it happens:** No canonical hostname format was enforced in v1.2. The `node_id` is whatever string the operator passes to `POST /admin/nodes/setup`. QUADS has its own naming convention. There is no normalization.
 
 **Consequences:**
-- Orphaned NVIDIA installer holding kernel module locks, preventing re-run.
-- Orphaned `podman build` consuming CPU and disk I/O.
-- Gateway reports "setup failed" but the setup may actually complete successfully on the remote host, leaving the gateway state out of sync.
-- Multiple orphaned processes from repeated setup attempts.
+- Duplicate entries in the unified node list for the same physical host.
+- Operator tries to tear down "host-01" but the QUADS entry for "host-01.scalelab.redhat.com" still shows as available, inviting a re-provision attempt.
+- Merge logic silently fails to correlate hosts, making the unified view useless.
+- If provisioning uses the FQDN from QUADS but etcd has the short name from a previous manual setup, the node appears twice in the registry.
 
 **Prevention:**
-- Run long commands inside `tmux` or `screen` on the remote host. The gateway creates a named session (`tmux new-session -d -s vllm-setup`), runs the command inside it, and monitors the session. On SSH reconnect, the gateway re-attaches to the same session to check status.
-- Alternative (simpler): use `nohup command > /var/log/vllm-setup.log 2>&1 &` with a PID file. On SSH reconnect, check if the PID is still running and tail the log.
-- Write a wrapper script on the remote host that:
-  1. Writes its PID to a known location.
-  2. Runs the setup steps.
-  3. Writes success/failure status to a state file.
-  4. The gateway polls the state file via SSH, not the command's stdout.
-- Before starting setup, check for orphaned processes from previous attempts: `pgrep -f 'NVIDIA-Linux'`, `podman ps --filter name=vllm`.
-- Implement a "cancel setup" action that SSHs in and kills known setup processes.
+- Canonicalize hostnames. Pick one format (FQDN or short) and normalize everywhere. Since QUADS returns FQDNs, use FQDN as the canonical `node_id`. When provisioning from the unified list, pass the FQDN from QUADS directly.
+- Add a normalization function: `def canonical_hostname(name: str) -> str` that strips or appends the domain suffix consistently. Use it in the QUADS client, the provisioner, and the merge logic.
+- For backward compatibility with existing etcd entries: the merge logic should try both FQDN and short hostname when matching. Or run a one-time migration to normalize existing etcd entries.
+- The `SetupRequest` model (admin.py) should validate and normalize the hostname before passing it to the provisioner.
 
-**Detection:** Before any setup operation, run a pre-flight check: `pgrep -f 'NVIDIA|podman build|dracut'` to detect orphans from a previous run.
+**Phase:** First phase -- before any merge logic. Hostname normalization is a precondition for correct merging.
 
-**Phase:** Core SSH integration. The nohup+PID file pattern is simpler than tmux and sufficient for non-interactive scripts. Use it.
+---
+
+### Pitfall 5: Removing the Setup Form Before Inline Actions Are Complete and Tested
+
+**What goes wrong:** The v1.3 plan says "Remove separate setup input form and setup buttons -- everything through the node list." The old setup form (dashboard.html lines 24-30, dashboard.js lines 196-223) is simple and works: type a hostname, click Setup. If the inline "Setup" button in the unified node list has a bug, there is no fallback for provisioning.
+
+Scenarios where inline-only breaks:
+- QUADS API is down: no available hosts shown, no Setup buttons visible. With the old form, operators could still type a hostname manually.
+- QUADS doesn't know about a host (new server not yet registered in QUADS): invisible in the unified list, cannot be provisioned. The old form accepted any hostname.
+- A host is in QUADS but filtered out by the GPU/availability query: invisible, cannot be provisioned.
+
+**Why it happens:** Replacing a working UI with a new one in a single step. The old form was a universal fallback -- any hostname, no dependencies. The inline buttons depend on QUADS data being correct and available.
+
+**Consequences:**
+- Operators locked out of provisioning when QUADS is unreachable.
+- Hosts not in QUADS cannot be provisioned at all.
+- Regression discovered in production when QUADS goes down at an inconvenient time.
+
+**Prevention:**
+- Keep the manual hostname input as a secondary/collapsed control. The inline buttons are the primary workflow, but a "Manual setup" text input remains for edge cases and QUADS outages. This is one `<input>` and one `<button>` -- not a significant UI burden.
+- Alternative: phase the removal. In v1.3.0, add inline buttons alongside the existing form. In v1.3.1 (after validation), collapse the form into a "manual override" section. In v1.4, remove it entirely if nobody uses it.
+- At minimum, the admin API endpoint `POST /admin/nodes/setup` must continue accepting arbitrary hostnames. The UI can change, the API should not remove capability.
+
+**Phase:** UI implementation. Do not remove the form in the same phase that adds inline buttons. Add first, validate, then remove.
 
 ---
 
@@ -148,216 +137,188 @@ Similarly: `podman build` is running, SSH drops, the build continues consuming r
 
 Mistakes that cause significant debugging time or operational headaches.
 
-### Pitfall 5: Not Cleaning Up on Teardown Failure
+### Pitfall 6: Merging Data Sources in the Wrong Layer
 
-**What goes wrong:** Teardown is supposed to: stop the vLLM container, remove it, deregister from etcd. The container stop succeeds, but the etcd deregistration fails (etcd is down). Now the container is stopped but the node is still in the registry. The health checker marks it UNHEALTHY, and the dashboard shows a dead node that cannot be set up (container remnants) or torn down (already partially torn down).
+**What goes wrong:** Two reasonable approaches for merging QUADS hosts and etcd nodes:
 
-Reverse scenario: etcd deregistration succeeds but `podman stop` fails (container is stuck, OOM, GPU process hung). The node disappears from the registry but the container keeps running, consuming GPU resources. The server appears "idle" to QUADS but is still running inference workloads.
+(A) **Backend merge:** A new API endpoint returns a unified list, merging QUADS cache and etcd registry server-side. The frontend receives one flat list.
 
-**Why it happens:** Teardown is treated as an atomic operation when it's actually a multi-step process that can fail at any point. Each step has different failure modes and different rollback actions.
+(B) **Frontend merge:** The frontend fetches `/admin/nodes` (etcd) and a new `/admin/quads/hosts` endpoint separately, then merges in JavaScript.
 
-**Consequences:**
-- Ghost nodes in etcd that no longer correspond to running containers.
-- Zombie containers consuming GPU memory that nobody knows about.
-- The server is "lost" -- neither the gateway nor QUADS tracks it correctly.
-- Manual intervention required to reconcile state.
+Option B seems simpler (two independent endpoints, frontend combines) but creates problems:
+- The merge logic (matching hostnames, determining state priority, handling conflicts) is duplicated if any other consumer needs the unified list (e.g., a future CLI tool, monitoring integration).
+- The JavaScript merge runs on every poll cycle (every 10 seconds). Complex merge logic in vanilla JS DOM manipulation (already 224 lines) becomes unmaintainable.
+- Race condition: the two fetches return at different times. Between `/admin/nodes` returning and `/admin/quads/hosts` returning, the UI flickers -- a host briefly appears as "available" then jumps to "provisioned" when the second response arrives.
+
+Option A is more work upfront but keeps the merge logic in Python (testable, type-checked) and delivers a consistent snapshot to the frontend.
 
 **Prevention:**
-- Define teardown as a sequence with explicit error handling per step:
-  1. Mark node as DRAINING in registry (prevents new traffic).
-  2. Wait for in-flight connections to finish (or timeout).
-  3. Stop container via SSH (`podman stop --time 30 vllm`).
-  4. Remove container via SSH (`podman rm vllm`).
-  5. Deregister from etcd.
-  6. Mark teardown complete.
-- If step 3 fails, force-kill: `podman kill vllm`, then `podman rm -f vllm`.
-- If step 5 fails, retry with backoff. If etcd is truly down, log the orphaned registration and add a reconciliation sweep that cleans up stale etcd entries on the next successful etcd connection.
-- Always deregister from etcd LAST (after container is confirmed stopped). This way, if teardown fails, the health checker will detect the dead node and mark it UNHEALTHY, which is the correct state.
-- Store teardown state: `TEARDOWN_IN_PROGRESS`, `TEARDOWN_FAILED(step=N)`, `TORN_DOWN`.
+- Merge in the backend. Create a single endpoint (e.g., `GET /admin/fleet`) that returns a unified list. Each entry has a `source` field ("quads", "etcd", or "both") and a computed `state` field ("available", "provisioning", "healthy", "unhealthy", "draining").
+- The merge logic is a pure function: `merge(quads_hosts, etcd_nodes, pending_hosts) -> list[UnifiedNode]`. Easy to test, no side effects.
+- The frontend fetches one endpoint, renders one table. The existing `refreshDashboard()` pattern (fetch + render) stays the same, just with a different endpoint and richer data.
+- Keep the raw `/admin/nodes` endpoint for backward compatibility and API consumers that only care about etcd-registered nodes.
 
-**Detection:** Periodic reconciliation: SSH into hosts that are registered in etcd and verify the container is actually running. Flag mismatches.
-
-**Phase:** Teardown implementation. Define the state machine before writing the code.
+**Phase:** Unified endpoint design. This is an architectural decision that affects everything downstream.
 
 ---
 
-### Pitfall 6: SSH Key Exposure Through Logs, Error Messages, or Configuration
+### Pitfall 7: Background QUADS Poller Lifecycle Not Integrated with Existing Shutdown
 
-**What goes wrong:** The SSH private key path, passphrase, or key material appears in:
-- Structured logs (structlog renders all bound variables by default).
-- FastAPI error responses (unhandled exceptions include local variables).
-- pydantic-settings `.env` file that gets committed to git.
-- Dashboard UI error messages shown to operators.
+**What goes wrong:** The gateway already has two background threads (etcd watcher, health checker) managed by a shared `stop_event` and joined during shutdown (main.py lines 123-149, 190-198). A new QUADS background poller needs the same lifecycle management. If it is added as a raw `asyncio.create_task()` without proper cancellation, it:
+- Keeps running during graceful shutdown, making HTTP calls to QUADS while the gateway is draining.
+- Holds open an httpx client that gets closed during shutdown, causing `RuntimeError: Event loop is closed` or `httpx.PoolTimeout`.
+- Is not joined on shutdown, so the process exits with the poller mid-request, potentially corrupting the cached state.
 
-**Why it happens:** The gateway uses structlog with context binding. If SSH connection parameters are bound to the logger context (a natural pattern: `log.bind(host=host, key_path=key_path)`), the key path appears in every subsequent log line. Worse, if the key content is ever loaded into a variable and an unhandled exception occurs, FastAPI's default error handler may include it in the traceback.
-
-The existing `Settings` class uses `env_file=".env"`. Adding SSH key paths or passphrases to `.env` creates a risk of committing secrets to git.
-
-**Consequences:**
-- SSH key paths leaked in logs visible to anyone with log access.
-- Key material in crash dumps or error tracking systems.
-- `.env` committed to git exposes credentials to anyone with repo access.
+**Why it happens:** The existing shutdown pattern uses `threading.Event` + `thread.join()`. A new poller might use `asyncio.Task` (natural for async code) but then misses the `stop_event` signal. Or it uses a thread but with its own httpx client that is not closed in the right order.
 
 **Prevention:**
-- Never bind key material or passphrases to structlog context. Bind only the key fingerprint or a key identifier.
-- Use Pydantic's `SecretStr` type for any SSH-related secrets in settings. `SecretStr` redacts the value in `repr()` and logging.
-- Add `.env` to `.gitignore` (verify it's already there).
-- Configure a custom FastAPI exception handler that strips sensitive variables from error responses.
-- Store SSH key paths in settings, not key contents. Load keys only when establishing a connection, never cache key material in app state.
-- The PROJECT.md already specifies "Pre-configured SSH keys (operator ensures ~/.ssh access)" -- lean into this. The gateway should read `~/.ssh/id_ed25519` by default, configurable via `INFERENCE_PROXY_SSH__KEY_PATH`. No key material in env vars.
+- Use the same `stop_event` that the etcd watcher and health checker use. The QUADS poller is an async loop that checks `stop_event.is_set()` between poll cycles.
+- If the poller is an `asyncio.Task` (preferred since QUADS calls are async httpx), store it in `app.state` and cancel it during the lifespan teardown, before closing the httpx client.
+- The poller should use the application's shared httpx client or its own client that is created and closed within the poller's lifecycle. Do not share the proxy httpx client (different timeout/pool settings).
+- Add the poller startup/shutdown to the existing lifespan function in main.py, in the same block as the other background services.
 
-**Detection:** Grep logs for patterns matching key paths or key material. Add a CI check that `.env` is not tracked in git.
-
-**Phase:** Settings and configuration phase, before any SSH code. Get the security model right first.
+**Phase:** QUADS client implementation. Wire into existing lifecycle from the start.
 
 ---
 
-### Pitfall 7: NFS Mount Failure Hangs Setup Indefinitely
+### Pitfall 8: QUADS Response Format Surprises
 
-**What goes wrong:** `setup.sh` runs `sudo mount -t nfs -o vers=3 rdu-storage02.scalelab.redhat.com:/mnt/SATA/scratch/grafuls/hf-cache /srv/hf-cache`. If the NFS server is down, unreachable, or the export path doesn't exist, this command hangs indefinitely with the default `hard` mount option. The SSH channel stays open, the gateway thinks setup is still in progress, and the remote host is stuck in a mount syscall.
+**What goes wrong:** The QUADS API has evolved through multiple versions (v2 with MongoDB backend returning `$oid`/`$date` fields, v3 with PostgreSQL returning standard JSON). The response format depends on the QUADS version deployed in the target environment. Code written against v3 responses breaks when pointed at a v2 QUADS instance, or vice versa.
 
-**Why it happens:** NFS `hard` mount (the default) retries indefinitely. The `mount` command will not return until the NFS server responds or the process is killed. This is by design for production NFS mounts (prevent data loss), but it's catastrophic for automated provisioning where you need fast failure.
-
-Looking at the actual `setup.sh` mount command: `sudo mount -t nfs -o vers=3 ...` -- no `soft`, no `timeo`, no `retrans` options. This is a hard mount with default timeouts.
-
-**Consequences:**
-- Setup hangs indefinitely on NFS failure.
-- The SSH command timeout (if set) kills the SSH channel but the mount process on the remote host continues retrying.
-- The server is stuck in an uninterruptible mount state.
-- Cannot SSH back in to fix it because `df` commands will also hang (NFS state is kernel-level).
+Specific surprises from the QUADS API:
+- Host objects may include MongoDB-style `{"$oid": "..."}` for IDs and `{"$date": 1552923007391}` for timestamps (v2).
+- The `cloud` field on a host object may be an object reference (`{"$oid": "..."}`) rather than a cloud name string -- requires a join/follow-up call to get the cloud name.
+- The `/api/v2/available` endpoint parameters use CLI-style `--schedule-start` format in the docs but may expect query params (`?schedule_start=...`) in practice.
+- Empty responses may be `[]`, `{}`, `""`, or `null` depending on the endpoint and version.
+- The `host_type` field is free-form text (not an enum). GPU presence is not a standard field -- it may need to be inferred from hostname patterns, host_type, or a separate metadata query.
 
 **Prevention:**
-- Use `soft` mount with explicit timeouts for provisioning: `sudo mount -t nfs -o vers=3,soft,timeo=100,retrans=3 ...`. This fails after ~30 seconds instead of hanging forever.
-- Better: check NFS server reachability BEFORE attempting the mount: `timeout 10 nc -zv rdu-storage02.scalelab.redhat.com 2049`.
-- Add a prerequisite check step that validates NFS server availability before the full setup begins.
-- If using `hard` mount for production reliability, do the mount in a subshell with `timeout`: `timeout 60 sudo mount -t nfs ...`.
-- After mount, verify it actually works: `timeout 10 ls /srv/hf-cache/` or `timeout 10 stat /srv/hf-cache/`.
+- Before writing the QUADS client, make a few manual `curl` calls against the actual QUADS instance to observe real response formats. Do not rely solely on documentation.
+- Use Pydantic models for QUADS response parsing with `model_config = ConfigDict(extra="ignore")` to tolerate unexpected fields. Define the fields you need, ignore the rest.
+- Handle both v2 and v3 response formats in the parser, or pin to the specific version deployed in the target environment and document the requirement.
+- For GPU host filtering: determine how GPU hosts are identified in the target QUADS instance (hostname pattern? host_type? metadata field?) and make it configurable, not hardcoded.
 
-**Detection:** SSH command timeout will catch this if set correctly. But the remote host may need manual recovery (`umount -f -l /srv/hf-cache`).
-
-**Phase:** Setup script hardening. Fix this before automating SSH setup.
+**Phase:** QUADS client implementation. Start with manual API exploration, then code the client.
 
 ---
 
-### Pitfall 8: GPU Driver Installation Failure Modes Are Not Recoverable by Re-Run
+### Pitfall 9: Unified Node List State Explosion in Vanilla JS
 
-**What goes wrong:** The NVIDIA `.run` installer fails partway through. Common failure modes:
-1. **Kernel header mismatch:** `dnf update` in step 2 installed a new kernel, but the running kernel is still the old one. `kernel-devel-$(uname -r)` installs headers for the old kernel. The driver compiles against old headers, DKMS fails on reboot.
-2. **Existing driver conflict:** A previous partial install left NVIDIA kernel modules loaded. The installer cannot replace loaded modules.
-3. **GCC version mismatch:** The kernel was compiled with a different GCC than what's installed. DKMS build fails.
-4. **Secure Boot:** The server has Secure Boot enabled. Unsigned NVIDIA modules fail to load.
+**What goes wrong:** The current dashboard.js is 224 lines of vanilla JS DOM manipulation. The node table renders 8 columns with one conditional action button (Teardown, disabled during provisioning/draining). The unified node list needs:
+- New states: "available" (from QUADS), plus all existing states.
+- Conditional action buttons per state: Available -> Setup, Healthy -> Teardown, Unhealthy -> Teardown + Retry, Provisioning -> (disabled), Draining -> (disabled).
+- A QUADS status indicator (connected/disconnected/stale).
+- Visual distinction between QUADS-only hosts and etcd-registered nodes.
+- Potentially more columns (GPU info, cloud assignment, QUADS last seen).
 
-After any of these failures, re-running setup.sh compounds the problem because:
-- `dnf update` may change the kernel again.
-- The partial NVIDIA install leaves state in `/usr/lib/modules/`, `/usr/src/`, and `/var/lib/dkms/`.
-- `dracut --force` may have already been run, so the initramfs includes the nouveau blacklist but no NVIDIA driver.
+The DOM rendering code becomes a state machine with 5+ branches for button rendering, 6+ status badge variants, and conditional columns. Without a framework, this is 400+ lines of `document.createElement` calls with nested conditionals.
+
+**Why it happens:** Vanilla JS was the right choice for v1.1 (simple table, one button). The v1.3 unified list has enough conditional rendering to exceed what vanilla DOM manipulation handles cleanly.
 
 **Consequences:**
-- Server boots without GPU drivers. `nvidia-smi` fails. CDI generation fails. Container cannot access GPUs.
-- `start-vllm.sh` calls `nvidia-smi` in `detect_gpu_info()` and will fail immediately.
-- Manual recovery requires SSH, driver removal, reboot, clean reinstall.
+- Bug-prone button state logic. A missed `if` condition means a Setup button appears on a provisioning node.
+- Difficult to test. No unit tests for JS rendering (the existing test suite is Python-only).
+- Every new state or action requires editing deeply nested createElement chains.
 
 **Prevention:**
-- Check prerequisites before driver install: `uname -r` matches available kernel-devel, GCC is correct version, no existing NVIDIA modules loaded (`lsmod | grep nvidia`).
-- If kernel was updated by `dnf update`, REBOOT before installing the driver. This is a hard requirement that the current `setup.sh` ignores.
-- Use `--uninstall` before reinstalling: `sudo sh NVIDIA-Linux-x86_64-*.run --uninstall` if a previous installation exists.
-- Check for Secure Boot: `mokutil --sb-state`. If enabled, either disable it or sign the modules (complex).
-- Split driver installation into a separate step with its own verification: after install, verify `nvidia-smi` works. If not, the step failed regardless of exit code.
-- Consider using `dnf install nvidia-driver` from the NVIDIA repo instead of the `.run` installer. Package manager handles kernel updates and DKMS automatically.
+- Do NOT switch to React/Vue/Svelte for this. The project constraint is "Jinja2 + vanilla JS, no build step." Respect it.
+- Extract rendering into small functions: `renderActionButtons(node)`, `renderStatusBadge(node)`, `renderNodeRow(node)`. Each function handles one concern.
+- Use a state-to-config map instead of if/else chains:
+  ```javascript
+  const STATE_CONFIG = {
+    available: { badge: "badge-available", actions: ["setup"] },
+    healthy: { badge: "badge-healthy", actions: ["teardown"] },
+    unhealthy: { badge: "badge-unhealthy", actions: ["teardown", "retry"] },
+    provisioning: { badge: "badge-in-progress", actions: [] },
+    draining: { badge: "badge-draining", actions: [] },
+  };
+  ```
+- Keep the rendering data-driven. The backend sends a computed `state` and `available_actions` list per node. The frontend maps these to buttons without needing to know the state machine.
 
-**Detection:** After driver install, always run `nvidia-smi` and check exit code. After CDI generation, verify `/etc/cdi/nvidia.yaml` exists and is non-empty.
-
-**Phase:** Setup script hardening. The reboot-after-kernel-update requirement means setup may need to be a multi-phase process: phase 1 (packages + kernel update + reboot), phase 2 (driver install + container setup).
+**Phase:** Unified endpoint design (backend sends computed actions) and UI implementation (data-driven rendering).
 
 ---
 
-### Pitfall 9: Concurrent Setup/Teardown Operations on the Same Host
+### Pitfall 10: QUADS Polling Thread Hammering the API or Drifting Silently
 
-**What goes wrong:** An operator clicks "Setup" for host-01, it starts running. The operator doesn't see progress (dashboard lag), clicks "Setup" again. Now two SSH sessions are running setup.sh on the same host simultaneously. Both try to install packages, blacklist modules, install drivers -- interleaving operations that were never designed to be concurrent.
+**What goes wrong:** Two failure modes:
 
-Or: operator starts setup, it's slow, they click "Teardown" to cancel. Now setup and teardown are racing on the same host.
+(A) **Too aggressive:** Polling QUADS every 5 seconds with a request that queries all hosts. QUADS is Flask + PostgreSQL and not designed for high-frequency polling. Under load, QUADS responses slow down, the gateway's poller backs up, multiple in-flight requests stack up, QUADS falls over.
 
-**Why it happens:** The `POST /admin/nodes/setup` endpoint has no lock or deduplication. If provisioning runs as a background task (as recommended in Pitfall 1), the endpoint will happily accept multiple requests for the same host.
+(B) **Silent drift:** The poller encounters an error (QUADS returns 500, network timeout). The error is logged but the cached data is retained. The poller retries on the next cycle but keeps failing. The cache serves increasingly stale data (minutes, hours) with no indication to the operator. The UI shows hosts as "available" that were reassigned hours ago.
 
-**Consequences:**
-- Corrupted package state from concurrent `dnf` operations.
-- Driver install race: two `.run` installers fighting over the same files.
-- One operation succeeds, the other fails with confusing errors.
-- Host ends up in an unknown state.
+**Why it happens:** Background pollers are fire-and-forget. Without explicit staleness tracking and alerting, failures are invisible. The existing dashboard polling (dashboard.js) shows "Update failed -- retrying..." on the frontend, but the backend QUADS poller has no equivalent visibility.
 
 **Prevention:**
-- Maintain a per-host lock in the gateway. Before starting setup or teardown, check if an operation is already in progress for that host. Return 409 Conflict if so.
-- Use an in-memory `dict[str, asyncio.Lock]` keyed by hostname. This is sufficient because the gateway is a single process.
-- Store operation state per host: `{host: {operation: "setup", started_at: datetime, task_id: str}}`. Expose this state on the dashboard and admin API.
-- The lock should cover the entire operation lifecycle, not just the SSH command. It should be released only when the operation completes (success or failure).
-- Consider a remote-side lock too: write a lock file on the host (e.g., `/var/lock/vllm-setup.lock`) at the start of setup.sh, remove on completion. Check for this lock before starting.
+- Track `last_successful_sync` timestamp and `consecutive_failures` count in the QUADS cache object. Expose these in the API response and the UI.
+- Define a staleness threshold (e.g., 5 minutes). If `last_successful_sync` exceeds the threshold, the UI shows a warning: "QUADS data is stale (last sync: 10 minutes ago)." Available hosts are still shown but visually dimmed or flagged.
+- Use exponential backoff on consecutive failures: 30s -> 60s -> 120s -> 300s (cap). This prevents hammering a struggling QUADS instance.
+- Log at WARNING level on first failure, ERROR level after 3 consecutive failures.
+- Default poll interval: 60 seconds. This balances freshness with QUADS load. Make it configurable via `INFERENCE_PROXY_QUADS__POLL_INTERVAL`.
 
-**Detection:** Log all operation start/complete/fail events with host identifier. Alert on concurrent operations for the same host.
+**Phase:** QUADS client implementation. Staleness tracking is part of the cache, not a separate feature.
 
-**Phase:** Must be in the first implementation of the setup/teardown endpoints. Not a future enhancement.
+---
+
+### Pitfall 11: Unified Node List Flickers on Every Poll Cycle
+
+**What goes wrong:** The current `refreshDashboard()` (dashboard.js line 99) replaces the entire table body on every poll: `tbody.innerHTML = ""` then re-appends all rows. This causes a visual flicker -- the table blanks for a frame then re-renders. At 10-second intervals this is barely noticeable with 3-5 nodes.
+
+With the unified list (potentially 20-50+ hosts from QUADS plus provisioned nodes), the flicker becomes pronounced. Worse: if an operator is about to click a button and the table re-renders, the click target moves and they click the wrong action. Setup instead of Teardown.
+
+**Why it happens:** Full DOM replacement is the simplest rendering strategy. The v1.1 implementation chose it for simplicity. With more rows and interactive elements, the trade-off changes.
+
+**Prevention:**
+- Diff-and-patch instead of full replace. Compare the new node list with what is currently in the DOM. Only update rows that changed (status changed, connections changed). Add/remove rows as needed.
+- Alternative (simpler): use `requestAnimationFrame` to batch the update. Replace `tbody.innerHTML = ""` with building the new content in a `DocumentFragment`, then replacing in one DOM operation. This eliminates the blank-frame flicker.
+- Disable buttons during the fetch-and-render cycle to prevent mis-clicks on moving targets.
+- A practical middle ground: build the full new tbody content in a fragment, swap it in with `tbody.replaceChildren(...fragment.childNodes)`. One DOM operation, no blank frame.
+
+**Phase:** UI implementation. The `DocumentFragment` approach is a small change to the existing render pattern.
 
 ---
 
 ## Minor Pitfalls
 
-Issues that cause debugging annoyance or operational friction.
+Issues that cause debugging annoyance or minor operational friction.
 
-### Pitfall 10: Container Name Collisions on Setup Re-Run
+### Pitfall 12: QUADS Host List Returns Non-GPU Hosts
 
-**What goes wrong:** Setup runs `podman build` and `podman run` with a container name (e.g., `vllm`). If a previous setup left a stopped container with the same name, `podman run --name vllm` fails with "container name already in use." If a previous setup left a running container, same error.
+**What goes wrong:** QUADS manages all bare-metal servers -- not just GPU servers. A `/api/v3/available` call returns servers with CPUs only, servers with FPGAs, storage nodes, network appliances. The unified node list shows 200+ hosts when only 15 have GPUs suitable for vLLM.
 
 **Prevention:**
-- Before `podman run`, always: `podman stop vllm 2>/dev/null; podman rm vllm 2>/dev/null` (ignore errors if container doesn't exist).
-- Use `podman run --replace --name vllm` (Podman 4.0+) which replaces any existing container with the same name.
-- Alternatively, use unique container names per setup attempt (e.g., `vllm-$(date +%s)`) but then you need to track which container name is active.
+- Filter on the QUADS side if the API supports it (e.g., `?host_type=gpu` or metadata filter). If not, filter client-side.
+- Make the filter configurable: `INFERENCE_PROXY_QUADS__HOST_FILTER` accepting a regex pattern or a list of host_type values. The QUADS client applies this filter after fetching.
+- Default to showing all hosts with a UI filter/search. Operators may want to see non-GPU hosts to understand what is available.
+- Determine the filtering mechanism by examining the actual QUADS instance's host_type values and metadata fields before coding.
 
-**Phase:** Setup script. Simple fix, do it when hardening the script.
+**Phase:** QUADS client configuration. A config setting, not a code architecture decision.
 
 ---
 
-### Pitfall 11: SSH Known Hosts Verification Blocks Automated Connections
+### Pitfall 13: httpx Client Configuration Conflicts
 
-**What goes wrong:** AsyncSSH (or any SSH library) prompts for host key verification on first connection. In an automated context, this blocks indefinitely or raises `HostKeyNotVerifiable`. Lab servers get reinstalled frequently, changing their host keys, causing "host key changed" errors that block all subsequent connections.
+**What goes wrong:** The gateway already has an httpx.AsyncClient configured for proxy traffic (main.py lines 168-181) with specific timeouts (5s connect, 120s read) and pool limits (100 connections). The QUADS poller needs its own httpx client with different settings (5s connect, 10s read -- QUADS calls are fast). If the QUADS client reuses the proxy httpx client, the 120s read timeout means a hung QUADS call blocks for 2 minutes before failing.
 
 **Prevention:**
-- For internal lab infrastructure, use `known_hosts=None` in AsyncSSH to disable host key verification. This is acceptable for internal networks (stated constraint: "Internal network only, no external-facing endpoints in v1").
-- Do NOT use `known_hosts=None` if the network is untrusted. For internal lab use, the risk is acceptable and the alternative (maintaining a known_hosts file for frequently-reinstalled lab servers) is operationally painful.
-- Document this as a deliberate security trade-off with a comment: `# ponytail: known_hosts=None acceptable for internal lab network. Add verification if network boundary changes.`
+- Create a separate httpx.AsyncClient for the QUADS poller with its own timeout and pool settings. Create it in the poller's lifecycle (startup), close it on shutdown.
+- Do not store it in `app.state` alongside the proxy client -- that invites confusion. Keep it internal to the QUADS client class.
+- Set aggressive timeouts: 5s connect, 10s read. QUADS responses should be fast; anything longer indicates a problem.
 
-**Phase:** Initial SSH integration.
+**Phase:** QUADS client implementation. Constructor parameter, not a concern for the broader architecture.
 
 ---
 
-### Pitfall 12: Setup Logs Lost When SSH Session Ends or Gateway Restarts
+### Pitfall 14: Test Complexity Explosion with Two External Dependencies
 
-**What goes wrong:** Setup script output is streamed over the SSH channel to the gateway. The gateway stores it in memory to show on the dashboard. If the gateway restarts during setup, all setup logs are lost. The operator has no idea what step the setup reached or why it failed.
-
-**Prevention:**
-- Redirect setup script output to a log file on the remote host: `setup.sh > /var/log/vllm-setup.log 2>&1`. The gateway can tail this file via SSH at any time.
-- Store setup status and progress in a structured state file on the remote host (see Pitfall 2).
-- On the gateway side, persist operation history to a simple JSON file or SQLite if needed. For v1.2, in-memory with log file on remote host is sufficient.
-- The gateway should be able to "reconnect" to an in-progress setup by checking the remote state file and log.
-
-**Phase:** Setup implementation. Log to remote file from day one.
-
----
-
-### Pitfall 13: `start-vllm.sh` Uses `exec` Which Prevents Status Reporting
-
-**What goes wrong:** `start-vllm.sh` line 123 uses `exec vllm serve ...`, which replaces the shell process with the vLLM process. This means:
-- The SSH channel stays open as long as vLLM runs (could be days/weeks).
-- No exit code is returned until vLLM exits.
-- The gateway cannot get a "started successfully" signal because the command never "finishes."
-
-**Why it happens:** `exec` is correct for production (PID 1, signal handling) but wrong for automated provisioning where you need to: start the server, verify it's healthy, then disconnect SSH.
+**What goes wrong:** Tests now need to mock both etcd responses (existing) and QUADS API responses (new). The conftest.py and fixtures grow to handle both. Integration tests for the unified endpoint need coordinated mock state across two systems: "QUADS says host-A is available AND etcd says host-B is healthy AND host-C is in the pending set."
 
 **Prevention:**
-- Run vLLM via `podman run -d` (detached mode) instead of exec'ing into it.
-- After `podman run -d`, poll `http://host:8000/health` from the gateway (not via SSH) until it returns 200 or a timeout is reached.
-- The container's own entry point can still use `exec vllm serve ...` -- the detached mode means SSH doesn't need to stay connected.
-- Do NOT try to parse vLLM's stdout for "ready" messages. Use the health endpoint.
+- The QUADS client should be a simple class with a clear interface (e.g., `get_available_hosts() -> list[QuadsHost]`). Inject it via FastAPI's dependency injection, same as the existing provisioner and registry. In tests, override it with a stub.
+- The merge function should be a pure function that takes `(quads_hosts, etcd_nodes, pending_hosts)` and returns `list[UnifiedNode]`. Test the merge logic independently with unit tests -- no mocking needed, just pass in lists.
+- Do not test the QUADS HTTP client by mocking httpx. Test the merge logic with pure data. Test the QUADS client with a few integration tests using pytest-httpx.
 
-**Phase:** Container launch approach. Must be decided before building the SSH integration.
+**Phase:** Implementation. Follow the existing dependency injection pattern in `config/dependencies.py`.
 
 ---
 
@@ -365,29 +326,25 @@ Issues that cause debugging annoyance or operational friction.
 
 | Phase Topic | Likely Pitfall | Mitigation |
 |-------------|---------------|------------|
-| SSH library choice | Event loop blocking (#1) | Use AsyncSSH, return 202 + background task |
-| Setup script hardening | Partial state (#2), NFS hang (#7), driver failure (#8) | Idempotent steps, `set -e`, timeout on NFS, prerequisite checks |
-| Provisioning state machine | Health checker race (#3), concurrent ops (#9) | Add PROVISIONING status, per-host locks, state tracking |
-| SSH connection management | Disconnect orphans (#4), known hosts (#11) | nohup + PID file, known_hosts=None for lab |
-| Teardown implementation | Cleanup failure (#5), container collisions (#10) | Multi-step with per-step error handling, force-remove |
-| Security | Key exposure (#6) | SecretStr, no keys in logs, key path not content |
-| Container launch | exec blocks SSH (#13) | podman run -d, poll /health from gateway |
-| Observability | Lost logs (#12) | Log to remote file, structured state file |
+| QUADS client + polling | Response format surprises (#8), silent drift (#10), httpx conflicts (#13) | Manual API exploration first, staleness tracking, separate httpx client |
+| Hostname normalization | Identity mismatch (#4) | Canonical format function, applied everywhere, before merge logic |
+| Unified API endpoint | Wrong merge layer (#6), race on setup (#1), QUADS down degrades all (#3) | Backend merge, pending_hosts set, graceful degradation |
+| UI: unified node list | State explosion in JS (#9), table flicker (#11), form removal regression (#5) | Data-driven rendering, DocumentFragment swap, keep manual input |
+| Availability validation | Stale cache provisioning wrong host (#2) | Fresh QUADS check at setup time, not from cache |
+| Background poller lifecycle | Not wired to shutdown (#7) | Use existing stop_event, create/close httpx client in poller scope |
+| Testing | Mock complexity (#14) | Pure merge function, DI for QUADS client, minimal integration tests |
+| Host filtering | Non-GPU hosts in list (#12) | Configurable filter, determine filter field from actual QUADS instance |
 
 ---
 
 ## Sources
 
-- [AsyncSSH documentation](https://asyncssh.readthedocs.io/en/latest/) -- async SSH library for Python
-- [AsyncSSH timeout issue #626](https://github.com/ronf/asyncssh/issues/626) -- `conn.run()` timeout does not always apply
-- [AsyncSSH connection lost issue #220](https://github.com/ronf/asyncssh/issues/220) -- `asyncio.run` causes ConnectionLost
-- [Paramiko async support issue #2363](https://github.com/paramiko/paramiko/issues/2363) -- no async support planned
-- [Podman zombie processes issue #19909](https://github.com/containers/podman/issues/19909) -- zombie containers with `podman system service`
-- [Podman container cleanup docs](https://docs.podman.io/en/v4.4/markdown/podman-container-cleanup.1.html) -- cleanup after daemon-mode exit
-- [Terraform remote-exec provisioner pitfalls](https://spacelift.io/blog/terraform-remote-exec) -- idempotency and partial state
-- [SSH provisioning corruption on interruption](https://discuss.hashicorp.com/t/provisioning-terraform-via-ssh-can-result-in-corrupted-files-if-there-is-an-interruption-backup-not-working/8060) -- file corruption on SSH kill
-- [NFS hard vs soft mounts](https://access.redhat.com/solutions/28211) -- mount hangs with hard option
-- [NFS stale handle auto-remount](https://techresolve.blog/2026/03/02/monitor-nfs-mount-stale-handles-and-auto-remount/) -- detection and recovery
-- [Python asyncio event loop blocking](https://docs.python.org/3/library/asyncio-dev.html) -- debug mode for slow callbacks
-- [SSH key management best practices](https://www.jumpserver.com/blog/ssh-key-management-best-practices) -- enterprise key security
-- [NVIDIA driver troubleshooting](https://forums.developer.nvidia.com/t/nvidia-smi-has-failed-because-it-couldnt-communicate-with-the-nvidia-driver/197141) -- driver communication failure after updates
+- QUADS API documentation: https://github.com/redhat-performance/quads/blob/master/docs/quads-api.md
+- QUADS project: https://github.com/redhat-performance/quads
+- QUADS project site: https://quads.dev/
+- Existing codebase: `inference_proxy/api/admin.py` (setup endpoint, no deduplication)
+- Existing codebase: `inference_proxy/provisioning/provisioner.py` (PROVISIONING registration gap)
+- Existing codebase: `inference_proxy/main.py` (lifespan shutdown pattern, httpx client config)
+- Existing codebase: `inference_proxy/static/js/dashboard.js` (DOM rendering, polling pattern)
+- Existing codebase: `inference_proxy/discovery/registry.py` (NodeRegistry, thread-safe access)
+- Stale-while-revalidate pattern: standard HTTP caching strategy applied to background polling

@@ -1,148 +1,177 @@
 # Technology Stack
 
-**Project:** QUADS LLM Inference Proxy -- v1.2 Node Provisioning
-**Researched:** 2026-07-01
+**Project:** QUADS LLM Inference Proxy -- v1.3 QUADS Integration
+**Researched:** 2026-07-15
 **Overall Confidence:** HIGH
-**Scope:** Stack additions for SSH-based node setup/teardown. Existing stack (FastAPI, httpx, etcd3gw, structlog, Pydantic v2, Jinja2) is validated and NOT re-evaluated here.
+**Scope:** Stack additions for QUADS REST API integration, periodic host polling, and unified node list UI. Existing stack (FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2) is validated and NOT re-evaluated here.
 
-## New Dependencies for v1.2
+## New Dependencies for v1.3
 
-### SSH Client
+**None.**
 
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| asyncssh | >=2.24.0 | Async SSH client | Native asyncio SSH -- connects to QUADS hosts, runs setup/teardown scripts, streams command output. No thread wrapping needed (unlike paramiko). Ships `py.typed` + full type annotations since v2.9.0, compatible with mypy `--strict`. ~18M monthly PyPI downloads. Actively maintained (2.24.0 released Jun 27, 2026). Python >=3.10. | HIGH |
+Zero new runtime or dev dependencies are needed. The existing stack covers every requirement for this milestone.
 
-**This is the only new runtime dependency needed for v1.2.**
+## Why No New Dependencies
 
-### Why asyncssh and not the alternatives
+The QUADS REST API is a standard Flask/JSON REST service. Our existing httpx client handles HTTP calls. Pydantic handles response modeling. The background polling pattern already exists (health checker thread). The dashboard already uses Jinja2 + vanilla JS.
 
-| Library | Async | License | Verdict |
-|---------|-------|---------|---------|
-| **asyncssh** | Native asyncio | EPL-2.0 OR GPL-2.0+ | **USE** -- native async, typed, actively maintained |
-| paramiko | No (needs `asyncio.to_thread()`) | LGPL-2.1 | REJECT -- sync-only, would need thread pool per SSH session |
-| fabric | No (wraps paramiko) | BSD-2 | REJECT -- CLI/sysadmin tool, not a library for async apps |
-| parallel-ssh | Partial (gevent or libssh2) | LGPL-2.1 | REJECT -- gevent conflicts with asyncio event loop |
+### QUADS API Surface (what we actually call)
 
-**asyncssh wins because:**
+The QUADS server exposes a Flask REST API at `/api/v3/`. Key endpoints we need:
 
-1. **Native asyncio** -- the app is async FastAPI + httpx. asyncssh uses `async with` / `await` natively. No `asyncio.to_thread()` wrapping, no thread pool sizing, no sync/async impedance mismatch. paramiko would require wrapping every call in `asyncio.to_thread()`, as we already do for etcd3gw -- adding a second threaded subsystem increases complexity for no benefit when a native async option exists.
+| Endpoint | Method | Auth Required | Returns | Purpose |
+|----------|--------|---------------|---------|---------|
+| `/api/v3/hosts` | GET | No | `list[HostDict]` | List all hosts with model, cloud, processors, broken/retired flags |
+| `/api/v3/hosts?model={model}` | GET | No | `list[HostDict]` | Filter hosts by hardware model |
+| `/api/v3/hosts/{hostname}` | GET | No | `HostDict` | Single host details |
+| `/api/v3/available` | GET | No | `list[str]` | List hostnames currently available (no active schedule) |
 
-2. **Connection reuse** -- SSH connections support multiple channels. One `asyncssh.connect()` call to a host can run multiple commands sequentially or in parallel via `conn.run()`. This matters for the setup flow (run setup.sh, then build container, then start vLLM -- all over one connection).
+All GET endpoints are unauthenticated. Write operations use `@check_access(["admin"])` with Basic/Bearer auth, but we only need reads. This means no auth library needed.
 
-3. **Streaming output** -- `conn.create_process()` provides `process.stdout.readline()` for real-time log streaming. Important for long-running setup scripts (NVIDIA driver install can take minutes). Enables future dashboard log streaming.
+Source: QUADS server source at `github.com/redhat-performance/quads`, specifically:
+- `src/quads/server/blueprints/hosts.py` -- GET endpoints have no `@check_access` decorator
+- `src/quads/server/blueprints/available.py` -- GET endpoints have no `@check_access` decorator
+- `src/quads/server/config.py` -- `API_VERSION = "v3"`
 
-4. **Type safety** -- Ships `py.typed` marker and full type annotations. Works with the project's `mypy --strict` configuration out of the box.
+### QUADS Host JSON Shape
 
-5. **18M monthly downloads** -- heavily adopted. Not a niche library.
+From the QUADS `Host` SQLAlchemy model and its `Serialize.as_dict()` method, hosts serialize to:
 
-### License note
+```json
+{
+  "id": 1,
+  "name": "host01.example.com",
+  "model": "R750xa",
+  "host_type": "scalelab",
+  "build": false,
+  "validated": true,
+  "broken": false,
+  "retired": false,
+  "rack": "b01",
+  "cloud": {"id": 1, "name": "cloud01", ...},
+  "default_cloud": {"id": 2, "name": "cloud02", ...},
+  "processors": [
+    {"id": 1, "handle": "GPU0", "vendor": "NVIDIA", "product": "A100", "cores": null, "threads": null, "processor_type": "GPU"},
+    {"id": 2, "handle": "CPU0", "vendor": "Intel", "product": "Xeon 8380", "cores": 40, "threads": 80, "processor_type": "CPU"}
+  ],
+  "interfaces": [...],
+  "memory": [...],
+  "disks": [...],
+  "last_build": "Mon, 01 Jul 2026 00:00:00 GMT",
+  "created_at": "Mon, 01 Jan 2026 00:00:00 GMT"
+}
+```
 
-asyncssh is dual-licensed: EPL-2.0 OR GPL-2.0-or-later. For internal-only use (no distribution), neither license imposes obligations. This project is explicitly "internal network only" per PROJECT.md constraints, so no licensing concern.
+GPU hosts are identified by having at least one processor with `processor_type == "GPU"`.
 
-## No New Dependencies Needed For
+## Existing Stack Coverage
 
-These capabilities are covered by the existing stack:
+| v1.3 Requirement | Covered By | How | Confidence |
+|-------------------|------------|-----|------------|
+| HTTP client for QUADS API | **httpx** (already installed) | `httpx.Client` (sync) for polling thread, same pattern as health checker's `httpx.Client(timeout=5.0)` | HIGH |
+| QUADS host data models | **Pydantic v2** (already installed) | New `QuadsHost` model in `models/` -- parse JSON response, extract GPU info, map to unified node state | HIGH |
+| Background host polling | **threading.Thread** (stdlib) | Same pattern as `run_health_checker` and `run_watcher` -- dedicated thread with `stop_event.wait(timeout=interval)` | HIGH |
+| Configuration (QUADS URL, poll interval) | **pydantic-settings** (already installed) | New `QuadsSettings` sub-model: `base_url`, `poll_interval`, `enabled` | HIGH |
+| Unified node list UI | **Jinja2 + vanilla JS** (already installed) | Extend existing dashboard template. New `/admin/quads/hosts` JSON endpoint for JS polling | HIGH |
+| Structured logging | **structlog** (already installed) | Log QUADS API calls with host counts, errors, poll timing | HIGH |
 
-| Capability | Covered By | How |
-|------------|------------|-----|
-| Health polling (POST setup, wait for /health 200) | httpx (already installed) | `httpx.AsyncClient.get(f"http://{host}:8000/health")` in a retry loop |
-| etcd registration after setup | etcd3gw (already installed) | Same `EtcdClient.put()` pattern used by the watcher |
-| Retry/backoff for health polling | tenacity (already in CLAUDE.md stack) OR stdlib asyncio | `asyncio.sleep()` loop with exponential backoff is 5 lines; tenacity is in the recommended stack but not yet in pyproject.toml -- add only if retry patterns proliferate |
-| Background task management | anyio (transitive dep of FastAPI) | Task groups for concurrent provisioning operations |
-| Configuration (SSH key path, timeouts) | pydantic-settings (already installed) | New `ProvisioningSettings` sub-model in settings.py |
-| Structured logging | structlog (already installed) | Log SSH operations with host/command context |
+### httpx usage: sync Client in thread (matching existing pattern)
+
+The codebase uses `httpx.Client` (synchronous) in background threads already:
+
+```python
+# From resilience/health_checker.py line 72:
+client = httpx.Client(timeout=_PROBE_TIMEOUT)
+```
+
+The QUADS poller follows the exact same pattern -- a `threading.Thread` with a sync `httpx.Client` making periodic GET requests. No new async HTTP client needed; no `asyncio.to_thread()` wrapping needed.
+
+```python
+# ponytail: same pattern as health_checker.py
+def run_quads_poller(
+    quads_client: QuadsClient,
+    registry: QuadsHostRegistry,  # or whatever holds the QUADS host list
+    stop_event: threading.Event,
+    interval: float = 300.0,
+) -> None:
+    while not stop_event.is_set():
+        hosts = quads_client.get_hosts()
+        available = quads_client.get_available()
+        registry.update(hosts, available)
+        if stop_event.wait(timeout=interval):
+            break
+```
+
+### Why NOT use httpx.AsyncClient for QUADS API
+
+The health checker and etcd watcher both run as background threads with sync clients. The QUADS poller is the same class of work -- periodic polling that runs independently of request handling. Using `httpx.AsyncClient` would require either:
+- Running in an asyncio task (which would share the event loop with request handling -- bad for a 5-minute poll cycle), or
+- `asyncio.to_thread()` wrapping (pointless complexity when sync httpx works directly)
+
+Sync `httpx.Client` in a thread is the established pattern. Follow it.
 
 ## What NOT to Add
 
 | Technology | Why Not |
 |------------|---------|
-| paramiko | Sync-only. Would be the second subsystem (after etcd3gw) needing thread wrapping. asyncssh eliminates this entirely. |
-| fabric | CLI deployment tool built on paramiko. Designed for `fab deploy` workflows, not programmatic async API calls. Overkill and wrong paradigm. |
-| parallel-ssh | Uses gevent or libssh2 bindings. gevent monkey-patching conflicts with asyncio. Not needed -- asyncssh handles concurrent connections natively via asyncio tasks. |
-| ansible-runner | Pulls in the entire Ansible engine. We run 2 shell scripts on bare metal hosts. A 200MB dependency for `ssh host 'bash setup.sh'` is absurd. |
-| Celery / dramatiq / arq | No task queue needed. Provisioning is triggered by admin API, runs as an asyncio background task, reports status via polling. The gateway has no persistent job storage requirement in v1.2. |
-| subprocess + system ssh | Spawns OS processes, no structured error handling, no connection reuse, no streaming output parsing. asyncssh is a proper library. |
+| requests | httpx is already installed and is the modern replacement. Adding requests alongside httpx is redundant. QUADS's own client uses `requests.Session` but we write our own thin client with httpx. |
+| aiohttp | httpx already handles HTTP. Adding aiohttp for one API client is waste. |
+| quads (pip package) | The QUADS Python package is a CLI/server tool, not an API client library. It pulls in Flask, SQLAlchemy, and dozens of dependencies. We need 2 GET endpoints. Write a 30-line httpx client. |
+| APScheduler / schedule | Background polling is `while True: do_thing(); stop_event.wait(interval)`. That's 4 lines. No scheduler library needed. |
+| tenacity | Retry logic for QUADS API calls can be a simple try/except with logging. The poller runs every N minutes anyway -- a failed poll just waits for the next cycle. No exponential backoff library needed for "try again in 5 minutes." |
+| cachetools / cachelib | The QUADS host list is an in-memory dict/list updated by the poller thread. That IS the cache. No cache library needed. |
+| WebSocket / SSE libraries | The dashboard already uses JS polling (`setInterval` + `fetch`). The unified node list follows the same pattern. No real-time push needed for a list that changes every few hours. |
 
-## Integration Pattern with Existing App
+## Integration Points with Existing App
 
-### asyncssh fits the existing patterns
-
-The codebase already uses two concurrency models:
-- **Async (main):** FastAPI handlers, httpx proxy calls -- all `async/await`
-- **Threaded (background):** etcd3gw watcher, health checker -- `threading.Thread` with `stop_event`
-
-asyncssh adds SSH operations to the async side. No new threading needed.
+### Settings (pydantic-settings)
 
 ```python
-# Typical usage pattern -- fits naturally into FastAPI async handlers
-import asyncssh
-
-async def setup_node(host: str, ssh_key_path: str) -> None:
-    async with asyncssh.connect(
-        host,
-        username="root",
-        client_keys=[ssh_key_path],
-        known_hosts=None,  # Internal lab network, hosts are trusted
-        connect_timeout=30,
-        login_timeout=30,
-        keepalive_interval=60,  # Setup scripts run for minutes
-    ) as conn:
-        # Run setup script, get full output
-        result = await conn.run("bash /tmp/setup.sh", timeout=600)
-        if result.exit_status != 0:
-            raise SetupError(result.stderr)
+class QuadsSettings(BaseModel):
+    """QUADS API integration configuration."""
+    base_url: str = ""  # Empty = QUADS integration disabled
+    poll_interval: int = 300  # 5 minutes between polls
+    request_timeout: int = 30
 ```
 
-### Key asyncssh parameters for this use case
+Added as `quads: QuadsSettings = QuadsSettings()` in root `Settings`. Env var: `INFERENCE_PROXY_QUADS__BASE_URL=https://quads.example.com/api/v3`.
 
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| `known_hosts` | `None` | Internal QUADS lab network. Hosts are re-imaged frequently; host keys change. Strict checking would break on every re-provision. |
-| `username` | `"root"` | Setup scripts need root for `dnf install`, `modprobe`, `iptables`, NFS mount. QUADS lab servers provide root SSH access. |
-| `client_keys` | `[settings.ssh_key_path]` | Pre-configured SSH key. Operator ensures `~/.ssh` access per PROJECT.md. |
-| `connect_timeout` | `30` | Fail fast if host is unreachable. |
-| `login_timeout` | `30` | Fail fast if auth fails. |
-| `keepalive_interval` | `60` | setup.sh installs NVIDIA drivers (several minutes). Keep connection alive during long silent periods. |
-| `timeout` on `run()` | `600-1800` | setup.sh: driver install + container build can take 10-30 minutes. |
+When `base_url` is empty, QUADS integration is disabled -- the gateway works exactly as v1.2. Feature flag via configuration, no code branching needed beyond "start the poller thread or don't."
 
-### New settings sub-model
+### Lifespan (main.py)
 
-```python
-class ProvisioningSettings(BaseModel):
-    """SSH provisioning configuration."""
-    ssh_key_path: str = "~/.ssh/id_rsa"
-    ssh_username: str = "root"
-    connect_timeout: int = 30
-    setup_timeout: int = 1800  # 30 min for full setup
-    teardown_timeout: int = 120  # 2 min for container stop + deregister
-    health_poll_interval: int = 10  # seconds between /health checks
-    health_poll_timeout: int = 300  # 5 min max wait for vLLM startup
-```
+The QUADS poller thread starts alongside the existing watcher and health checker threads in the lifespan context manager. Same `stop_event` for coordinated shutdown.
+
+### Dashboard
+
+Extend the existing `/admin/nodes` JSON endpoint (or add a parallel `/admin/quads/hosts` endpoint) that the dashboard JS fetches. The unified node list merges QUADS hosts with etcd-registered nodes client-side or server-side.
 
 ## Installation
 
 ```bash
-# Only one new dependency
-uv add "asyncssh>=2.24.0"
+# No new dependencies
+# Existing pyproject.toml already has everything needed
 ```
-
-No new dev dependencies needed. The existing pytest + pytest-asyncio stack handles async SSH testing. Mock asyncssh connections in tests using standard unittest.mock (AsyncMock for coroutines).
 
 ## Key Version Constraints
 
-| Dependency | Minimum | Why This Minimum |
-|------------|---------|-----------------|
-| asyncssh >= 2.24.0 | Latest release (Jun 2026). Includes py.typed, full type annotations, Python 3.12+ support, keepalive fixes. |
+No new version constraints. All existing constraints from v1.2 remain valid.
+
+| Existing Dependency | Minimum | Still Valid |
+|---------------------|---------|-------------|
+| httpx >= 0.28 | Stable sync and async client APIs | Yes |
+| Pydantic >= 2.10 | Frozen model support, model_copy | Yes |
+| pydantic-settings >= 2.14 | Nested env var resolution | Yes |
+| structlog >= 26.1.0 | Context variables, async-safe | Yes |
+| Jinja2 >= 3.1 | Template rendering for dashboard | Yes |
 
 ## Sources
 
-- asyncssh PyPI: https://pypi.org/project/asyncssh/ -- v2.24.0 (Jun 27, 2026)
-- asyncssh docs: https://asyncssh.readthedocs.io/ -- v2.23.1 docs (latest published)
-- asyncssh GitHub: https://github.com/ronf/asyncssh
-- asyncssh changelog (py.typed added v2.9.0): https://asyncssh.readthedocs.io/en/latest/changes.html
-- asyncssh license (EPL-2.0 OR GPL-2.0+): https://github.com/ronf/asyncssh/issues/161
-- paramiko vs asyncssh comparison: https://piptrends.com/compare/paramiko-vs-fabric-vs-asyncssh
-- SSH library comparison: https://elegantnetwork.github.io/posts/comparing-ssh/
-- asyncssh timeout discussion: https://github.com/ronf/asyncssh/discussions/409
-- asyncssh known_hosts=None: https://github.com/ronf/asyncssh/issues/179
+- QUADS GitHub: https://github.com/redhat-performance/quads
+- QUADS API client source: `src/quads/quads_api.py` -- shows endpoint patterns (GET /hosts, GET /available)
+- QUADS Host model: `src/quads/server/models.py` -- Host columns (name, model, broken, retired, processors with GPU type)
+- QUADS blueprints: `src/quads/server/blueprints/hosts.py` -- GET endpoints are unauthenticated
+- QUADS available blueprint: `src/quads/server/blueprints/available.py` -- returns list of hostname strings
+- QUADS server config: `src/quads/server/config.py` -- `API_VERSION = "v3"`
+- QUADS auth decorator: `src/quads/server/blueprints/__init__.py` -- `check_access` only on write endpoints
+- QUADS swagger: `src/quads/server/swagger.yaml` -- OpenAPI 3.0.0 spec, base URL `https://quads.example.com/api/v3/`

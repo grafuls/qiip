@@ -1,156 +1,289 @@
 # Feature Landscape
 
-**Domain:** SSH-based GPU node provisioning and teardown for vLLM inference gateway
-**Researched:** 2026-07-01
-**Context:** v1.2 milestone for QUADS LLM Inference Proxy. Existing gateway has OpenAI proxy, etcd discovery, load balancing, circuit breaker, health checks, admin API, and operations dashboard. This research covers adding SSH-based node setup/teardown from the gateway itself.
+**Domain:** QUADS REST API integration for GPU host discovery and unified node management UI
+**Researched:** 2026-07-15
+**Sources:** QUADS OpenAPI spec (swagger.yaml), server models.py, blueprints (hosts.py, available.py, schedules.py), quads_api.py -- all from github.com/redhat-performance/quads `latest` branch
 
-## Setup Pipeline (What the Existing Scripts Do)
+## QUADS API Reference (Verified Against Source)
 
-The existing `auto-vllm-container/` directory defines a concrete, already-validated provisioning pipeline. Any SSH-based automation must execute these steps remotely:
+**Confidence: HIGH** -- read directly from swagger.yaml and implementation source code.
 
-1. **NVIDIA repo setup** -- `curl` NVIDIA container toolkit repo into yum repos
-2. **System update** -- `dnf -y update`
-3. **Dependency install** -- kernel-devel, kernel-headers, nvidia-container-toolkit, podman, nfs-utils, wget
-4. **Blacklist nouveau** -- write modprobe blacklist, rebuild initramfs, unload nouveau
-5. **NVIDIA driver install** -- download and run `.run` installer (580.126.09) with DKMS
-6. **CDI generation** -- `nvidia-ctk cdi generate` for Podman GPU access
-7. **NFS mount** -- mount shared Hugging Face cache from NFS server
-8. **Firewall** -- open port 8000 via iptables
-9. **Container build** -- `podman build -t auto-vllm -f Containerfile .`
-10. **Container start** -- `podman run` with GPU passthrough, NFS volume mount, network=host
-11. **Health poll** -- wait for `curl http://{host}:8000/health` to return 200
-12. **etcd registration** -- register node with endpoint, model info, capabilities
+### Base URL
 
-Steps 1-8 are `setup.sh`. Steps 9-10 are manual (README). Steps 11-12 are gateway-side.
+`https://<quads-host>/api/v3/`
+
+### Authentication
+
+QUADS uses Basic Auth for login, returns a Bearer token. **Read-only GET endpoints are unauthenticated** in the blueprints -- only POST/PATCH/DELETE have `@check_access` decorators. This means host listing and availability checks work without auth for our read-only integration.
+
+### Endpoints We Need
+
+| Endpoint | Method | Purpose | Auth Required |
+|----------|--------|---------|---------------|
+| `GET /hosts/` | GET | List all hosts with filters | No |
+| `GET /hosts/{hostname}/` | GET | Single host detail (includes processors, memory, disks, interfaces) | No |
+| `GET /hosts/{hostname}/processors/` | GET | Host processor list (CPU + GPU) | No |
+| `GET /available/` | GET | List hostnames available for scheduling | No |
+| `GET /available/{hostname}/` | GET | Check if specific host is available | No |
+| `GET /schedules/current/` | GET | Current active schedules (who owns what) | No |
+
+### Host Response Shape (from models.py `as_dict()`)
+
+```json
+{
+  "id": 12,
+  "name": "host.example.com",
+  "model": "R640",
+  "host_type": "vendor",
+  "build": true,
+  "validated": true,
+  "switch_config_applied": true,
+  "broken": false,
+  "retired": false,
+  "last_build": "2022-02-02T00:00:00",
+  "can_self_schedule": false,
+  "created_at": "2022-01-01T00:00:00",
+  "rack": "A1",
+  "uloc": "U01",
+  "blade": null,
+  "bootmode": "Uefi",
+  "cloud": {
+    "id": 1,
+    "name": "cloud01",
+    "last_redefined": "2022-01-01T00:00:00"
+  },
+  "default_cloud": {
+    "id": 1,
+    "name": "cloud01",
+    "last_redefined": "2022-01-01T00:00:00"
+  },
+  "interfaces": [
+    {
+      "id": 1,
+      "name": "em1",
+      "bios_id": "nic1",
+      "mac_address": "aa:00:bb:11:cc:22",
+      "switch_ip": "10.1.1.18",
+      "switch_port": "xt-0-0/1",
+      "speed": 1000,
+      "vendor": "Intel",
+      "pxe_boot": true,
+      "maintenance": false
+    }
+  ],
+  "disks": [
+    {"id": 1, "disk_type": "nvme", "size_gb": 2000, "count": 10}
+  ],
+  "memory": [
+    {"id": 1, "handle": "MMD", "size_gb": 64}
+  ],
+  "processors": [
+    {
+      "id": 1,
+      "handle": "GPU0",
+      "vendor": "NVIDIA",
+      "product": "A100",
+      "cores": 6912,
+      "threads": 6912,
+      "processor_type": "GPU"
+    }
+  ]
+}
+```
+
+### Host Query Filters (GET /hosts/)
+
+Supported query params (from swagger + `filter_hosts_dict`):
+- `name` -- hostname filter
+- `model` -- hardware model (e.g., "R640", "DGX")
+- `host_type` -- type classification
+- `build` -- boolean
+- `validated` -- boolean
+- `broken` -- boolean
+- `retired` -- boolean
+- `cloud` -- filter by current cloud assignment name
+
+### Processor Model (GPU Detection)
+
+The `Processor` model has a `processor_type` enum with values `"CPU"` and `"GPU"`. This is the field to filter on for GPU hosts. Each processor record includes:
+- `vendor` (e.g., "NVIDIA")
+- `product` (e.g., "A100", "H100")
+- `cores` / `threads`
+- `processor_type` -- the discriminator: `"CPU"` or `"GPU"`
+
+**GPU detection strategy:** Fetch hosts with full detail, check `processors` array for any entry where `processor_type == "GPU"`.
+
+### Availability Endpoint Behavior
+
+`GET /available/` returns **a flat list of hostname strings** (not full host objects):
+```json
+["host01.example.com", "host02.example.com"]
+```
+
+`GET /available/{hostname}/` returns:
+```json
+{"host01.example.com": "True"}
+```
+
+Parameters: `start` (datetime), `end` (datetime), `cloud` (string).
+Default start/end is `datetime.now()` if not provided -- effectively "available right now."
+
+### Determining "Idle" Hosts
+
+A host is considered available/idle in QUADS when:
+1. It has no active schedule overlapping the queried time range
+2. It is not `broken` or `retired`
+3. The `default_cloud` concept: hosts return to their default cloud (typically "cloud01" = spare pool) when unscheduled
+
+### Cloud / Assignment Model
+
+- **Cloud**: Named allocation group (e.g., "cloud01" through "cloudNN"). `cloud01` is conventionally the spare pool.
+- **Assignment**: Links a cloud to an owner, ticket, description. Has `active`, `provisioned`, `validated` flags.
+- **Schedule**: Time-boxed binding of a host to an assignment with `start`/`end` dates.
+- A host's `cloud` field shows its current cloud assignment. If `cloud.name == default_cloud.name`, the host is in its spare pool (idle).
 
 ## Table Stakes
 
-Features that MUST exist for v1.2 to be usable. Without these, operators fall back to SSH-ing manually.
+Features users expect for this milestone. Missing = milestone feels incomplete.
 
 | Feature | Why Expected | Complexity | Notes |
 |---------|--------------|------------|-------|
-| **SSH connection to remote host** | The entire provisioning model requires executing commands on bare-metal GPU servers. Operators expect to provide a hostname and have the gateway connect. | Low | Use asyncssh (asyncio-native). Authenticate via pre-configured SSH keys (`~/.ssh/`). No password auth -- keys are standard in QUADS labs. |
-| **Run setup.sh remotely** | The existing setup script handles driver install, toolkit setup, NFS mount, firewall. Operators expect to not rewrite this. | Medium | Upload or pipe `setup.sh` to remote host, execute via SSH. Script is idempotent-ish (dnf handles already-installed, but driver re-install and initramfs rebuild will re-run). Must handle sudo (NOPASSWD expected on lab servers). |
-| **Container image build** | The vLLM container must be built on the target host from the Containerfile. | Low | `podman build -t auto-vllm -f Containerfile .` on remote host. Requires uploading `Containerfile` and `start-vllm.sh` first. |
-| **Container start with GPU passthrough** | The vLLM container must run with `--device nvidia.com/gpu=all`, NFS mount, and host networking. | Low | Fixed `podman run` command from README. GPU auto-detection happens inside the container via `start-vllm.sh`. |
-| **Health poll after start** | vLLM takes 30s-5min to load a model (depends on model size and GPU). The gateway must poll `/health` until it succeeds before declaring the node ready. | Low | Poll `http://{host}:8000/health` with backoff. Timeout after configurable max wait (default: 10 min for large models on slow hardware). |
-| **etcd registration after health** | Once the node is healthy, register it in etcd with endpoint, model, and capabilities so the existing discovery system picks it up. | Low | Use existing `node_to_etcd()` serializer and `EtcdClient`. The etcd watcher will propagate the new node to the registry automatically. |
-| **Node teardown (container stop)** | Operators need to decommission a node: stop the container, remove it from the pool. | Low | SSH to host, `podman stop auto-vllm`. Or if the gateway already has the host info, it can do this remotely. |
-| **etcd deregistration on teardown** | Remove the node key from etcd so the watcher drops it from the registry. | Low | Delete the etcd key. Existing watcher handles propagation. |
-| **Setup status tracking** | Setup takes 5-30 minutes (driver install is slow). Operators need to know what step is running and whether it succeeded or failed. | Medium | State machine: PENDING -> CONNECTING -> SETUP_RUNNING -> BUILDING -> STARTING -> HEALTH_CHECK -> REGISTERING -> COMPLETE (or FAILED at any step). Store in-memory per-host. |
-| **Admin API for setup/teardown** | `POST /admin/nodes/setup` and `DELETE /admin/nodes/{id}` so operators (and the dashboard) can trigger provisioning. | Low | FastAPI endpoints on the existing admin router. Setup is async (returns immediately with a task ID, operator polls for status). Teardown can be synchronous (fast). |
-| **Setup error reporting** | When setup fails (SSH unreachable, driver install fails, container won't start), the operator must see what went wrong and at which step. | Medium | Capture stderr/stdout from each SSH command. Store the failing step and error output. Return via status API. |
+| QUADS API client module | Foundation for everything else -- fetches host data | Low | httpx AsyncClient, 3-4 endpoints. Read-only, no auth needed for GETs. |
+| Periodic background polling of QUADS | Keep host list fresh without manual refresh | Low | asyncio task on interval, same pattern as health checker. Store results in memory. |
+| Unified node list merging QUADS hosts + etcd nodes | The whole point of v1.3 -- one table showing all systems | Med | Merge logic: match by hostname between QUADS data and etcd-registered nodes. |
+| GPU indicator per host | Must show which QUADS hosts have GPUs (only GPU hosts are useful for vLLM) | Low | Filter `processors` for `processor_type == "GPU"`. Show vendor+product. |
+| Inline "Setup" button for available hosts | Replace the separate setup form | Low | Button in Actions column, calls existing `POST /admin/nodes/setup`. |
+| Inline "Teardown" button for provisioned nodes | Already exists per-node, just ensure it appears in unified list | Low | Already implemented. Carry forward into new table layout. |
+| Host availability status from QUADS | Show whether each host is available or currently assigned | Low | Cross-reference `/available/` response with host list. |
+| Remove separate setup form | Explicit in milestone scope -- everything through node list | Low | Delete the `<section class="card">` setup form from dashboard.html. |
+| QUADS base URL configuration | Configurable QUADS server endpoint | Low | Add `QuadsSettings` to `Settings` with `base_url`, `poll_interval`. |
 
 ## Differentiators
 
-Features that add operational value but are not strictly required for v1.2 to work.
-
-### Tier 1 (High Value for v1.2)
+Features that set the dashboard apart. Not strictly required but high value.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| **Step-by-step progress via dashboard** | Operators see "Installing NVIDIA driver..." or "Building container..." in the dashboard UI instead of a blank spinner. Much better UX than "setup in progress." | Medium | Dashboard polls a status endpoint that returns current step + output tail. Reuse existing polling pattern (vanilla JS `setInterval`). |
-| **Pre-flight validation** | Before starting the full setup, check: SSH reachable? GPUs detected (`lspci`)? Enough disk space? Prevents wasting 10 minutes on a doomed setup. | Low | Run quick SSH commands before committing to the full pipeline. Fail fast with a clear error. |
-| **Connection draining before teardown** | Before stopping the container, drain active connections (stop routing new requests, wait for in-flight to finish). Already partially implemented in v1.0 (`registry.drain()`). | Low | Call `registry.drain(node_id)`, wait for `active_connections == 0` (with timeout), then proceed with container stop + deregistration. |
-| **Setup log capture** | Store full stdout/stderr from each step. Operators can view the complete setup log for debugging. | Low | Append SSH output to an in-memory buffer per setup task. Expose via `GET /admin/nodes/setup/{task_id}/log`. Cap buffer size (last 1000 lines). |
-
-### Tier 2 (Nice-to-Have, Consider for v1.3+)
-
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| **Parallel multi-node setup** | Set up 3-5 nodes at once when a batch of servers becomes idle. | Low | Each setup is already async. Just allow multiple concurrent setup tasks. Limit concurrency to avoid overwhelming the gateway. |
-| **Setup profiles / presets** | Different model/GPU combinations as named profiles ("h100-72b", "t4-3b") instead of always auto-detecting. | Low | The existing `start-vllm.sh` already auto-detects. Presets would override env vars (`VLLM_MODEL`, `VLLM_TENSOR_PARALLEL`). YAGNI until auto-detection proves insufficient. |
-| **Setup history** | Persistent record of past setup/teardown operations for audit trail. | Medium | Requires persistence (etcd keys, SQLite, or file). In-memory only for v1.2. |
-| **Container image caching** | Skip `podman build` if the image already exists on the target host. | Low | `podman image exists auto-vllm && echo "cached" || podman build ...`. Saves 1-3 minutes per setup. |
+| State-based action buttons | Button changes based on host state: Available->Setup, Healthy->Teardown, Unhealthy->Teardown, Provisioning->disabled | Low | Switch on merged status in JS render function. Already partially done for teardown button disabling. |
+| Host hardware summary in table | Show GPU model, memory total, model name inline | Low | Condense processor/memory data into short string like "2x A100, 512GB". |
+| Visual status grouping or sorting | Sort nodes by state (available first, then provisioning, healthy, unhealthy) | Low | Client-side sort in JS before rendering. |
+| QUADS cloud/assignment info tooltip | Show who owns a scheduled host (owner, ticket) | Med | Requires additional `/schedules/current/` call to get assignment details. |
+| Filter/search in node list | Filter by hostname, model, status, GPU type | Low | Client-side JS filter on the already-fetched data. |
+| Connection drain indicator | Show "draining (3 active)" during teardown | Low | Already have active_connections data. |
 
 ## Anti-Features
 
-Features to deliberately NOT build for v1.2.
+Features to explicitly NOT build.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| **Full orchestration / auto-scaling** | PROJECT.md explicitly defers this. v1.2 is operator-triggered setup/teardown, not automatic. Auto-scaling requires QUADS API integration, capacity planning, scheduling logic. Completely different system. | Operator clicks "setup" or "teardown" in dashboard. Auto-scaling is a future milestone. |
-| **NVIDIA driver management / version selection** | The setup.sh pins a specific driver version (580.126.09). Managing multiple driver versions, upgrades, and compatibility matrices is an ops nightmare. | Pin the driver version in setup.sh. Update the script when a new driver is validated. |
-| **Model download / management** | Models live on NFS (`/srv/hf-cache`). The gateway should not download or manage models. | NFS mount is handled by setup.sh. Model selection is handled by `start-vllm.sh` auto-detection. |
-| **WebSocket-based live streaming of setup output** | Adding WebSocket support to the dashboard for real-time log streaming adds frontend and backend complexity. The existing polling pattern works fine. | Poll `GET /admin/nodes/setup/{task_id}/log` on the same interval as dashboard auto-refresh. Good enough for an ops tool. |
-| **SSH key management** | Generating, distributing, or rotating SSH keys is an operational concern outside the gateway. | Operators ensure `~/.ssh/` has the right keys before using setup. Document the requirement. |
-| **Persistent setup state (database)** | Adding a database dependency for setup state tracking is overkill. Setup state is ephemeral -- if the gateway restarts, operators re-trigger setup. | In-memory dict of active/recent setup tasks. Cleared on restart. |
-| **Agent on target hosts** | Installing a daemon/agent on each GPU server defeats the purpose of SSH-based agentless provisioning. | SSH for everything. The target hosts need only SSHD (already running on all QUADS servers). |
+| Write operations to QUADS API | We are a consumer of QUADS data, not a QUADS admin tool. Writing schedules/assignments would create ownership confusion. | Read-only integration. Setup/teardown is our SSH provisioner, not QUADS scheduling. |
+| Full QUADS dashboard clone | QUADS has its own web UI. Duplicating cloud management, schedule editing, etc. is scope creep. | Show only what's needed: host name, availability, GPU info, hardware model. |
+| Auth token management for QUADS | GET endpoints don't require auth. Adding login/token refresh adds complexity for no gain. | Use unauthenticated GET requests. If auth is required in deployment, add basic auth header config. |
+| Real-time QUADS sync (WebSocket/SSE) | QUADS is a Flask app with no push mechanism. Polling is the only option. | Poll on configurable interval (default 60s). QUADS data changes slowly (schedules change hourly/daily). |
+| Auto-provisioning of available hosts | Automatically setting up every idle GPU host is dangerous -- could grab hosts assigned to others. | Manual "Setup" button. Future auto-scaling is explicitly out of scope. |
+| Per-host detail page | Over-engineering for an ops dashboard. | Show essential info inline in the table. Tooltip or expandable row for extras if needed. |
+| Caching QUADS responses in etcd | Adds write load to etcd for data that's already in memory. | In-memory cache in the QUADS client, refreshed by the background poller. |
 
 ## Feature Dependencies
 
 ```
-SSH Connection
-  --> Pre-flight Validation (quick SSH commands)
-  --> Run setup.sh (long SSH command)
-      --> Container Build (SSH: podman build)
-          --> Container Start (SSH: podman run)
-              --> Health Poll (HTTP from gateway to node:8000/health)
-                  --> etcd Registration (gateway writes to etcd)
-                      --> Node appears in registry (etcd watcher picks it up)
-
-Teardown:
-  Connection Draining (registry.drain())
-    --> Container Stop (SSH: podman stop)
-        --> etcd Deregistration (gateway deletes etcd key)
-            --> Node removed from registry (etcd watcher picks it up)
-
-Setup State Machine:
-  PENDING -> CONNECTING -> VALIDATING -> SETUP_RUNNING -> BUILDING
-    -> STARTING -> HEALTH_CHECK -> REGISTERING -> COMPLETE
-  (any step) -> FAILED
-
-Admin API (POST /admin/nodes/setup) -> triggers setup pipeline (async)
-Admin API (GET /admin/nodes/setup/{id}) -> returns setup state + progress
-Admin API (DELETE /admin/nodes/{id}) -> triggers teardown pipeline
-Dashboard -> polls admin API for status display
+QuadsSettings config  -->  QUADS API client module
+QUADS API client      -->  Background poller (fetches on interval)
+Background poller     -->  In-memory QUADS host cache
+QUADS host cache      -->  Unified node list merge logic
+etcd NodeRegistry     -->  Unified node list merge logic  (already exists)
+Merge logic           -->  Admin API endpoint (GET /admin/nodes returns merged list)
+Admin API endpoint    -->  Dashboard JS render (unified table)
+Dashboard JS render   -->  Inline action buttons (state-based)
+Remove setup form     -->  (independent, do after inline buttons work)
 ```
 
-## Failure Modes (GPU Server Specific)
+## Unified Node List: Merged Data Model
 
-These are the things that go wrong during SSH-based GPU server provisioning. Each maps to a setup step.
+Each row in the unified table represents a host. The merge key is hostname.
 
-| Step | Failure Mode | Likelihood | Detection | Recovery |
-|------|-------------|------------|-----------|----------|
-| SSH connect | Host unreachable, key rejected, timeout | Medium | asyncssh raises `ConnectionRefused`, `PermissionDenied`, `TimeoutError` | Pre-flight check. Report to operator. |
-| dnf update | Network issues, repo unavailable, disk full | Low | Non-zero exit code from SSH command | Retry. Check disk space in pre-flight. |
-| NVIDIA driver install | Kernel headers mismatch, Secure Boot enabled, nouveau still loaded, download fails | **High** | Non-zero exit code, specific error strings in stderr | This is the most fragile step. Kernel mismatch requires exact `kernel-devel-$(uname -r)` which may not be in repos for older kernels. Secure Boot must be disabled in BIOS (cannot fix via SSH). nouveau blacklist + dracut may require reboot. |
-| nvidia-ctk CDI generate | Driver not loaded, nvidia-smi fails | Medium | Non-zero exit code | Usually means driver install failed silently. Check `nvidia-smi` output. |
-| NFS mount | NFS server unreachable, export not available, stale mount | Medium | `mount` command fails or hangs | Check NFS server accessibility in pre-flight. Use mount timeout. |
-| podman build | Network issues pulling base image, disk full | Low-Medium | Non-zero exit code | Retry. First pull of `vllm/vllm-openai:v0.8.5` is ~15GB. Ensure disk space. |
-| podman run | GPU device not available, port 8000 already in use, OOM | Medium | Container exits immediately, `podman ps` shows no running container | Check CDI config, check port availability, check GPU memory. |
-| Health poll timeout | vLLM fails to load model (OOM, model not on NFS, corrupted weights) | Medium | `/health` never returns 200 within timeout | Check container logs (`podman logs auto-vllm`). Model too large for available GPU memory is the most common cause. |
-| etcd registration | etcd unreachable | Low | Exception from etcd3gw | Retry. If etcd is down, the entire gateway has bigger problems. |
+```
+Source A: QUADS API  -- knows about ALL lab hosts (available or assigned)
+Source B: etcd registry -- knows about hosts WE have provisioned with vLLM
 
-## MVP Recommendation for v1.2
+Cases:
+1. In QUADS, NOT in etcd         -> "available" (or "assigned" if QUADS says scheduled)
+2. In QUADS AND in etcd          -> show etcd status (healthy/unhealthy/provisioning/draining)
+3. NOT in QUADS, in etcd         -> "provisioned" (manually added, not in QUADS inventory)
+4. In QUADS, broken/retired      -> show but grey out, no actions
+```
 
-**Must have (ship-blocking):**
-1. SSH connection via asyncssh with key auth
-2. Remote execution of setup.sh (upload + run)
-3. Remote container build + start
-4. Health poll from gateway until node is ready
-5. etcd registration (using existing serializer)
-6. Setup state machine (in-memory, per-task)
-7. `POST /admin/nodes/setup` -- trigger setup, return task ID
-8. `GET /admin/nodes/setup/{task_id}` -- poll setup status
-9. `DELETE /admin/nodes/{id}` -- teardown (stop container + deregister)
-10. Error capture and reporting per step
-11. Dashboard buttons for setup/teardown
+### Suggested Merged Response Shape
 
-**Should have (high value, low risk):**
-1. Pre-flight validation (SSH reachable, GPU present, disk space)
-2. Connection draining before teardown
-3. Dashboard step-by-step progress display
-4. Setup log capture (last N lines of output)
+```json
+{
+  "hostname": "host01.example.com",
+  "source": "quads+etcd",
+  "quads_status": "available",
+  "node_status": "healthy",
+  "model_hw": "R640",
+  "gpu": "2x NVIDIA A100",
+  "gpu_count": 2,
+  "memory_gb": 512,
+  "cloud": "cloud01",
+  "vllm_model": "meta-llama/Llama-3-70b",
+  "active_connections": 3,
+  "circuit_breaker_state": "closed",
+  "actions": ["teardown"]
+}
+```
 
-**Defer:**
-- Parallel multi-node setup: each setup is already async, just run multiple
-- Retry individual steps: add when operators actually ask for it
-- Setup history/audit: in-memory is fine for now
-- Container image caching: minor optimization, add when setup time is a complaint
+## Inline Action Button UI Patterns
+
+Standard ops dashboard patterns for inline actions:
+
+| Host State | Available Actions | Button Style |
+|------------|-------------------|--------------|
+| Available (idle, has GPU) | Setup | Primary (blue/green) |
+| Available (idle, no GPU) | -- (greyed out "No GPU") | Disabled |
+| Assigned (scheduled to someone else) | -- (disabled, tooltip "Assigned to X") | Disabled |
+| Provisioning | -- (disabled, show spinner or "Provisioning...") | Disabled with loading indicator |
+| Healthy | Teardown | Danger (red/outline) |
+| Unhealthy | Teardown, Retry Setup | Danger + Warning |
+| Draining | -- (disabled, "Draining...") | Disabled |
+| Broken/Retired | -- (disabled) | Greyed out |
+
+**UI pattern:** Single Actions column with contextual button(s). Disabled buttons show tooltip explaining why. This is the standard pattern in Kubernetes dashboards, Foreman, and MAAS.
+
+## MVP Recommendation
+
+Prioritize:
+1. **QUADS client + config + poller** -- foundation, no UI impact yet, testable in isolation
+2. **Merge logic + admin API update** -- backend delivers unified list
+3. **Dashboard table rewrite** -- render unified list with inline buttons
+4. **Remove setup form** -- cleanup after inline buttons work
+
+Defer:
+- Cloud/assignment tooltip details: requires extra API call, low priority information
+- Filter/search: useful but not blocking, add when table has enough rows to need it
+- Host hardware summary beyond GPU: nice to have, model name in QUADS is sufficient
+
+## Complexity Assessment
+
+| Component | Estimated Size | Risk |
+|-----------|---------------|------|
+| QUADS client module | ~80-120 LOC | Low -- straightforward httpx GET calls |
+| Background poller | ~40-60 LOC | Low -- same pattern as health checker thread |
+| Merge logic | ~60-100 LOC | Med -- matching hostnames, handling edge cases (case sensitivity, FQDN vs short name) |
+| Admin API changes | ~30-50 LOC | Low -- extend existing endpoint |
+| Dashboard HTML/JS changes | ~100-150 LOC | Med -- table restructure, state-based buttons |
+| Config additions | ~15-20 LOC | Low -- QuadsSettings model |
+| Tests | ~200-300 LOC | Med -- mock QUADS responses, test merge logic |
+
+**Total estimate:** ~525-850 new LOC, comparable in scope to v1.1 (dashboard) rather than v1.2 (SSH provisioning).
 
 ## Sources
 
-- [AsyncSSH documentation](https://asyncssh.readthedocs.io/) -- async SSH client for Python, line-by-line output streaming
-- [NVIDIA Container Toolkit troubleshooting](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/troubleshooting.html) -- GPU access failures in containers
-- Existing codebase: `auto-vllm-container/setup.sh`, `start-vllm.sh`, `Containerfile` -- the actual provisioning scripts this feature automates
+- QUADS swagger.yaml: `src/quads/server/swagger.yaml` in github.com/redhat-performance/quads (OpenAPI 3.0.0, version 3.0.0)
+- QUADS models.py: `src/quads/server/models.py` -- SQLAlchemy models defining Host, Processor, Schedule, Assignment, Cloud
+- QUADS hosts.py blueprint: `src/quads/server/blueprints/hosts.py` -- confirms GET /hosts/ is unauthenticated
+- QUADS available.py blueprint: `src/quads/server/blueprints/available.py` -- returns list of hostname strings
+- QUADS quads_api.py: `src/quads/quads_api.py` -- reference Python client using requests (sync)
+- QUADS HostDao: `src/quads/server/dao/host.py` -- query filter implementation
+- Existing inference-proxy: dashboard.html, dashboard.js, admin.py, models/admin.py, config/settings.py
