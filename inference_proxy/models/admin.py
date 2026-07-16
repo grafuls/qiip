@@ -28,6 +28,11 @@ class AdminNodeResponse(BaseModel):
     status: str
     active_connections: int
     circuit_breaker_state: str
+    state: str = ""
+    actions: list[str] = []
+    gpu_vendor: str | None = None
+    gpu_model: str | None = None
+    gpu_count: int | None = None
 
 
 class AdminMetricsResponse(BaseModel):
