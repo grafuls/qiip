@@ -9,10 +9,10 @@ Requirements for QUADS Integration milestone. Each maps to roadmap phases.
 
 ### QUADS Client & Discovery
 
-- [ ] **QUADS-01**: Gateway can connect to a configurable QUADS REST API and retrieve the list of all hosts
+- [x] **QUADS-01**: Gateway can connect to a configurable QUADS REST API and retrieve the list of all hosts
 - [ ] **QUADS-02**: Gateway polls QUADS periodically in the background with configurable interval and in-memory caching
-- [ ] **QUADS-03**: Gateway filters QUADS hosts to only those with GPU processors (processor_type=GPU)
-- [ ] **QUADS-04**: Gateway normalizes hostnames to a canonical format for matching QUADS FQDNs with etcd short names
+- [x] **QUADS-03**: Gateway filters QUADS hosts to only those with GPU processors (processor_type=GPU)
+- [x] **QUADS-04**: Gateway normalizes hostnames to a canonical format for matching QUADS FQDNs with etcd short names
 
 ### Unified Node List
 
@@ -67,10 +67,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| QUADS-01 | Phase 15 | Pending |
+| QUADS-01 | Phase 15 | Complete |
 | QUADS-02 | Phase 16 | Pending |
-| QUADS-03 | Phase 15 | Pending |
-| QUADS-04 | Phase 15 | Pending |
+| QUADS-03 | Phase 15 | Complete |
+| QUADS-04 | Phase 15 | Complete |
 | NODES-01 | Phase 17 | Pending |
 | NODES-02 | Phase 17 | Pending |
 | NODES-03 | Phase 17 | Pending |
