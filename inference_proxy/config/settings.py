@@ -127,6 +127,7 @@ class QUADSSettings(BaseModel):
 
     base_url: str | None = None
     timeout: float = 10.0
+    poll_interval: int = 300
 
 
 class Settings(BaseSettings):
