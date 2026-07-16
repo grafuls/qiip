@@ -16,8 +16,11 @@ from inference_proxy.config.dependencies import (
     get_node_selector,
     get_provisioner,
     get_proxy_client,
+    get_quads_client,
+    get_quads_poller,
     get_request_metrics,
     get_settings,
+    get_unified_node_service,
 )
 from inference_proxy.config.settings import (
     EtcdSettings,
@@ -32,6 +35,7 @@ from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.connection_tracker import ConnectionTracker
 from inference_proxy.routing.node_selector import NodeSelector
 from inference_proxy.routing.request_metrics import RequestMetrics
+from inference_proxy.services.unified_nodes import UnifiedNodeService
 
 
 @pytest.fixture
@@ -108,8 +112,12 @@ def app(
     application.state.node_selector = node_selector
     application.state.circuit_breaker_registry = circuit_breaker_registry
     application.state.request_metrics = request_metrics
+    application.state.quads_poller = None
+    application.state.quads_client = None
     application.state.shutting_down = False
     application.dependency_overrides[get_proxy_client] = lambda: proxy_client
+    application.dependency_overrides[get_quads_client] = lambda: None
+    application.dependency_overrides[get_quads_poller] = lambda: None
     application.dependency_overrides[get_node_selector] = lambda: node_selector
     application.dependency_overrides[get_circuit_breaker_registry] = (
         lambda: circuit_breaker_registry
@@ -117,6 +125,14 @@ def app(
     application.dependency_overrides[get_request_metrics] = (
         lambda: request_metrics
     )
+    # UnifiedNodeService with no QUADS by default
+    _unified_svc = UnifiedNodeService(
+        registry=test_registry,
+        poller=None,
+        cb_registry=circuit_breaker_registry,
+        tracker=node_selector.tracker,
+    )
+    application.dependency_overrides[get_unified_node_service] = lambda: _unified_svc
     mock_provisioner = MagicMock()
     mock_provisioner._etcd_client = MagicMock()
     application.state.provisioner = mock_provisioner

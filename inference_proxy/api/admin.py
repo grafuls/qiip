@@ -14,11 +14,11 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 
 from inference_proxy.config.dependencies import (
-    get_circuit_breaker_registry,
-    get_node_selector,
     get_provisioner,
+    get_quads_client,
     get_registry,
     get_request_metrics,
+    get_unified_node_service,
 )
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.models.admin import (
@@ -30,37 +30,22 @@ from inference_proxy.models.admin import (
     TeardownResponse,
 )
 from inference_proxy.provisioning.provisioner import NodeProvisioner
-from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
-from inference_proxy.routing.node_selector import NodeSelector
+from inference_proxy.quads.client import QUADSClient, QUADSConnectionError
 from inference_proxy.routing.request_metrics import RequestMetrics
+from inference_proxy.services.unified_nodes import UnifiedNodeService
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
+
+# D-08: module-level set to prevent duplicate setup requests
+pending_hosts: set[str] = set()
 
 
 @admin_router.get("/nodes")
 async def list_nodes(
-    registry: NodeRegistry = Depends(get_registry),
-    node_selector: NodeSelector = Depends(get_node_selector),
-    cb_registry: CircuitBreakerRegistry = Depends(get_circuit_breaker_registry),
+    service: UnifiedNodeService = Depends(get_unified_node_service),
 ) -> list[AdminNodeResponse]:
-    """Return all registered nodes with identity, health, and operational state.
-
-    Returns a flat JSON array of nodes.  Nodes of all statuses
-    (HEALTHY, UNHEALTHY, DRAINING) appear in the response.
-    """
-    nodes = registry.get_all()
-    tracker = node_selector.tracker
-    return [
-        AdminNodeResponse(
-            node_id=n.node_id,
-            endpoint=n.endpoint,
-            model=n.model,
-            status=n.status.value,
-            active_connections=tracker.get(n.node_id),
-            circuit_breaker_state=(breaker.state if (breaker := cb_registry.get(n.node_id)) is not None else "closed"),
-        )
-        for n in nodes
-    ]
+    """Return unified node list merging QUADS hosts with etcd nodes."""
+    return service.get_unified_nodes()
 
 
 @admin_router.get("/metrics")
@@ -79,10 +64,45 @@ async def get_metrics(
 async def setup_node(
     body: SetupRequest,
     provisioner: NodeProvisioner = Depends(get_provisioner),
+    quads_client: QUADSClient | None = Depends(get_quads_client),
 ) -> SetupResponse:
-    """Trigger provisioning of a new node (runs in background)."""
-    provisioner.fire_background(provisioner.provision(body.hostname))
-    return SetupResponse(task_id=body.hostname)
+    """Trigger provisioning of a new node (runs in background).
+
+    Includes dedup guard (D-08) and live QUADS re-validation (D-10/D-11).
+    """
+    hostname = body.hostname
+
+    # D-08: dedup guard
+    if hostname in pending_hosts:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Setup already in progress for '{hostname}'",
+        )
+
+    # D-10/D-11: live QUADS re-validation
+    if quads_client is not None:
+        try:
+            available = await quads_client.get_available()
+        except QUADSConnectionError as exc:
+            raise HTTPException(
+                status_code=503, detail="QUADS unavailable"
+            ) from exc
+        if hostname not in available:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Host '{hostname}' is not available in QUADS",
+            )
+
+    pending_hosts.add(hostname)
+
+    async def _provision_and_cleanup() -> None:
+        try:
+            await provisioner.provision(hostname)
+        finally:
+            pending_hosts.discard(hostname)
+
+    provisioner.fire_background(_provision_and_cleanup())
+    return SetupResponse(task_id=hostname)
 
 
 @admin_router.get("/provisioning/tasks")
