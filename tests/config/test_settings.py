@@ -11,6 +11,7 @@ from inference_proxy.config.settings import (
     EtcdSettings,
     GatewaySettings,
     ProvisioningSettings,
+    QUADSSettings,
     RoutingSettings,
     SSHSettings,
     Settings,
@@ -154,6 +155,40 @@ class TestSSHAndProvisioningAreNotBaseSettings:
     def test_provisioning_settings_is_base_model_not_base_settings(self) -> None:
         assert not issubclass(ProvisioningSettings, BaseSettings)
         assert issubclass(ProvisioningSettings, BaseModel)
+
+
+class TestDefaultQUADSSettings:
+    def test_base_url_is_none(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.quads.base_url is None
+
+    def test_timeout_is_10(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.quads.timeout == 10.0
+
+
+class TestEnvVarOverrideQUADSBaseUrl:
+    def test_env_var_override_quads_base_url(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_QUADS__BASE_URL", "http://quads.example.com")
+        settings = Settings(_env_file=None)
+        assert settings.quads.base_url == "http://quads.example.com"
+
+
+class TestEnvVarOverrideQUADSTimeout:
+    def test_env_var_override_quads_timeout(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_QUADS__TIMEOUT", "5.0")
+        settings = Settings(_env_file=None)
+        assert settings.quads.timeout == 5.0
+
+
+class TestQUADSSettingsIsNotBaseSettings:
+    def test_quads_settings_is_base_model_not_base_settings(self) -> None:
+        assert not issubclass(QUADSSettings, BaseSettings)
+        assert issubclass(QUADSSettings, BaseModel)
 
 
 class TestSettingsIsBaseSettings:

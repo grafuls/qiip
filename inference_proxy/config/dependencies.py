@@ -19,6 +19,7 @@ from fastapi import Request
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.proxy.client import ProxyClient
+from inference_proxy.quads.client import QUADSClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.node_selector import NodeSelector
 from inference_proxy.routing.request_metrics import RequestMetrics
@@ -86,3 +87,8 @@ def get_node_selector(request: Request) -> NodeSelector:
 def get_provisioner(request: Request) -> NodeProvisioner:
     """Return the node provisioner from the current application state."""
     return request.app.state.provisioner  # type: ignore[no-any-return]
+
+
+def get_quads_client(request: Request) -> QUADSClient | None:
+    """Return the QUADS client, or None when QUADS is not configured (D-10)."""
+    return request.app.state.quads_client  # type: ignore[no-any-return]

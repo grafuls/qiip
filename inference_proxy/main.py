@@ -40,6 +40,7 @@ from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.provisioning.ssh_client import SSHClient
+from inference_proxy.quads.client import QUADSClient
 from inference_proxy.resilience.health_checker import run_health_checker
 from inference_proxy.resilience.shutdown import ShutdownMiddleware
 from inference_proxy.routing.connection_tracker import ConnectionTracker
@@ -165,6 +166,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         app.state.provisioner = provisioner
 
+        if resolved_settings.quads.base_url is not None:
+            quads_http = httpx.AsyncClient(
+                timeout=httpx.Timeout(resolved_settings.quads.timeout),
+            )
+            quads_client = QUADSClient(
+                quads_http, resolved_settings.quads.base_url
+            )
+            app.state.quads_client = quads_client
+        else:
+            app.state.quads_client = None
+            quads_http = None
+
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(
                 connect=resolved_settings.proxy.connect_timeout,
@@ -193,6 +206,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await asyncio.sleep(resolved_settings.gateway.graceful_shutdown_timeout)
 
         await http_client.aclose()
+        if quads_http is not None:
+            await quads_http.aclose()
         stop_event.set()
         watch_thread.join(timeout=10)
         health_thread.join(timeout=10)

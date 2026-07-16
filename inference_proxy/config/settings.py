@@ -117,6 +117,18 @@ class ProvisioningSettings(BaseModel):
     scripts_dir: Path = Path("auto-vllm-container")
 
 
+class QUADSSettings(BaseModel):
+    """QUADS API configuration.
+
+    When ``base_url`` is ``None`` (the default), QUADS features are
+    disabled (D-10).  Setting it via ``INFERENCE_PROXY_QUADS__BASE_URL``
+    activates the QUADS integration.
+    """
+
+    base_url: str | None = None
+    timeout: float = 10.0
+
+
 class Settings(BaseSettings):
     """Root application settings.
 
@@ -142,3 +154,4 @@ class Settings(BaseSettings):
     dashboard: DashboardSettings = DashboardSettings()
     ssh: SSHSettings = SSHSettings()
     provisioning: ProvisioningSettings = ProvisioningSettings()
+    quads: QUADSSettings = QUADSSettings()
