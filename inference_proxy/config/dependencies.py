@@ -25,6 +25,8 @@ from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.node_selector import NodeSelector
 from inference_proxy.routing.request_metrics import RequestMetrics
 
+from inference_proxy.services.unified_nodes import UnifiedNodeService
+
 from .settings import Settings
 
 
@@ -101,3 +103,13 @@ def get_quads_poller(request: Request) -> QUADSPoller | None:
     Phase 17 consumes this to merge QUADS hosts with etcd nodes.
     """
     return request.app.state.quads_poller  # type: ignore[no-any-return]
+
+
+def get_unified_node_service(request: Request) -> UnifiedNodeService:
+    """Build UnifiedNodeService from app.state components."""
+    return UnifiedNodeService(
+        registry=request.app.state.registry,
+        poller=request.app.state.quads_poller,
+        cb_registry=request.app.state.circuit_breaker_registry,
+        tracker=request.app.state.node_selector.tracker,
+    )

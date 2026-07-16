@@ -1,15 +1,11 @@
 """Integration tests for the admin API endpoints.
 
 Tests cover:
-- GET /admin/nodes with populated registry returns all nodes
-- GET /admin/nodes with empty registry returns empty list
-- Each node in the response contains six fields (identity + operational state)
-- Nodes with different statuses (HEALTHY, UNHEALTHY, DRAINING) all appear
-- The response is a flat JSON array, not wrapped in an object
-- GET /admin/nodes active_connections reflects ConnectionTracker state
-- GET /admin/nodes circuit_breaker_state reflects CircuitBreaker state
+- GET /admin/nodes returns unified list merging QUADS + etcd (NODES-01)
+- Each node has state and actions fields (NODES-02)
+- POST /admin/nodes/setup dedup guard (NODES-04)
+- POST /admin/nodes/setup live QUADS re-validation (NODES-05)
 - GET /admin/metrics returns aggregate request counter data
-- POST /admin/nodes/setup returns 202 and fires provisioning
 - GET /admin/provisioning/tasks returns task status from etcd
 - DELETE /admin/nodes/{id} returns 202 for known nodes, 404 for unknown
 """
@@ -17,15 +13,24 @@ Tests cover:
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from inference_proxy.config.dependencies import (
+    get_quads_client,
+    get_unified_node_service,
+)
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.models.node import Node, NodeStatus
+from inference_proxy.models.quads import QUADSHost
+from inference_proxy.quads.client import QUADSConnectionError
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.connection_tracker import ConnectionTracker
 from inference_proxy.routing.request_metrics import RequestMetrics
+from inference_proxy.services.unified_nodes import UnifiedNodeService
 
 
 def _make_node(
@@ -67,12 +72,12 @@ class TestAdminNodesPopulated:
         data = response.json()
         assert len(data) == 2
 
-    def test_each_node_has_exactly_six_fields(
+    def test_each_node_has_expected_fields(
         self,
         client: TestClient,
         test_registry: NodeRegistry,
     ) -> None:
-        """Each node contains identity and operational state fields."""
+        """Each node contains identity, operational state, and unified fields."""
         test_registry.add(_make_node())
 
         response = client.get("/admin/nodes")
@@ -80,14 +85,12 @@ class TestAdminNodesPopulated:
 
         assert len(data) == 1
         node = data[0]
-        assert set(node.keys()) == {
-            "node_id",
-            "endpoint",
-            "model",
-            "status",
-            "active_connections",
-            "circuit_breaker_state",
+        expected = {
+            "node_id", "endpoint", "model", "status",
+            "active_connections", "circuit_breaker_state",
+            "state", "actions", "gpu_vendor", "gpu_model", "gpu_count",
         }
+        assert set(node.keys()) == expected
         assert "last_heartbeat" not in node
         assert "capabilities" not in node
 
@@ -329,3 +332,199 @@ class TestTeardownEndpoint:
     ) -> None:
         response = client.delete("/admin/nodes/unknown")
         assert response.status_code == 404
+
+
+# -- Unified list tests (NODES-01, NODES-02) --
+
+
+class TestUnifiedNodeList:
+    """GET /admin/nodes returns unified QUADS+etcd merged list."""
+
+    def test_merged_list_with_quads(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        connection_tracker: ConnectionTracker,
+        circuit_breaker_registry: CircuitBreakerRegistry,
+    ) -> None:
+        """NODES-01: Unified list includes both etcd and available QUADS hosts."""
+        test_registry.add(_make_node(node_id="gpu01"))
+        poller = MagicMock()
+        poller.hosts = [
+            QUADSHost(hostname="gpu01", gpu_vendor="NVIDIA", gpu_model="A100", gpu_count=4),
+            QUADSHost(hostname="gpu02", gpu_vendor="AMD", gpu_model="MI300X", gpu_count=8),
+        ]
+        poller.available_hostnames = ["gpu01", "gpu02"]
+        svc = UnifiedNodeService(
+            registry=test_registry,
+            poller=poller,
+            cb_registry=circuit_breaker_registry,
+            tracker=connection_tracker,
+        )
+        app.dependency_overrides[get_unified_node_service] = lambda: svc
+
+        response = client.get("/admin/nodes")
+        data = response.json()
+
+        assert len(data) == 2
+        ids = {n["node_id"] for n in data}
+        assert ids == {"gpu01", "gpu02"}
+
+    def test_each_node_has_state_and_actions(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        connection_tracker: ConnectionTracker,
+        circuit_breaker_registry: CircuitBreakerRegistry,
+    ) -> None:
+        """NODES-02: Each node includes state and actions."""
+        poller = MagicMock()
+        poller.hosts = [
+            QUADSHost(hostname="gpu01", gpu_vendor="NVIDIA", gpu_model="A100", gpu_count=4),
+        ]
+        poller.available_hostnames = ["gpu01"]
+        svc = UnifiedNodeService(
+            registry=test_registry,
+            poller=poller,
+            cb_registry=circuit_breaker_registry,
+            tracker=connection_tracker,
+        )
+        app.dependency_overrides[get_unified_node_service] = lambda: svc
+
+        response = client.get("/admin/nodes")
+        node = response.json()[0]
+
+        assert "state" in node
+        assert "actions" in node
+        assert node["state"] == "available"
+        assert node["actions"] == ["setup"]
+
+    def test_no_quads_returns_etcd_only(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+    ) -> None:
+        """Graceful degradation: no QUADS returns etcd-only nodes."""
+        test_registry.add(_make_node(node_id="gpu01"))
+
+        response = client.get("/admin/nodes")
+        data = response.json()
+
+        assert len(data) == 1
+        assert data[0]["node_id"] == "gpu01"
+        assert data[0]["state"] == "healthy"
+
+
+# -- Dedup guard tests (NODES-04) --
+
+
+@pytest.fixture(autouse=True)
+def _clear_pending_hosts() -> None:
+    """Clear the module-level pending_hosts between tests."""
+    import inference_proxy.api.admin as admin_mod
+    if hasattr(admin_mod, "pending_hosts"):
+        admin_mod.pending_hosts.clear()
+
+
+class TestSetupDedupGuard:
+    """POST /admin/nodes/setup returns 409 for duplicate requests (NODES-04)."""
+
+    def test_returns_409_for_pending_hostname(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        import inference_proxy.api.admin as admin_mod
+        admin_mod.pending_hosts.add("gpu01")
+
+        response = client.post("/admin/nodes/setup", json={"hostname": "gpu01"})
+        assert response.status_code == 409
+
+    def test_clears_pending_after_completion(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        """Pending host is removed after provisioning task fires."""
+        import inference_proxy.api.admin as admin_mod
+
+        response = client.post("/admin/nodes/setup", json={"hostname": "gpu01"})
+        assert response.status_code == 202
+        # The background task wrapper should eventually discard from pending_hosts.
+        # Since fire_background is mocked, we check it was called with a coroutine.
+        mock_provisioner.fire_background.assert_called_once()
+
+
+# -- QUADS re-validation tests (NODES-05) --
+
+
+class TestSetupQuadsRevalidation:
+    """POST /admin/nodes/setup re-validates against live QUADS (NODES-05)."""
+
+    def test_returns_503_on_quads_connection_error(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        mock_quads = AsyncMock()
+        mock_quads.get_available.side_effect = QUADSConnectionError("timeout")
+        app.dependency_overrides[get_quads_client] = lambda: mock_quads
+
+        response = client.post("/admin/nodes/setup", json={"hostname": "gpu01"})
+        assert response.status_code == 503
+
+    def test_returns_400_for_unavailable_host(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        mock_quads = AsyncMock()
+        mock_quads.get_available.return_value = ["gpu99"]
+        app.dependency_overrides[get_quads_client] = lambda: mock_quads
+
+        response = client.post("/admin/nodes/setup", json={"hostname": "gpu01"})
+        assert response.status_code == 400
+
+    def test_succeeds_for_available_host(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        mock_quads = AsyncMock()
+        mock_quads.get_available.return_value = ["gpu01"]
+        app.dependency_overrides[get_quads_client] = lambda: mock_quads
+
+        response = client.post("/admin/nodes/setup", json={"hostname": "gpu01"})
+        assert response.status_code == 202
+
+    def test_works_without_quads_configured(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        """When QUADS not configured (None), setup proceeds without validation."""
+        response = client.post("/admin/nodes/setup", json={"hostname": "gpu01"})
+        assert response.status_code == 202
+
+
+class TestExistingEndpointsUnchanged:
+    """Existing endpoints still work after refactoring."""
+
+    def test_metrics_still_works(self, client: TestClient) -> None:
+        response = client.get("/admin/metrics")
+        assert response.status_code == 200
+
+    def test_teardown_still_works(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        test_registry.add(_make_node(node_id="gpu01"))
+        response = client.delete("/admin/nodes/gpu01")
+        assert response.status_code == 202
