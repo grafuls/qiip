@@ -47,7 +47,7 @@
 
 - [x] **Phase 15: QUADS Client and Models** - Connect to QUADS API, parse host data, normalize hostnames (completed 2026-07-16)
 - [x] **Phase 16: Background Polling** - Periodic QUADS polling with in-memory caching and staleness tracking (completed 2026-07-16)
-- [ ] **Phase 17: Unified Node List and Admin API** - Merge QUADS hosts with etcd nodes, state-aware actions, dedup guard
+- [x] **Phase 17: Unified Node List and Admin API** - Merge QUADS hosts with etcd nodes, state-aware actions, dedup guard (completed 2026-07-16)
 - [ ] **Phase 18: Dashboard UI Update** - Unified table with inline action buttons and QUADS status indicator
 
 ## Phase Details
@@ -88,7 +88,9 @@ Plans:
   3. Setup request for an already-pending host returns 409 Conflict
   4. Setup request re-validates host availability against live QUADS data, not the polling cache
   5. Inline actions trigger the correct operations: Setup for available, Teardown for healthy, Teardown+Retry for unhealthy
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [x] 17-01-PLAN.md — UnifiedNodeService, extended AdminNodeResponse, dedup guard, QUADS re-validation
 
 ### Phase 18: Dashboard UI Update
 **Goal**: Dashboard displays the unified node list with inline provisioning controls
@@ -123,5 +125,5 @@ Plans:
 | 14. Dashboard Operations | v1.2 | 1/1 | Complete | 2026-07-08 |
 | 15. QUADS Client and Models | v1.3 | 1/1 | Complete    | 2026-07-16 |
 | 16. Background Polling | v1.3 | 1/1 | Complete    | 2026-07-16 |
-| 17. Unified Node List and Admin API | v1.3 | 0/? | Not started | - |
+| 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete   | 2026-07-16 |
 | 18. Dashboard UI Update | v1.3 | 0/? | Not started | - |
