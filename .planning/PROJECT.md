@@ -64,7 +64,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ## Context
 
-Shipped v1.2 with 9,635 LOC (Python + HTML/CSS/JS) across 14 phases and 338 tests.
+Shipped v1.2 with 9,635 LOC (Python + HTML/CSS/JS) across 14 phases and 338 tests. Phase 15 complete — QUADS client and models layer added (361 tests).
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
@@ -125,4 +125,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-15 — v1.3 QUADS Integration milestone started*
+*Last updated: 2026-07-16 — Phase 15 (QUADS Client and Models) complete*
