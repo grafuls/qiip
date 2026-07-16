@@ -45,7 +45,7 @@
 
 **Milestone Goal:** Integrate with the QUADS REST API to show all available GPU hosts in a unified node list with inline provisioning controls, replacing the separate setup form.
 
-- [ ] **Phase 15: QUADS Client and Models** - Connect to QUADS API, parse host data, normalize hostnames
+- [x] **Phase 15: QUADS Client and Models** - Connect to QUADS API, parse host data, normalize hostnames (completed 2026-07-16)
 - [ ] **Phase 16: Background Polling** - Periodic QUADS polling with in-memory caching and staleness tracking
 - [ ] **Phase 17: Unified Node List and Admin API** - Merge QUADS hosts with etcd nodes, state-aware actions, dedup guard
 - [ ] **Phase 18: Dashboard UI Update** - Unified table with inline action buttons and QUADS status indicator
@@ -63,7 +63,7 @@
   4. QUADS connection settings (base URL, timeouts) are configurable via environment variables
 **Plans**: 1 plan
 Plans:
-- [ ] 15-01-PLAN.md -- QUADSHost model, QUADSClient, config, DI wiring
+- [x] 15-01-PLAN.md -- QUADSHost model, QUADSClient, config, DI wiring
 
 ### Phase 16: Background Polling
 **Goal**: Gateway maintains a fresh cached list of QUADS hosts without blocking request handling
@@ -119,7 +119,7 @@ Plans:
 | 12. Provisioning Robustness | v1.2 | 2/2 | Complete | 2026-07-02 |
 | 13. Teardown and Admin API | v1.2 | 2/2 | Complete | 2026-07-07 |
 | 14. Dashboard Operations | v1.2 | 1/1 | Complete | 2026-07-08 |
-| 15. QUADS Client and Models | v1.3 | 0/1 | Not started | - |
+| 15. QUADS Client and Models | v1.3 | 1/1 | Complete   | 2026-07-16 |
 | 16. Background Polling | v1.3 | 0/? | Not started | - |
 | 17. Unified Node List and Admin API | v1.3 | 0/? | Not started | - |
 | 18. Dashboard UI Update | v1.3 | 0/? | Not started | - |
