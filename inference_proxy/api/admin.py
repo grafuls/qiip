@@ -30,7 +30,11 @@ from inference_proxy.models.admin import (
     TeardownResponse,
 )
 from inference_proxy.provisioning.provisioner import NodeProvisioner
-from inference_proxy.quads.client import QUADSClient, QUADSConnectionError
+from inference_proxy.quads.client import (
+    QUADSClient,
+    QUADSConnectionError,
+    canonical_hostname,
+)
 from inference_proxy.routing.request_metrics import RequestMetrics
 from inference_proxy.services.unified_nodes import UnifiedNodeService
 
@@ -70,7 +74,7 @@ async def setup_node(
 
     Includes dedup guard (D-08) and live QUADS re-validation (D-10/D-11).
     """
-    hostname = body.hostname
+    hostname = canonical_hostname(body.hostname)
 
     # D-08: dedup guard
     if hostname in pending_hosts:
@@ -101,7 +105,11 @@ async def setup_node(
         finally:
             pending_hosts.discard(hostname)
 
-    provisioner.fire_background(_provision_and_cleanup())
+    try:
+        provisioner.fire_background(_provision_and_cleanup())
+    except Exception:
+        pending_hosts.discard(hostname)
+        raise
     return SetupResponse(task_id=hostname)
 
 
