@@ -16,11 +16,11 @@ Requirements for QUADS Integration milestone. Each maps to roadmap phases.
 
 ### Unified Node List
 
-- [ ] **NODES-01**: Admin API returns a unified node list merging QUADS available hosts with etcd-registered nodes by hostname
-- [ ] **NODES-02**: Each node in the unified list shows its state (available, provisioned, healthy, unhealthy) with available actions
-- [ ] **NODES-03**: User can trigger Setup on an available node, Teardown on a healthy node, and Teardown+Retry on an unhealthy node via inline actions
-- [ ] **NODES-04**: Gateway prevents duplicate setup requests for the same host with a pending_hosts guard (409 on duplicate)
-- [ ] **NODES-05**: Gateway re-validates host availability against QUADS at setup time, not from the polling cache
+- [x] **NODES-01**: Admin API returns a unified node list merging QUADS available hosts with etcd-registered nodes by hostname
+- [x] **NODES-02**: Each node in the unified list shows its state (available, provisioned, healthy, unhealthy) with available actions
+- [x] **NODES-03**: User can trigger Setup on an available node, Teardown on a healthy node, and Teardown+Retry on an unhealthy node via inline actions
+- [x] **NODES-04**: Gateway prevents duplicate setup requests for the same host with a pending_hosts guard (409 on duplicate)
+- [x] **NODES-05**: Gateway re-validates host availability against QUADS at setup time, not from the polling cache
 
 ### Dashboard UI
 
@@ -71,11 +71,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | QUADS-02 | Phase 16 | Complete |
 | QUADS-03 | Phase 15 | Complete |
 | QUADS-04 | Phase 15 | Complete |
-| NODES-01 | Phase 17 | Pending |
-| NODES-02 | Phase 17 | Pending |
-| NODES-03 | Phase 17 | Pending |
-| NODES-04 | Phase 17 | Pending |
-| NODES-05 | Phase 17 | Pending |
+| NODES-01 | Phase 17 | Complete |
+| NODES-02 | Phase 17 | Complete |
+| NODES-03 | Phase 17 | Complete |
+| NODES-04 | Phase 17 | Complete |
+| NODES-05 | Phase 17 | Complete |
 | DASH-01 | Phase 18 | Pending |
 | DASH-02 | Phase 18 | Pending |
 | DASH-03 | Phase 18 | Pending |

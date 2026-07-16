@@ -125,5 +125,5 @@ Plans:
 | 14. Dashboard Operations | v1.2 | 1/1 | Complete | 2026-07-08 |
 | 15. QUADS Client and Models | v1.3 | 1/1 | Complete    | 2026-07-16 |
 | 16. Background Polling | v1.3 | 1/1 | Complete    | 2026-07-16 |
-| 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete   | 2026-07-16 |
+| 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete    | 2026-07-16 |
 | 18. Dashboard UI Update | v1.3 | 0/? | Not started | - |
