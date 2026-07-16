@@ -41,6 +41,7 @@ from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.provisioning.ssh_client import SSHClient
 from inference_proxy.quads.client import QUADSClient
+from inference_proxy.quads.poller import QUADSPoller
 from inference_proxy.resilience.health_checker import run_health_checker
 from inference_proxy.resilience.shutdown import ShutdownMiddleware
 from inference_proxy.routing.connection_tracker import ConnectionTracker
@@ -174,8 +175,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 quads_http, resolved_settings.quads.base_url
             )
             app.state.quads_client = quads_client
+            quads_poller = QUADSPoller(
+                quads_client, resolved_settings.quads.poll_interval
+            )
+            quads_poller.start()
+            app.state.quads_poller = quads_poller
         else:
             app.state.quads_client = None
+            app.state.quads_poller = None
             quads_http = None
 
         http_client = httpx.AsyncClient(
@@ -206,6 +213,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         await asyncio.sleep(resolved_settings.gateway.graceful_shutdown_timeout)
 
         await http_client.aclose()
+        if app.state.quads_poller is not None:
+            await app.state.quads_poller.stop()
         if quads_http is not None:
             await quads_http.aclose()
         stop_event.set()
