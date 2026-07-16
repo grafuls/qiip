@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 import structlog
 
 from inference_proxy.models.quads import QUADSHost
-from inference_proxy.quads.client import QUADSClient, QUADSConnectionError
+from inference_proxy.quads.client import QUADSClient
 
 logger = structlog.get_logger()
 
@@ -39,11 +39,11 @@ class QUADSPoller:
 
     @property
     def hosts(self) -> list[QUADSHost]:
-        return self._hosts
+        return list(self._hosts)
 
     @property
     def available_hostnames(self) -> list[str]:
-        return self._available
+        return list(self._available)
 
     @property
     def last_sync(self) -> datetime | None:
@@ -57,6 +57,8 @@ class QUADSPoller:
 
     def start(self) -> None:
         """Kick off the background poll loop."""
+        if self._task is not None and not self._task.done():
+            return
         self._task = asyncio.create_task(self._poll_loop())
 
     async def stop(self) -> None:
@@ -83,11 +85,12 @@ class QUADSPoller:
         try:
             hosts = await self._client.get_hosts()
             available = await self._client.get_available()
-        except QUADSConnectionError:
+        except Exception:
             self._consecutive_failures += 1
             logger.warning(
                 "quads_poll_failed",
                 consecutive_failures=self._consecutive_failures,
+                exc_info=True,
             )
             return
 
