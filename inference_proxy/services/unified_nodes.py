@@ -1,15 +1,29 @@
-"""Unified node list service — merges QUADS hosts with etcd nodes.
+"""Unified node list service — merges QUADS hosts with etcd nodes (D-01).
 
-Stub for TDD RED phase. Implementation in GREEN.
+Produces a single list of AdminNodeResponse with computed state and
+actions by joining QUADS GPU inventory with etcd-registered nodes by
+hostname.  Etcd status wins when a host appears in both sources (D-05).
+Nodes in etcd but absent from QUADS are excluded (D-03).
 """
 
 from __future__ import annotations
 
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.models.admin import AdminNodeResponse
+from inference_proxy.models.node import Node
+from inference_proxy.models.quads import QUADSHost
 from inference_proxy.quads.poller import QUADSPoller
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.connection_tracker import ConnectionTracker
+
+# D-07: state -> available actions
+_STATE_ACTIONS: dict[str, list[str]] = {
+    "available": ["setup"],
+    "healthy": ["teardown"],
+    "unhealthy": ["teardown", "retry"],
+    "provisioning": ["cancel"],
+    "draining": ["force_teardown"],
+}
 
 
 class UnifiedNodeService:
@@ -28,4 +42,64 @@ class UnifiedNodeService:
         self._tracker = tracker
 
     def get_unified_nodes(self) -> list[AdminNodeResponse]:
-        raise NotImplementedError
+        """Return merged QUADS + etcd node list sorted by node_id."""
+        etcd_map = {n.node_id: n for n in self._registry.get_all()}
+
+        # Graceful degradation: no QUADS -> etcd-only
+        if self._poller is None:
+            return sorted(
+                (self._from_etcd(n) for n in etcd_map.values()),
+                key=lambda r: r.node_id,
+            )
+
+        quads_map: dict[str, QUADSHost] = {h.hostname: h for h in self._poller.hosts}
+        available_set = set(self._poller.available_hostnames)
+        result: list[AdminNodeResponse] = []
+
+        for hostname, host in quads_map.items():
+            etcd_node = etcd_map.get(hostname)
+            if etcd_node is not None:
+                # D-05: etcd status wins
+                result.append(self._from_etcd(etcd_node, host))
+            elif hostname in available_set:
+                result.append(self._from_available(host))
+            # else: not available and not in etcd -> skip
+
+        return sorted(result, key=lambda r: r.node_id)
+
+    def _from_etcd(
+        self,
+        node: Node,
+        host: QUADSHost | None = None,
+    ) -> AdminNodeResponse:
+        state = node.status.value
+        breaker = self._cb_registry.get(node.node_id)
+        return AdminNodeResponse(
+            node_id=node.node_id,
+            endpoint=node.endpoint,
+            model=node.model,
+            status=node.status.value,
+            active_connections=self._tracker.get(node.node_id),
+            circuit_breaker_state=breaker.state if breaker else "closed",
+            state=state,
+            actions=list(_STATE_ACTIONS.get(state, [])),
+            gpu_vendor=host.gpu_vendor if host else None,
+            gpu_model=host.gpu_model if host else None,
+            gpu_count=host.gpu_count if host else None,
+        )
+
+    @staticmethod
+    def _from_available(host: QUADSHost) -> AdminNodeResponse:
+        return AdminNodeResponse(
+            node_id=host.hostname,
+            endpoint="",
+            model="",
+            status="",
+            active_connections=0,
+            circuit_breaker_state="closed",
+            state="available",
+            actions=list(_STATE_ACTIONS["available"]),
+            gpu_vendor=host.gpu_vendor,
+            gpu_model=host.gpu_model,
+            gpu_count=host.gpu_count,
+        )
