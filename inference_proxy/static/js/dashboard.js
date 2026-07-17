@@ -80,20 +80,121 @@ function renderTasks(tasks) {
   }
 }
 
-async function handleTeardown(nodeId) {
-  if (!window.confirm(`Teardown node ${nodeId}? This will drain connections and stop the container.`)) {
-    return;
+// ponytail: data-driven action dispatch replaces per-action functions
+const ACTION_CONFIG = {
+  setup: {
+    method: "POST",
+    url: () => "/admin/nodes/setup",
+    body: (nodeId) => ({ hostname: nodeId }),
+    confirm: false,
+    confirmMsg: null,
+    label: "Setup Node",
+    css: "btn-setup",
+    successMsg: (nodeId) => `Setup started for ${nodeId}`,
+  },
+  teardown: {
+    method: "DELETE",
+    url: (nodeId) => `/admin/nodes/${nodeId}`,
+    body: null,
+    confirm: true,
+    confirmMsg: (nodeId) =>
+      `Teardown node ${nodeId}? This will drain connections and stop the container.`,
+    label: "Teardown",
+    css: "btn-teardown",
+    successMsg: (nodeId) => `Teardown started for ${nodeId}`,
+  },
+  retry: {
+    method: "POST",
+    url: () => "/admin/nodes/setup",
+    body: (nodeId) => ({ hostname: nodeId }),
+    confirm: false,
+    confirmMsg: null,
+    label: "Retry",
+    css: "btn-retry",
+    successMsg: (nodeId) => `Retry started for ${nodeId}`,
+  },
+  cancel: {
+    method: "DELETE",
+    url: (nodeId) => `/admin/nodes/${nodeId}`,
+    body: null,
+    confirm: true,
+    confirmMsg: (nodeId) => `Cancel provisioning for ${nodeId}?`,
+    label: "Cancel",
+    css: "btn-cancel",
+    successMsg: (nodeId) => `Cancelled provisioning for ${nodeId}`,
+  },
+  force_teardown: {
+    method: "DELETE",
+    url: (nodeId) => `/admin/nodes/${nodeId}?force=true`,
+    body: null,
+    confirm: true,
+    confirmMsg: (nodeId) =>
+      `Force teardown ${nodeId}? This will immediately stop the container without draining.`,
+    label: "Force Teardown",
+    css: "btn-force-teardown",
+    successMsg: (nodeId) => `Teardown started for ${nodeId}`,
+  },
+};
+
+async function handleAction(action, nodeId) {
+  const config = ACTION_CONFIG[action];
+  if (!config) return;
+  if (config.confirm && !window.confirm(config.confirmMsg(nodeId))) return;
+  const options = { method: config.method };
+  if (config.body) {
+    options.headers = { "Content-Type": "application/json" };
+    options.body = JSON.stringify(config.body(nodeId));
   }
   try {
-    const resp = await fetch(`/admin/nodes/${nodeId}`, { method: "DELETE" });
+    const resp = await fetch(config.url(nodeId), options);
     if (resp.ok) {
-      showToast(`Teardown started for ${nodeId}`, "success");
+      showToast(config.successMsg(nodeId), "success");
     } else {
-      showToast(`Teardown failed: HTTP ${resp.status}`, "error");
+      const data = await resp.json().catch(() => ({ detail: `HTTP ${resp.status}` }));
+      showToast(data.detail || `HTTP ${resp.status}`, "error");
     }
   } catch (err) {
-    showToast(`Teardown failed: ${err.message}`, "error");
+    showToast(`${config.label} failed: ${err.message}`, "error");
   }
+}
+
+function relativeTime(isoString) {
+  if (!isoString) return "";
+  const diffMs = Date.now() - new Date(isoString).getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h`;
+}
+
+function renderQuadsStatus(data) {
+  const el = document.getElementById("quads-status");
+  el.textContent = "";
+  const badge = document.createElement("span");
+  badge.className = "badge";
+  if (data.status === "connected") {
+    badge.classList.add("badge-healthy");
+    badge.textContent = `QUADS: connected — ${relativeTime(data.last_sync)} ago`;
+  } else if (data.status === "stale") {
+    badge.classList.add("badge-draining");
+    badge.textContent = `QUADS: stale — last sync ${relativeTime(data.last_sync)} ago`;
+  } else {
+    badge.classList.add("badge-unhealthy");
+    badge.textContent = "QUADS: unavailable";
+  }
+  el.appendChild(badge);
+}
+
+function createActionButton(action, nodeId) {
+  const config = ACTION_CONFIG[action];
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = config.css;
+  btn.textContent = config.label;
+  btn.addEventListener("click", function () {
+    btn.disabled = true;
+    handleAction(action, nodeId);
+  });
+  return btn;
 }
 
 async function refreshDashboard() {
@@ -102,10 +203,11 @@ async function refreshDashboard() {
   const lastUpdatedEl = document.getElementById("last-updated");
   const warningEl = document.getElementById("poll-warning");
   try {
-    const [nodesResp, metricsResp, tasksResp] = await Promise.all([
+    const [nodesResp, metricsResp, tasksResp, quadsResp] = await Promise.all([
       fetch("/admin/nodes"),
       fetch("/admin/metrics"),
       fetch("/admin/provisioning/tasks"),
+      fetch("/admin/quads/status"),
     ]);
     if (!nodesResp.ok) throw new Error(`HTTP ${nodesResp.status}`);
     if (!metricsResp.ok) throw new Error(`HTTP ${metricsResp.status}`);
@@ -114,16 +216,26 @@ async function refreshDashboard() {
     const tasks = tasksResp.ok ? await tasksResp.json() : [];
     const perNode = metrics.per_node || {};
 
+    // ponytail: graceful degradation if QUADS endpoint unavailable
+    if (quadsResp.ok) {
+      renderQuadsStatus(await quadsResp.json());
+    }
+
     warningEl.textContent = "";
     warningEl.className = "";
 
     if (nodes.length === 0) {
-      countEl.textContent = "0 nodes registered";
-      tbody.innerHTML =
-        '<tr><td colspan="8">No nodes registered</td></tr>';
+      countEl.textContent = "0 nodes";
+      tbody.textContent = "";
+      const emptyRow = document.createElement("tr");
+      const emptyCell = document.createElement("td");
+      emptyCell.colSpan = 10;
+      emptyCell.textContent = "No nodes found";
+      emptyRow.appendChild(emptyCell);
+      tbody.appendChild(emptyRow);
     } else {
-      countEl.textContent = `${nodes.length} nodes registered`;
-      tbody.innerHTML = "";
+      countEl.textContent = `${nodes.length} nodes`;
+      tbody.textContent = "";
 
       for (const node of nodes) {
         const tr = document.createElement("tr");
@@ -132,46 +244,75 @@ async function refreshDashboard() {
         tdId.textContent = node.node_id;
         tr.appendChild(tdId);
 
+        const tdGpuVendor = document.createElement("td");
+        tdGpuVendor.textContent = node.gpu_vendor || "—";
+        tr.appendChild(tdGpuVendor);
+
+        const tdGpuModel = document.createElement("td");
+        tdGpuModel.textContent = node.gpu_model || "—";
+        tr.appendChild(tdGpuModel);
+
         const tdEndpoint = document.createElement("td");
-        tdEndpoint.textContent = node.endpoint;
+        tdEndpoint.textContent = node.state === "available" ? "—" : node.endpoint;
         tr.appendChild(tdEndpoint);
 
         const tdModel = document.createElement("td");
-        tdModel.textContent = node.model;
+        tdModel.textContent = node.state === "available" ? "—" : node.model;
         tr.appendChild(tdModel);
 
-        const tdStatus = document.createElement("td");
-        const statusBadge = document.createElement("span");
-        statusBadge.className = `badge badge-${node.status}`;
-        statusBadge.textContent = node.status;
-        tdStatus.appendChild(statusBadge);
-        tr.appendChild(tdStatus);
+        const tdState = document.createElement("td");
+        const stateBadge = document.createElement("span");
+        stateBadge.className = `badge badge-${node.state}`;
+        stateBadge.textContent = node.state;
+        tdState.appendChild(stateBadge);
+        tr.appendChild(tdState);
 
         const tdConn = document.createElement("td");
-        tdConn.textContent = node.active_connections;
+        tdConn.textContent = node.state === "available" ? "—" : node.active_connections;
         tr.appendChild(tdConn);
 
         const tdCb = document.createElement("td");
-        const cbBadge = document.createElement("span");
-        cbBadge.className = `badge badge-${node.circuit_breaker_state}`;
-        cbBadge.textContent = node.circuit_breaker_state;
-        tdCb.appendChild(cbBadge);
+        if (node.state === "available") {
+          tdCb.textContent = "—";
+        } else {
+          const cbBadge = document.createElement("span");
+          cbBadge.className = `badge badge-${node.circuit_breaker_state}`;
+          cbBadge.textContent = node.circuit_breaker_state;
+          tdCb.appendChild(cbBadge);
+        }
         tr.appendChild(tdCb);
 
         const tdReqs = document.createElement("td");
-        tdReqs.textContent = perNode[node.node_id] || 0;
+        tdReqs.textContent = node.state === "available" ? "—" : (perNode[node.node_id] || 0);
         tr.appendChild(tdReqs);
 
         const tdActions = document.createElement("td");
-        const teardownBtn = document.createElement("button");
-        teardownBtn.type = "button";
-        teardownBtn.textContent = "Teardown";
-        teardownBtn.disabled = ["provisioning", "draining"].includes(node.status);
-        teardownBtn.addEventListener("click", function () {
-          teardownBtn.disabled = true;
-          handleTeardown(node.node_id);
-        });
-        tdActions.appendChild(teardownBtn);
+        const actions = node.actions || [];
+        if (actions.length === 1) {
+          tdActions.appendChild(createActionButton(actions[0], node.node_id));
+        } else if (actions.length > 1) {
+          const group = document.createElement("div");
+          group.className = "action-group";
+          group.appendChild(createActionButton(actions[0], node.node_id));
+
+          const caret = document.createElement("button");
+          caret.type = "button";
+          caret.className = ACTION_CONFIG[actions[0]].css + " action-caret";
+          caret.textContent = "▾";
+          const menu = document.createElement("div");
+          menu.className = "action-menu";
+          for (let i = 1; i < actions.length; i++) {
+            const menuBtn = createActionButton(actions[i], node.node_id);
+            menu.appendChild(menuBtn);
+          }
+          caret.addEventListener("click", function (e) {
+            e.stopPropagation();
+            menu.classList.toggle("open");
+          });
+          group.appendChild(caret);
+          group.appendChild(menu);
+          tdActions.appendChild(group);
+        }
         tr.appendChild(tdActions);
 
         tbody.appendChild(tr);
@@ -193,6 +334,30 @@ document.addEventListener("DOMContentLoaded", function () {
   refreshDashboard();
   setInterval(refreshDashboard, POLL_INTERVAL_MS);
 
+  // Dropdown dismissal on outside click
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest(".action-group")) {
+      document.querySelectorAll(".action-menu.open").forEach(function (m) {
+        m.classList.remove("open");
+      });
+    }
+  });
+
+  // Manual setup toggle (D-05)
+  const toggle = document.getElementById("manual-setup-toggle");
+  const setupRow = document.getElementById("manual-setup-row");
+  toggle.addEventListener("click", function (e) {
+    e.preventDefault();
+    if (setupRow.style.display === "none") {
+      setupRow.style.display = "flex";
+      toggle.textContent = "- Manual setup";
+    } else {
+      setupRow.style.display = "none";
+      toggle.textContent = "+ Manual setup";
+    }
+  });
+
+  // Setup form handler
   const form = document.getElementById("setup-form");
   form.addEventListener("submit", async function (e) {
     e.preventDefault();
