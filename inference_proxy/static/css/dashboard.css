@@ -163,10 +163,104 @@ td button:disabled { opacity: 0.3; cursor: not-allowed; }
   color: #fbbf24;
 }
 
+.badge-available,
 .badge-in-progress,
 .badge-provisioning {
   background: rgba(59, 130, 246, 0.15);
-  color: #60a5fa;
+  color: #3b82f6;
+}
+
+/* Action button variants (D-06) */
+.btn-setup {
+  color: #3b82f6;
+  border-color: #3b82f6;
+}
+.btn-setup:hover:not(:disabled) {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.btn-teardown,
+.btn-cancel,
+.btn-force-teardown {
+  color: #f87171;
+  border-color: #f87171;
+}
+.btn-teardown:hover:not(:disabled),
+.btn-cancel:hover:not(:disabled),
+.btn-force-teardown:hover:not(:disabled) {
+  background: #f87171;
+  color: #fff;
+}
+
+.btn-retry {
+  color: #fbbf24;
+  border-color: #fbbf24;
+}
+.btn-retry:hover:not(:disabled) {
+  background: #fbbf24;
+  color: #fff;
+}
+
+/* Action group dropdown (D-08) */
+.action-group {
+  display: inline-flex;
+  gap: 0;
+  position: relative;
+}
+.action-group > button:first-child {
+  border-radius: 0.375rem 0 0 0.375rem;
+}
+
+.action-caret {
+  padding: 0.25rem 0.5rem;
+  border-left: none;
+  border-radius: 0 0.375rem 0.375rem 0;
+}
+
+.action-menu {
+  display: none;
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 0.25rem;
+  background: var(--accent-bg);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+  padding: 0.25rem;
+  z-index: 10;
+  min-width: 8rem;
+}
+.action-menu.open {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.action-menu button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+.action-menu button:hover {
+  background: rgba(51, 65, 85, 0.5);
+}
+
+/* Manual setup toggle (D-05) */
+.manual-setup-toggle {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: 0.75rem;
+  cursor: pointer;
+}
+.manual-setup-toggle:hover {
+  text-decoration: underline;
 }
 
 .error-text { color: #f87171; font-size: 0.8rem; }

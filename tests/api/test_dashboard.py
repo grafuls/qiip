@@ -4,8 +4,9 @@ Tests cover:
 - GET /dashboard returns 200 with text/html content type (DASH-01)
 - Dashboard served by same app as API (DASH-03)
 - HTML contains Simple.css CDN link and dashboard assets (TMPL-01, TMPL-02)
-- Table structure with 8 column headers including Actions (NODE-01, METR-02)
+- Table structure with 10 column headers including GPU Vendor, GPU Model, State, Actions (NODE-01)
 - Badge CSS classes for status, circuit breaker, and provisioning states (NODE-02)
+- Manual setup toggle and QUADS status element (D-04, D-05, D-09)
 """
 
 from __future__ import annotations
@@ -65,16 +66,18 @@ class TestDashboardTemplate:
 
 
 class TestDashboardTableStructure:
-    """Dashboard HTML contains the node fleet table structure (NODE-01)."""
+    """Dashboard HTML contains the node fleet table structure (NODE-01, D-01, D-02)."""
 
-    def test_contains_all_eight_column_headers(self, client: TestClient) -> None:
-        """HTML contains all 8 th elements for the node table."""
+    def test_contains_all_ten_column_headers(self, client: TestClient) -> None:
+        """HTML contains all 10 th elements for the node table."""
         response = client.get("/dashboard")
         headers = [
             "Node ID",
+            "GPU Vendor",
+            "GPU Model",
             "Endpoint",
             "Model",
-            "Status",
+            "State",
             "Active Connections",
             "Circuit Breaker",
             "Requests",
@@ -117,6 +120,11 @@ class TestDashboardPolling:
         response = client.get("/dashboard")
         assert 'id="poll-warning"' in response.text
 
+    def test_contains_quads_status_element(self, client: TestClient) -> None:
+        """HTML contains span with id='quads-status' for QUADS indicator (D-09)."""
+        response = client.get("/dashboard")
+        assert 'id="quads-status"' in response.text
+
 
 class TestDashboardBadgeCSS:
     """Badge CSS contains classes for all status and circuit breaker states (NODE-02)."""
@@ -147,14 +155,41 @@ class TestDashboardBadgeCSS:
         for cls in (".badge-complete", ".badge-failed", ".badge-in-progress"):
             assert cls in css, f"Missing CSS class: {cls}"
 
+    def test_badge_css_contains_available_class(self) -> None:
+        """dashboard.css contains .badge-available for available state badge (DASH-01)."""
+        css = self._css_path.read_text()
+        assert ".badge-available" in css, "Missing CSS class: .badge-available"
+
+    def test_badge_css_contains_action_button_classes(self) -> None:
+        """dashboard.css contains .btn-setup and .btn-teardown action variants (D-06)."""
+        css = self._css_path.read_text()
+        assert ".btn-setup" in css, "Missing CSS class: .btn-setup"
+        assert ".btn-teardown" in css, "Missing CSS class: .btn-teardown"
+
 
 class TestSetupForm:
-    """Dashboard HTML contains the setup form elements (DASH-01)."""
+    """Dashboard HTML contains the setup form elements (DASH-01, D-04, D-05)."""
 
     def test_contains_setup_form(self, client: TestClient) -> None:
-        """HTML contains form with id='setup-form'."""
+        """HTML contains form with id='setup-form' (moved inside Node Fleet card)."""
         response = client.get("/dashboard")
         assert 'id="setup-form"' in response.text
+
+    def test_standalone_provision_card_removed(self, client: TestClient) -> None:
+        """Standalone 'Provision Node' card is removed (D-04)."""
+        response = client.get("/dashboard")
+        assert "Provision Node" not in response.text
+
+    def test_contains_manual_setup_toggle(self, client: TestClient) -> None:
+        """HTML contains manual setup toggle link (D-05)."""
+        response = client.get("/dashboard")
+        assert 'id="manual-setup-toggle"' in response.text
+        assert "+ Manual setup" in response.text
+
+    def test_contains_manual_setup_row(self, client: TestClient) -> None:
+        """HTML contains hidden manual setup row container."""
+        response = client.get("/dashboard")
+        assert 'id="manual-setup-row"' in response.text
 
     def test_contains_hostname_input(self, client: TestClient) -> None:
         """HTML contains input with id='setup-hostname'."""
