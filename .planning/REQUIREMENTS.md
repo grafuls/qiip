@@ -24,11 +24,11 @@ Requirements for QUADS Integration milestone. Each maps to roadmap phases.
 
 ### Dashboard UI
 
-- [ ] **DASH-01**: Dashboard displays a single unified table showing all nodes across all states (available, provisioned, healthy, unhealthy)
-- [ ] **DASH-02**: Dashboard shows inline action buttons per node based on current state
-- [ ] **DASH-03**: Standalone setup form is removed, replaced by inline controls with a collapsed manual hostname fallback
-- [ ] **DASH-04**: Dashboard shows QUADS connection status indicator (connected/stale/unavailable) with cache age
-- [ ] **DASH-05**: Dashboard shows GPU hardware info (vendor, model) per host inline in the node list
+- [x] **DASH-01**: Dashboard displays a single unified table showing all nodes across all states (available, provisioned, healthy, unhealthy)
+- [x] **DASH-02**: Dashboard shows inline action buttons per node based on current state
+- [x] **DASH-03**: Standalone setup form is removed, replaced by inline controls with a collapsed manual hostname fallback
+- [x] **DASH-04**: Dashboard shows QUADS connection status indicator (connected/stale/unavailable) with cache age
+- [x] **DASH-05**: Dashboard shows GPU hardware info (vendor, model) per host inline in the node list
 
 ## Future Requirements
 
@@ -76,11 +76,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NODES-03 | Phase 17 | Complete |
 | NODES-04 | Phase 17 | Complete |
 | NODES-05 | Phase 17 | Complete |
-| DASH-01 | Phase 18 | Pending |
-| DASH-02 | Phase 18 | Pending |
-| DASH-03 | Phase 18 | Pending |
-| DASH-04 | Phase 18 | Pending |
-| DASH-05 | Phase 18 | Pending |
+| DASH-01 | Phase 18 | Complete |
+| DASH-02 | Phase 18 | Complete |
+| DASH-03 | Phase 18 | Complete |
+| DASH-04 | Phase 18 | Complete |
+| DASH-05 | Phase 18 | Complete |
 
 **Coverage:**
 - v1.3 requirements: 14 total
