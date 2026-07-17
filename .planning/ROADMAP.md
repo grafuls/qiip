@@ -48,7 +48,7 @@
 - [x] **Phase 15: QUADS Client and Models** - Connect to QUADS API, parse host data, normalize hostnames (completed 2026-07-16)
 - [x] **Phase 16: Background Polling** - Periodic QUADS polling with in-memory caching and staleness tracking (completed 2026-07-16)
 - [x] **Phase 17: Unified Node List and Admin API** - Merge QUADS hosts with etcd nodes, state-aware actions, dedup guard (completed 2026-07-16)
-- [ ] **Phase 18: Dashboard UI Update** - Unified table with inline action buttons and QUADS status indicator
+- [x] **Phase 18: Dashboard UI Update** - Unified table with inline action buttons and QUADS status indicator (completed 2026-07-17)
 
 ## Phase Details
 
@@ -104,8 +104,8 @@ Plans:
   5. GPU hardware info (vendor, model) is visible per host in the node list
 **Plans**: 2 plans
 Plans:
-- [ ] 18-01-PLAN.md -- QUADS status endpoint (model, endpoint, tests)
-- [ ] 18-02-PLAN.md -- Dashboard frontend overhaul (HTML, JS, CSS, tests)
+- [x] 18-01-PLAN.md -- QUADS status endpoint (model, endpoint, tests)
+- [x] 18-02-PLAN.md -- Dashboard frontend overhaul (HTML, JS, CSS, tests)
 
 
 
@@ -130,4 +130,4 @@ Plans:
 | 15. QUADS Client and Models | v1.3 | 1/1 | Complete    | 2026-07-16 |
 | 16. Background Polling | v1.3 | 1/1 | Complete    | 2026-07-16 |
 | 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete    | 2026-07-16 |
-| 18. Dashboard UI Update | v1.3 | 0/2 | Not started | - |
+| 18. Dashboard UI Update | v1.3 | 2/2 | Complete   | 2026-07-17 |
