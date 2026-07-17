@@ -84,3 +84,13 @@ class TaskStatusResponse(BaseModel):
     updated_at: datetime
     failed_step: str | None = None
     error: str | None = None
+
+
+class QUADSStatusResponse(BaseModel):
+    """QUADS poller staleness data for the dashboard status indicator."""
+
+    model_config = ConfigDict(frozen=True)
+
+    status: str
+    last_sync: datetime | None
+    consecutive_failures: int
