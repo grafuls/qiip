@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from inference_proxy.config.dependencies import (
     get_provisioner,
     get_quads_client,
+    get_quads_poller,
     get_registry,
     get_request_metrics,
     get_unified_node_service,
@@ -24,6 +25,7 @@ from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.models.admin import (
     AdminMetricsResponse,
     AdminNodeResponse,
+    QUADSStatusResponse,
     SetupRequest,
     SetupResponse,
     TaskStatusResponse,
@@ -35,6 +37,7 @@ from inference_proxy.quads.client import (
     QUADSConnectionError,
     canonical_hostname,
 )
+from inference_proxy.quads.poller import QUADSPoller
 from inference_proxy.routing.request_metrics import RequestMetrics
 from inference_proxy.services.unified_nodes import UnifiedNodeService
 
@@ -140,3 +143,25 @@ async def teardown_node(
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     provisioner.fire_background(provisioner.teardown(node_id, force=force))
     return TeardownResponse(task_id=node_id)
+
+
+@admin_router.get("/quads/status")
+async def get_quads_status(
+    poller: QUADSPoller | None = Depends(get_quads_poller),
+) -> QUADSStatusResponse:
+    """Return QUADS poller staleness for the dashboard status indicator."""
+    if poller is None:
+        return QUADSStatusResponse(
+            status="unavailable", last_sync=None, consecutive_failures=0
+        )
+    if poller.last_sync is None or poller.consecutive_failures >= 3:
+        status = "unavailable"
+    elif poller.consecutive_failures >= 1:
+        status = "stale"
+    else:
+        status = "connected"
+    return QUADSStatusResponse(
+        status=status,
+        last_sync=poller.last_sync,
+        consecutive_failures=poller.consecutive_failures,
+    )
