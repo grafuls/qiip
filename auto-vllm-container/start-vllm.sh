@@ -13,9 +13,9 @@ detect_gpu_info() {
         echo "FATAL: nvidia-smi failed. NVIDIA driver may not be loaded." >&2
         exit 1
     fi
-    GPU_MODEL=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1 | xargs)
+    GPU_MODEL=$(nvidia-smi --query-gpu=name --format=csv,noheader -i 0 | xargs)
     GPU_COUNT=$(nvidia-smi --list-gpus | wc -l)
-    GPU_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits | head -1)
+    GPU_VRAM_MB=$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits -i 0)
     GPU_VRAM_GB=$(( (GPU_VRAM_MB + 512) / 1024 ))
 }
 

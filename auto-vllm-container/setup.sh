@@ -34,7 +34,7 @@ install_nvidia_repo() {
 run_system_update() {
     sudo dnf -y update
     sudo dnf -y install kernel-devel-"$(uname -r)" kernel-headers-"$(uname -r)" \
-        nvidia-container-toolkit podman-plugins wget podman nfs-utils
+        nvidia-container-toolkit podman-plugins gcc make wget podman nfs-utils elfutils-libelf-devel
 }
 
 install_nvidia_driver() {
