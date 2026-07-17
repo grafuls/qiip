@@ -53,9 +53,11 @@ Source: existing `dashboard.css` spacing values, corrected to grid-aligned multi
 | Body | 14px (0.875rem) | 400 | 1.5 |
 | Label / Table header | 12px (0.75rem) | 600 | 1.2 |
 | Card title | 16px (1rem) | 600 | 1.2 |
-| Page heading | 24px (1.5rem) | 700 | 1.2 |
+| Page heading | 24px (1.5rem) | 600 | 1.2 |
 
-Source: existing `dashboard.css` — `table` at 0.875rem, `thead th` at 0.75rem/600, `.card-title` at 1rem/600, `h1` at 1.5rem/700.
+Two weights only: 400 (regular) for body text, 600 (semibold) for all emphasis levels. Visual hierarchy between page heading, card title, and label is achieved through size alone (24px > 16px > 12px), not weight.
+
+Source: existing `dashboard.css` — `table` at 0.875rem, `thead th` at 0.75rem/600, `.card-title` at 1rem/600, `h1` updated from 700 to 600.
 
 ---
 
@@ -75,6 +77,12 @@ Source: existing `dashboard.css` — `table` at 0.875rem, `thead th` at 0.75rem/
 Accent reserved for: Setup Node action buttons, QUADS "connected" status badge, focused input border ring, manual setup toggle link, provisioning badge. Never for destructive or warning elements.
 
 Source: existing `dashboard.css` `:root` variables and badge classes.
+
+---
+
+## Focal Point
+
+The **Node Fleet table** is the primary visual anchor on the dashboard screen. All other elements (header, QUADS status, manual setup toggle, toast notifications) are subordinate to the table. The table occupies the largest content area and receives the user's attention first on page load.
 
 ---
 
