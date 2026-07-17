@@ -15,6 +15,7 @@
                 <p id="node-count">Loading node data...</p>
             </div>
             <div class="header-right">
+                <span id="quads-status"></span>
                 <p id="last-updated"></p>
                 <p id="poll-warning"></p>
             </div>
@@ -22,23 +23,23 @@
 
         <main>
             <section class="card">
-                <h2 class="card-title">Provision Node</h2>
-                <form id="setup-form" method="post" class="setup-form">
-                    <input type="text" id="setup-hostname" placeholder="Enter hostname" required>
-                    <button type="submit" id="setup-btn">Setup</button>
-                </form>
-            </section>
-
-            <section class="card">
-                <h2 class="card-title">Node Fleet</h2>
+                <h2 class="card-title">Node Fleet <a href="#" class="manual-setup-toggle" id="manual-setup-toggle">+ Manual setup</a></h2>
+                <div id="manual-setup-row" style="display: none;">
+                    <form id="setup-form" class="setup-form">
+                        <input type="text" id="setup-hostname" placeholder="Enter hostname" required>
+                        <button type="submit" id="setup-btn">Setup Node</button>
+                    </form>
+                </div>
                 <div class="table-wrap">
                     <table>
                         <thead>
                             <tr>
                                 <th scope="col">Node ID</th>
+                                <th scope="col">GPU Vendor</th>
+                                <th scope="col">GPU Model</th>
                                 <th scope="col">Endpoint</th>
                                 <th scope="col">Model</th>
-                                <th scope="col">Status</th>
+                                <th scope="col">State</th>
                                 <th scope="col">Active Connections</th>
                                 <th scope="col">Circuit Breaker</th>
                                 <th scope="col">Requests</th>
@@ -46,7 +47,7 @@
                             </tr>
                         </thead>
                         <tbody id="node-table-body">
-                            <tr><td colspan="8">Loading node data...</td></tr>
+                            <tr><td colspan="10">Loading node data...</td></tr>
                         </tbody>
                     </table>
                 </div>
