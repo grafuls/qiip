@@ -33,16 +33,16 @@ Declared values (must be multiples of 4):
 
 | Token | Value | Usage |
 |-------|-------|-------|
-| xs | 4px (0.2rem) | Badge inline padding, icon gaps |
-| sm | 8px (0.5rem) | Button padding, form gaps, table cell padding, badge block padding |
+| xs | 4px (0.25rem) | Badge inline padding, icon gaps, action button block padding |
+| sm | 8px (0.5rem) | Button horizontal padding, form gaps, badge block padding, action button inline padding, table cell block padding |
 | md | 16px (1rem) | Card title margin, section spacing |
 | lg | 20px (1.25rem) | Card padding, section margin |
 | xl | 24px (1.5rem) | Dashboard page padding, header margin, toast container offset |
 | 2xl | 32px (2rem) | Dashboard top/bottom padding |
 
-Exceptions: Action button padding uses 5px/10px (0.3rem/0.6rem) to keep inline table buttons compact. Table cell padding uses 10px/12px (0.625rem/0.75rem) per existing pattern.
+Exceptions: Table cell inline padding uses 12px (0.75rem) per existing pattern. 12px is a multiple of 4 and grid-compliant but not a named token.
 
-Source: existing `dashboard.css` spacing values.
+Source: existing `dashboard.css` spacing values, corrected to grid-aligned multiples of 4.
 
 ---
 
@@ -65,14 +65,14 @@ Source: existing `dashboard.css` — `table` at 0.875rem, `thead th` at 0.75rem/
 |------|-------|-------|
 | Dominant (60%) | `#0f172a` (--bg) | Page background |
 | Secondary (30%) | `#1e293b` (--accent-bg) | Cards, table hover backgrounds |
-| Accent (10%) | `#3b82f6` (--accent) | Setup button, provisioning badge, QUADS "connected" badge, manual setup toggle link, focused input ring |
+| Accent (10%) | `#3b82f6` (--accent) | Setup Node button, provisioning badge, QUADS "connected" badge, manual setup toggle link, focused input ring |
 | Destructive | `#f87171` | Teardown button border/text, Force Teardown button, Cancel button, unhealthy/failed badges |
 | Warning | `#fbbf24` | Retry button, draining badge, QUADS "stale" badge, poll warning text |
 | Success | `#4ade80` | Healthy badge, complete badge |
 | Text primary | `#e2e8f0` (--text) | Body text, table cells |
 | Text secondary | `#94a3b8` (--text-light) | Node count, last updated, table headers |
 
-Accent reserved for: Setup action buttons, QUADS "connected" status badge, focused input border ring, manual setup toggle link, provisioning badge. Never for destructive or warning elements.
+Accent reserved for: Setup Node action buttons, QUADS "connected" status badge, focused input border ring, manual setup toggle link, provisioning badge. Never for destructive or warning elements.
 
 Source: existing `dashboard.css` `:root` variables and badge classes.
 
@@ -100,13 +100,13 @@ New CSS classes for color-coded inline action buttons (D-06).
 
 | Action | CSS Class | Border/Text Color | Hover Fill | Confirmation |
 |--------|-----------|-------------------|------------|--------------|
-| Setup | `.btn-setup` | `#3b82f6` (accent) | `#3b82f6` | None (D-07) |
+| Setup Node | `.btn-setup` | `#3b82f6` (accent) | `#3b82f6` | None (D-07) |
 | Teardown | `.btn-teardown` | `#f87171` (red) | `#f87171` | `window.confirm` (D-07) |
 | Retry | `.btn-retry` | `#fbbf24` (amber) | `#fbbf24` | None (D-07) |
 | Cancel | `.btn-cancel` | `#f87171` (red) | `#f87171` | `window.confirm` (D-07) |
 | Force Teardown | `.btn-force-teardown` | `#f87171` (red) | `#f87171` | `window.confirm` (D-07) |
 
-Button base pattern: transparent background, 1px solid border in the variant color, text in the variant color. On hover, fill with the variant color and switch text to `#fff`. Same sizing as existing `td button` (0.3rem/0.6rem padding, 0.75rem font, 0.375rem border-radius).
+Button base pattern: transparent background, 1px solid border in the variant color, text in the variant color. On hover, fill with the variant color and switch text to `#fff`. Sizing: 0.25rem/0.5rem padding (4px/8px), 0.75rem font, 0.375rem border-radius.
 
 When a node has multiple actions (D-08): first action renders as a standalone button. If more than one action exists, add a small dropdown toggle button (a downward caret character) adjacent to the primary button. Clicking the caret shows a positioned `<div>` menu with secondary action buttons. Menu dismisses on click outside or on action click. Pure vanilla JS — no library.
 
@@ -129,7 +129,7 @@ Column order per D-01. Total 10 columns (up from 8).
 | 7 | Active Connections | `active_connections` | em-dash (---) |
 | 8 | Circuit Breaker | `circuit_breaker_state` | em-dash (---) |
 | 9 | Requests | per_node metrics | em-dash (---) |
-| 10 | Actions | `actions` list | Setup button |
+| 10 | Actions | `actions` list | Setup Node button |
 
 For nodes in etcd (healthy/unhealthy/provisioning/draining): all columns populated from `AdminNodeResponse` fields. GPU columns show value if QUADS data exists, em-dash if null.
 
@@ -185,7 +185,7 @@ Remove the standalone "Provision Node" card (D-04). Add a toggle link below the 
 <div id="manual-setup-row" style="display: none;">
   <form id="setup-form" class="setup-form">
     <input type="text" id="setup-hostname" placeholder="Enter hostname" required>
-    <button type="submit" id="setup-btn">Setup</button>
+    <button type="submit" id="setup-btn">Setup Node</button>
   </form>
 </div>
 ```
@@ -220,8 +220,8 @@ Source: D-04, D-05 from CONTEXT.md.
 
 | Element | Copy |
 |---------|------|
-| Primary CTA (inline) | "Setup" (on available node action button) |
-| Manual fallback CTA | "Setup" (submit button in collapsed manual form) |
+| Primary CTA (inline) | "Setup Node" (on available node action button) |
+| Manual fallback CTA | "Setup Node" (submit button in collapsed manual form) |
 | Toggle link (collapsed) | "+ Manual setup" |
 | Toggle link (expanded) | "- Manual setup" |
 | Empty state heading | "No nodes found" |
@@ -251,8 +251,8 @@ Source: D-07 confirmation rules from CONTEXT.md, existing toast patterns from `d
 
 | Action | HTTP Method | Endpoint | Body | On Success |
 |--------|-------------|----------|------|------------|
-| Setup (inline) | POST | `/admin/nodes/setup` | `{ "hostname": node.node_id }` | Toast "Setup started for {node_id}" |
-| Setup (manual) | POST | `/admin/nodes/setup` | `{ "hostname": input.value }` | Toast + clear input |
+| Setup Node (inline) | POST | `/admin/nodes/setup` | `{ "hostname": node.node_id }` | Toast "Setup started for {node_id}" |
+| Setup Node (manual) | POST | `/admin/nodes/setup` | `{ "hostname": input.value }` | Toast + clear input |
 | Teardown | DELETE | `/admin/nodes/{node_id}` | none | Toast "Teardown started for {node_id}" |
 | Retry | POST | `/admin/nodes/setup` | `{ "hostname": node.node_id }` | Toast "Retry started for {node_id}" |
 | Cancel | DELETE | `/admin/nodes/{node_id}` | none | Toast "Cancelled provisioning for {node_id}" |
@@ -285,7 +285,7 @@ For nodes with 2+ actions (D-08):
   position: relative;
 }
 .action-caret {
-  padding: 0.3rem 0.4rem;
+  padding: 0.25rem 0.5rem;
   border-left: none;
   border-radius: 0 0.375rem 0.375rem 0;
   /* inherits color from primary button variant */
@@ -312,7 +312,7 @@ For nodes with 2+ actions (D-08):
   width: 100%;
   text-align: left;
   border: none;
-  padding: 0.4rem 0.6rem;
+  padding: 0.5rem 0.75rem;
   background: transparent;
   border-radius: 0.25rem;
 }
