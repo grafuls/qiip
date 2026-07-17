@@ -13,6 +13,7 @@ Tests cover:
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -21,6 +22,7 @@ from fastapi.testclient import TestClient
 
 from inference_proxy.config.dependencies import (
     get_quads_client,
+    get_quads_poller,
     get_unified_node_service,
 )
 from inference_proxy.discovery.registry import NodeRegistry
@@ -528,3 +530,73 @@ class TestExistingEndpointsUnchanged:
         test_registry.add(_make_node(node_id="gpu01"))
         response = client.delete("/admin/nodes/gpu01")
         assert response.status_code == 202
+
+
+class TestQuadsStatus:
+    """GET /admin/quads/status returns poller staleness data (D-10)."""
+
+    def test_returns_200(self, client: TestClient) -> None:
+        response = client.get("/admin/quads/status")
+        assert response.status_code == 200
+
+    def test_unavailable_when_no_poller(self, client: TestClient) -> None:
+        """Default fixture has poller=None."""
+        data = client.get("/admin/quads/status").json()
+        assert data["status"] == "unavailable"
+        assert data["last_sync"] is None
+        assert data["consecutive_failures"] == 0
+
+    def test_connected_when_zero_failures(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        poller = MagicMock()
+        poller.last_sync = datetime(2026, 7, 17, 10, 0, 0, tzinfo=UTC)
+        poller.consecutive_failures = 0
+        app.dependency_overrides[get_quads_poller] = lambda: poller
+
+        data = client.get("/admin/quads/status").json()
+        assert data["status"] == "connected"
+
+    def test_stale_when_one_failure(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        poller = MagicMock()
+        poller.last_sync = datetime(2026, 7, 17, 10, 0, 0, tzinfo=UTC)
+        poller.consecutive_failures = 1
+        app.dependency_overrides[get_quads_poller] = lambda: poller
+
+        data = client.get("/admin/quads/status").json()
+        assert data["status"] == "stale"
+
+    def test_stale_when_two_failures(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        poller = MagicMock()
+        poller.last_sync = datetime(2026, 7, 17, 10, 0, 0, tzinfo=UTC)
+        poller.consecutive_failures = 2
+        app.dependency_overrides[get_quads_poller] = lambda: poller
+
+        data = client.get("/admin/quads/status").json()
+        assert data["status"] == "stale"
+
+    def test_unavailable_when_three_failures(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        poller = MagicMock()
+        poller.last_sync = datetime(2026, 7, 17, 10, 0, 0, tzinfo=UTC)
+        poller.consecutive_failures = 3
+        app.dependency_overrides[get_quads_poller] = lambda: poller
+
+        data = client.get("/admin/quads/status").json()
+        assert data["status"] == "unavailable"
+
+    def test_unavailable_when_never_synced(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        poller = MagicMock()
+        poller.last_sync = None
+        poller.consecutive_failures = 0
+        app.dependency_overrides[get_quads_poller] = lambda: poller
+
+        data = client.get("/admin/quads/status").json()
+        assert data["status"] == "unavailable"
