@@ -102,8 +102,12 @@ Plans:
   3. Standalone setup form is removed; a collapsed manual hostname input is available as fallback
   4. QUADS connection status indicator shows connected/stale/unavailable with cache age
   5. GPU hardware info (vendor, model) is visible per host in the node list
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 2 plans
+Plans:
+- [ ] 18-01-PLAN.md -- QUADS status endpoint (model, endpoint, tests)
+- [ ] 18-02-PLAN.md -- Dashboard frontend overhaul (HTML, JS, CSS, tests)
+
+
 
 ## Progress
 
@@ -126,4 +130,4 @@ Plans:
 | 15. QUADS Client and Models | v1.3 | 1/1 | Complete    | 2026-07-16 |
 | 16. Background Polling | v1.3 | 1/1 | Complete    | 2026-07-16 |
 | 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete    | 2026-07-16 |
-| 18. Dashboard UI Update | v1.3 | 0/? | Not started | - |
+| 18. Dashboard UI Update | v1.3 | 0/2 | Not started | - |
