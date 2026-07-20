@@ -13,73 +13,6 @@ function showToast(message, type) {
   }, 4000);
 }
 
-function stepBadgeClass(step) {
-  if (step === "complete" || step === "teardown_complete") return "badge-complete";
-  if (step === "failed") return "badge-failed";
-  return "badge-in-progress";
-}
-
-function renderTasks(tasks) {
-  const tbody = document.getElementById("tasks-table-body");
-  if (!tasks || tasks.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="6">No provisioning tasks</td></tr>';
-    return;
-  }
-  tbody.innerHTML = "";
-  for (const task of tasks) {
-    const tr = document.createElement("tr");
-
-    const tdHost = document.createElement("td");
-    tdHost.textContent = task.hostname;
-    tr.appendChild(tdHost);
-
-    const tdStep = document.createElement("td");
-    const stepBadge = document.createElement("span");
-    stepBadge.className = "badge " + stepBadgeClass(task.current_step);
-    stepBadge.textContent = task.current_step;
-    tdStep.appendChild(stepBadge);
-    tr.appendChild(tdStep);
-
-    const tdStatus = document.createElement("td");
-    if (task.failed_step) {
-      const failBadge = document.createElement("span");
-      failBadge.className = "badge badge-failed";
-      failBadge.textContent = "failed at " + task.failed_step;
-      tdStatus.appendChild(failBadge);
-    } else if (task.current_step === "complete" || task.current_step === "teardown_complete") {
-      const doneBadge = document.createElement("span");
-      doneBadge.className = "badge badge-complete";
-      doneBadge.textContent = task.current_step;
-      tdStatus.appendChild(doneBadge);
-    } else {
-      const progBadge = document.createElement("span");
-      progBadge.className = "badge badge-in-progress";
-      progBadge.textContent = "in progress";
-      tdStatus.appendChild(progBadge);
-    }
-    tr.appendChild(tdStatus);
-
-    const tdError = document.createElement("td");
-    if (task.error) {
-      tdError.className = "error-text";
-      tdError.textContent = task.error;
-    } else {
-      tdError.textContent = "—";
-    }
-    tr.appendChild(tdError);
-
-    const tdStarted = document.createElement("td");
-    tdStarted.textContent = new Date(task.started_at).toLocaleString();
-    tr.appendChild(tdStarted);
-
-    const tdUpdated = document.createElement("td");
-    tdUpdated.textContent = new Date(task.updated_at).toLocaleString();
-    tr.appendChild(tdUpdated);
-
-    tbody.appendChild(tr);
-  }
-}
-
 // ponytail: data-driven action dispatch replaces per-action functions
 const ACTION_CONFIG = {
   setup: {
@@ -207,17 +140,15 @@ async function refreshDashboard() {
   const lastUpdatedEl = document.getElementById("last-updated");
   const warningEl = document.getElementById("poll-warning");
   try {
-    const [nodesResp, metricsResp, tasksResp, quadsResp] = await Promise.all([
+    const [nodesResp, metricsResp, quadsResp] = await Promise.all([
       fetch("/admin/nodes"),
       fetch("/admin/metrics"),
-      fetch("/admin/provisioning/tasks"),
       fetch("/admin/quads/status"),
     ]);
     if (!nodesResp.ok) throw new Error(`HTTP ${nodesResp.status}`);
     if (!metricsResp.ok) throw new Error(`HTTP ${metricsResp.status}`);
     const nodes = await nodesResp.json();
     const metrics = await metricsResp.json();
-    const tasks = tasksResp.ok ? await tasksResp.json() : [];
     const perNode = metrics.per_node || {};
 
     // ponytail: graceful degradation if QUADS endpoint unavailable
@@ -245,7 +176,11 @@ async function refreshDashboard() {
         const tr = document.createElement("tr");
 
         const tdId = document.createElement("td");
-        tdId.textContent = node.node_id;
+        const idLink = document.createElement("a");
+        idLink.href = "/dashboard/nodes/" + encodeURIComponent(node.node_id);
+        idLink.textContent = node.node_id.split(".")[0];
+        idLink.title = node.node_id;
+        tdId.appendChild(idLink);
         tr.appendChild(tdId);
 
         const tdGpuVendor = document.createElement("td");
@@ -322,8 +257,6 @@ async function refreshDashboard() {
         tbody.appendChild(tr);
       }
     }
-
-    renderTasks(tasks);
 
     lastUpdatedEl.textContent =
       "Updated " + new Date().toLocaleTimeString();

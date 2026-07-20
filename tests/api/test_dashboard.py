@@ -203,14 +203,51 @@ class TestSetupForm:
 
 
 class TestTasksPanel:
-    """Dashboard HTML contains the provisioning tasks panel (DASH-03)."""
+    """Provisioning tasks panel moved to per-node detail page."""
 
-    def test_contains_tasks_panel(self, client: TestClient) -> None:
-        """HTML contains section with id='tasks-panel'."""
+    def test_tasks_panel_not_on_main_dashboard(self, client: TestClient) -> None:
+        """Tasks panel was removed from the main dashboard."""
         response = client.get("/dashboard")
+        assert 'id="tasks-panel"' not in response.text
+
+    def test_tasks_panel_on_node_detail(self, client: TestClient) -> None:
+        """Tasks panel is present on the node detail page."""
+        response = client.get("/dashboard/nodes/test-node")
+        assert response.status_code == 200
         assert 'id="tasks-panel"' in response.text
-
-    def test_contains_tasks_table_body(self, client: TestClient) -> None:
-        """HTML contains tbody with id='tasks-table-body'."""
-        response = client.get("/dashboard")
         assert 'id="tasks-table-body"' in response.text
+
+
+class TestNodeDetailPage:
+    """Per-node detail page at /dashboard/nodes/{node_id}."""
+
+    def test_returns_200(self, client: TestClient) -> None:
+        """GET /dashboard/nodes/{node_id} returns 200."""
+        response = client.get("/dashboard/nodes/test-node")
+        assert response.status_code == 200
+
+    def test_returns_html(self, client: TestClient) -> None:
+        """Response is HTML."""
+        response = client.get("/dashboard/nodes/test-node")
+        assert "text/html" in response.headers["content-type"]
+
+    def test_contains_node_id(self, client: TestClient) -> None:
+        """Page contains the node_id."""
+        response = client.get("/dashboard/nodes/test-node")
+        assert "test-node" in response.text
+
+    def test_contains_back_link(self, client: TestClient) -> None:
+        """Page contains a link back to the fleet dashboard."""
+        response = client.get("/dashboard/nodes/test-node")
+        assert 'href="/dashboard"' in response.text
+
+    def test_contains_node_detail_js(self, client: TestClient) -> None:
+        """Page loads node_detail.js."""
+        response = client.get("/dashboard/nodes/test-node")
+        assert "node_detail.js" in response.text
+
+    def test_fqdn_node_id(self, client: TestClient) -> None:
+        """Supports FQDN node IDs with dots."""
+        response = client.get("/dashboard/nodes/host01.example.com")
+        assert response.status_code == 200
+        assert "host01.example.com" in response.text
