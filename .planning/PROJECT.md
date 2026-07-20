@@ -50,7 +50,10 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Active
 
-(No active milestone — start next with `/gsd:new-milestone`)
+**v1.4 Chatbot Playground:**
+- [ ] Chat UI page with message input and streaming response display
+- [ ] Model selector showing available healthy models
+- [ ] Conversation history (in-session, not persisted)
 
 ### Out of Scope
 
@@ -61,6 +64,17 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - Multi-tenancy — future work
 - Geographic distribution — future work
 - Model caching/optimization — future work
+
+## Context
+
+## Current Milestone: v1.4 Chatbot Playground
+
+**Goal:** Add a chat page to the dashboard where users can converse with any healthy inference endpoint through the existing proxy.
+
+**Target features:**
+- Chat UI page with message input and streaming response display
+- Model selector showing available healthy models
+- Conversation history (in-session, not persisted)
 
 ## Context
 
@@ -130,4 +144,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-20 after v1.3 milestone*
+*Last updated: 2026-07-20 after v1.4 milestone start*
