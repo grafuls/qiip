@@ -1,0 +1,260 @@
+/* Chat page styles -- extends dashboard.css custom properties */
+
+/* --- Page layout --- */
+.chat-page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 56px);
+}
+
+/* --- Nav links --- */
+.nav-links {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: 1.5rem;
+}
+
+.nav-link {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-light);
+  text-decoration: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius);
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--bg);
+  text-decoration: none;
+}
+
+/* --- Model selector bar --- */
+.model-selector-bar {
+  height: 48px;
+  padding: 0 32px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+}
+
+#model-select {
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0.375rem 0.75rem;
+  cursor: pointer;
+}
+
+/* --- Message area --- */
+.message-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 32px;
+}
+
+.message-area-inner {
+  max-width: 768px;
+  margin: 0 auto;
+  padding: 24px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* --- Empty state --- */
+.empty-state {
+  text-align: center;
+  padding: 4rem 1rem;
+  color: var(--text-light);
+}
+
+.empty-state h2 {
+  font-family: 'Poppins', 'Open Sans', sans-serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  color: var(--text);
+  opacity: 0.5;
+}
+
+.empty-state p {
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+/* --- Message bubbles --- */
+.message-bubble {
+  max-width: 80%;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  word-wrap: break-word;
+}
+
+.bubble-user {
+  margin-left: auto;
+  background: var(--primary);
+  color: #fff;
+}
+
+.bubble-assistant {
+  margin-right: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.bubble-error {
+  color: var(--danger);
+}
+
+[data-theme="dark"] .bubble-user {
+  color: #111827;
+}
+
+/* --- Streaming cursor --- */
+.streaming-cursor::after {
+  content: '|';
+  animation: blink 0.8s step-end infinite;
+  color: var(--primary);
+  font-weight: 600;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* --- Input bar --- */
+.input-bar {
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+  padding: 16px 32px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+#chat-input {
+  flex: 1;
+  min-height: 40px;
+  max-height: 200px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  resize: none;
+  outline: none;
+}
+
+#chat-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+#chat-input::placeholder {
+  color: var(--disabled);
+}
+
+#send-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius);
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  font-weight: 600;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+#send-btn:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+#send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Markdown in assistant bubbles --- */
+.bubble-assistant pre {
+  background: var(--bg);
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  overflow-x: auto;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  margin: 0.5rem 0;
+}
+
+.bubble-assistant code {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8125rem;
+}
+
+.bubble-assistant :not(pre) > code {
+  background: var(--bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.bubble-assistant p {
+  margin: 0.25rem 0;
+}
+
+.bubble-assistant p:first-child {
+  margin-top: 0;
+}
+
+.bubble-assistant p:last-child {
+  margin-bottom: 0;
+}
+
+/* --- Responsive --- */
+@media (max-width: 768px) {
+  .model-selector-bar {
+    padding: 0 16px;
+  }
+
+  .message-area {
+    padding: 0 16px;
+  }
+
+  .message-bubble {
+    max-width: 90%;
+  }
+
+  .input-bar {
+    padding: 16px;
+  }
+}
+
+/* --- Reduced motion --- */
+@media (prefers-reduced-motion: reduce) {
+  .streaming-cursor::after {
+    animation: none;
+  }
+
+  #send-btn {
+    transition: none;
+  }
+
+  .nav-link {
+    transition: none;
+  }
+}
