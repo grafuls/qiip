@@ -3,15 +3,26 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Node Fleet Dashboard</title>
-    <link rel="stylesheet" href="https://cdn.simplecss.org/simple.css">
+    <title>QUADS — Node Fleet Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Open+Sans:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.css') }}">
 </head>
 <body>
+    <nav class="top-bar" aria-label="Primary">
+        <div class="brand">
+            <span class="brand-icon" aria-hidden="true">Q</span>
+            QUADS
+            <span class="brand-sep" aria-hidden="true"></span>
+            <span class="brand-sub">Inference Proxy</span>
+        </div>
+    </nav>
+
     <div class="dashboard">
         <header class="dashboard-header">
             <div>
-                <h1>Node Fleet Dashboard</h1>
+                <h1>Node Fleet</h1>
                 <p id="node-count">Loading node data...</p>
             </div>
             <div class="header-right">
@@ -23,7 +34,7 @@
 
         <main>
             <section class="card">
-                <h2 class="card-title">Node Fleet <a href="#" class="manual-setup-toggle" id="manual-setup-toggle">+ Manual setup</a></h2>
+                <h2 class="card-title">Nodes <a href="#" class="manual-setup-toggle" id="manual-setup-toggle">+ Manual setup</a></h2>
                 <div id="manual-setup-row" style="display: none;">
                     <form id="setup-form" class="setup-form">
                         <input type="text" id="setup-hostname" placeholder="Enter hostname" required>
