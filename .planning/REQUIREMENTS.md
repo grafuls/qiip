@@ -38,8 +38,8 @@
 
 | Requirement | Phase | Plan | Status |
 |-------------|-------|------|--------|
-| CHAT-01 | — | — | Pending |
-| CHAT-02 | — | — | Pending |
-| CHAT-03 | — | — | Pending |
-| CFG-01 | — | — | Pending |
-| CFG-02 | — | — | Pending |
+| CHAT-01 | 19 | — | Pending |
+| CHAT-02 | 19 | — | Pending |
+| CHAT-03 | 19 | — | Pending |
+| CFG-01 | 20 | — | Pending |
+| CFG-02 | 20 | — | Pending |

@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Chatbot Playground
-status: planning
-last_updated: "2026-07-20T12:48:03.326Z"
+status: roadmapped
+last_updated: "2026-07-20"
 last_activity: 2026-07-20
 progress:
-  total_phases: 0
+  total_phases: 2
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,17 +17,19 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-15)
+See: .planning/PROJECT.md (updated 2026-07-20)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Milestone complete
+**Current focus:** Phase 19 — Chat Page and Streaming
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 19 of 20 (Chat Page and Streaming)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-20 — Milestone v1.4 started
+Status: Ready to plan
+Last activity: 2026-07-20 — Roadmap created for v1.4
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -61,9 +63,9 @@ Last activity: 2026-07-20 — Milestone v1.4 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- asyncssh for SSH operations (native asyncio, no paramiko thread-wrapping)
-- Embed provisioning in gateway process (no Celery/task queue)
-- Write to etcd, let watcher propagate (never mutate NodeRegistry directly from provisioner)
+- Jinja2 + vanilla JS for Web UI (no build step, stays in Python ecosystem)
+- Polling for auto-refresh (simple JS interval, sufficient for ops dashboard)
+- Data-driven ACTION_CONFIG in dashboard.js (single dispatch map)
 - Zero new dependencies for v1.3 (httpx, Pydantic, structlog, pydantic-settings cover everything)
 
 ### Pending Todos
@@ -83,10 +85,10 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-07-17T08:50:48.138Z
-Stopped at: Phase 18 UI-SPEC approved
-Resume file: .planning/phases/18-dashboard-ui-update/18-UI-SPEC.md
+Last session: 2026-07-20
+Stopped at: Roadmap created for v1.4 Chatbot Playground
+Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 19 with /gsd:plan-phase 19

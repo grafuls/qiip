@@ -6,6 +6,7 @@
 - ✅ **v1.1 Web UI** — Phases 7-9 (shipped 2026-07-01)
 - ✅ **v1.2 Node Setup** — Phases 10-14 (shipped 2026-07-08)
 - ✅ **v1.3 QUADS Integration** — Phases 15-18 (shipped 2026-07-20)
+- 🚧 **v1.4 Chatbot Playground** — Phases 19-20 (in progress)
 
 ## Phases
 
@@ -51,6 +52,39 @@
 
 </details>
 
+### v1.4 Chatbot Playground (In Progress)
+
+**Milestone Goal:** Add a chat page where users can converse with any healthy inference endpoint through the existing proxy.
+
+- [ ] **Phase 19: Chat Page and Streaming** - Core chat UI with message input, SSE streaming responses, and model selection
+- [ ] **Phase 20: Chat Configuration** - System prompt setting and dark/light mode consistency
+
+## Phase Details
+
+### Phase 19: Chat Page and Streaming
+**Goal**: Users can have a conversation with any healthy inference model through the browser
+**Depends on**: Phase 18 (existing dashboard, proxy endpoints)
+**Requirements**: CHAT-01, CHAT-02, CHAT-03
+**Success Criteria** (what must be TRUE):
+  1. User can navigate to the chat page from the dashboard
+  2. User can type a message and receive a response from a healthy inference endpoint
+  3. User can see tokens appear incrementally as the model generates its response (real-time streaming)
+  4. User can select which model to chat with from available healthy models
+  5. Conversation history is visible in the chat area and persists within the browser session
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 20: Chat Configuration
+**Goal**: Users can customize chat behavior and appearance
+**Depends on**: Phase 19
+**Requirements**: CFG-01, CFG-02
+**Success Criteria** (what must be TRUE):
+  1. User can set a system prompt that is included with every request to the model
+  2. Chat page follows the same dark/light mode toggle as the existing dashboard
+  3. System prompt persists across messages within the same session
+**Plans**: TBD
+**UI hint**: yes
+
 ## Progress
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -73,3 +107,5 @@
 | 16. Background Polling | v1.3 | 1/1 | Complete | 2026-07-16 |
 | 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete | 2026-07-16 |
 | 18. Dashboard UI Update | v1.3 | 2/2 | Complete | 2026-07-17 |
+| 19. Chat Page and Streaming | v1.4 | 0/? | Not started | - |
+| 20. Chat Configuration | v1.4 | 0/? | Not started | - |
