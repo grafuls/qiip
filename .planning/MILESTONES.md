@@ -1,5 +1,15 @@
 # Milestones
 
+## v1.3 QUADS Integration (Shipped: 2026-07-20)
+
+**Phases completed:** 4 phases, 5 plans, 2 tasks
+
+**Key accomplishments:**
+
+- HTML template (dashboard.html):
+
+---
+
 ## v1.2 Node Setup — SHIPPED 2026-07-08
 
 **Phases:** 5 | **Plans:** 9 | **Tests:** 338 | **LOC:** 9,635 (Python + HTML/CSS/JS)

@@ -39,18 +39,18 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - ✓ Pre-flight validation (SSH, GPU, disk checks) — v1.2
 - ✓ Step-by-step state machine tracking for provisioning — v1.2
 
+### Validated in v1.3
+
+- ✓ QUADS REST API client to discover available GPU hosts — v1.3
+- ✓ Periodic background polling to keep QUADS host list fresh — v1.3
+- ✓ Unified node list showing all systems (available, provisioned, healthy, unhealthy) — v1.3
+- ✓ Inline action buttons per node state (Setup, Teardown, Retry, Cancel, Force Teardown) — v1.3
+- ✓ QUADS connection status indicator (connected/stale/unavailable) — v1.3
+- ✓ GPU hardware info (vendor, model) visible per host — v1.3
+
 ### Active
 
-## Current Milestone: v1.3 QUADS Integration
-
-**Goal:** Integrate with the QUADS REST API to show all available GPU hosts in a unified node list with inline provisioning controls, replacing the separate setup form.
-
-**Target features:**
-- QUADS REST API client to discover available GPU hosts
-- Periodic background polling to keep QUADS host list fresh
-- Unified node list showing all systems (available, provisioned, healthy, unhealthy)
-- Inline action buttons per node state (Available→Setup, Healthy→Teardown, Unhealthy→Teardown+Retry)
-- Remove separate setup input form and setup buttons — everything through the node list
+(No active milestone — start next with `/gsd:new-milestone`)
 
 ### Out of Scope
 
@@ -64,7 +64,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ## Context
 
-Shipped v1.2 with 9,635 LOC (Python + HTML/CSS/JS) across 14 phases and 338 tests. Phase 15 complete — QUADS client and models layer added (361 tests).
+Shipped v1.3 across 18 phases and 412 tests. QUADS integration complete — gateway discovers available GPU hosts, polls for freshness, merges with etcd nodes in a unified view, and renders inline action controls on the dashboard.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
@@ -106,6 +106,11 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 | Embed provisioning in gateway process | No Celery/task queue — asyncio tasks suffice for stateless proxy | ✓ Validated v1.2 |
 | Write to etcd, let watcher propagate | Never mutate NodeRegistry directly from provisioner | ✓ Validated v1.2 |
 | Graceful teardown default, force optional | Drain connections before stop; force skips drain | ✓ Validated v1.2 |
+| etcd3gw HTTP gateway for QUADS client | Same lib as discovery; avoids adding aiohttp/requests dep | ✓ Validated v1.3 |
+| Background polling thread for QUADS | etcd3gw is sync; thread + asyncio.to_thread natural fit | ✓ Validated v1.3 |
+| Unified node list merging QUADS + etcd | Single source of truth for operators; hostname-based merge | ✓ Validated v1.3 |
+| Data-driven ACTION_CONFIG in dashboard.js | Single dispatch map replaces per-action functions; O/C compliant | ✓ Validated v1.3 |
+| Zero new dependencies for v1.3 | httpx, Pydantic, structlog, pydantic-settings cover everything | ✓ Validated v1.3 |
 
 ## Evolution
 
@@ -125,4 +130,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-17 — Phase 18 (Dashboard UI Update) complete*
+*Last updated: 2026-07-20 after v1.3 milestone*
