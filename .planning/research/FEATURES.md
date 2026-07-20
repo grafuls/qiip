@@ -1,289 +1,151 @@
 # Feature Landscape
 
-**Domain:** QUADS REST API integration for GPU host discovery and unified node management UI
-**Researched:** 2026-07-15
-**Sources:** QUADS OpenAPI spec (swagger.yaml), server models.py, blueprints (hosts.py, available.py, schedules.py), quads_api.py -- all from github.com/redhat-performance/quads `latest` branch
+**Domain:** Chatbot playground UI for an OpenAI-compatible inference proxy
+**Researched:** 2026-07-20
 
-## QUADS API Reference (Verified Against Source)
+## Existing Infrastructure (Already Built)
 
-**Confidence: HIGH** -- read directly from swagger.yaml and implementation source code.
+The proxy already provides everything the chat page needs on the backend:
 
-### Base URL
+| Endpoint | What It Does | Chat Page Uses It For |
+|----------|-------------|----------------------|
+| `POST /v1/chat/completions` | Proxies chat requests to vLLM with retry, circuit breaker, streaming SSE | Sending messages, receiving streamed tokens |
+| `GET /v1/models` | Returns deduplicated healthy model list (OpenAI format) | Populating model selector dropdown |
+| `GET /dashboard` | Jinja2 HTML shell + vanilla JS | Pattern to follow for chat page |
 
-`https://<quads-host>/api/v3/`
-
-### Authentication
-
-QUADS uses Basic Auth for login, returns a Bearer token. **Read-only GET endpoints are unauthenticated** in the blueprints -- only POST/PATCH/DELETE have `@check_access` decorators. This means host listing and availability checks work without auth for our read-only integration.
-
-### Endpoints We Need
-
-| Endpoint | Method | Purpose | Auth Required |
-|----------|--------|---------|---------------|
-| `GET /hosts/` | GET | List all hosts with filters | No |
-| `GET /hosts/{hostname}/` | GET | Single host detail (includes processors, memory, disks, interfaces) | No |
-| `GET /hosts/{hostname}/processors/` | GET | Host processor list (CPU + GPU) | No |
-| `GET /available/` | GET | List hostnames available for scheduling | No |
-| `GET /available/{hostname}/` | GET | Check if specific host is available | No |
-| `GET /schedules/current/` | GET | Current active schedules (who owns what) | No |
-
-### Host Response Shape (from models.py `as_dict()`)
-
-```json
-{
-  "id": 12,
-  "name": "host.example.com",
-  "model": "R640",
-  "host_type": "vendor",
-  "build": true,
-  "validated": true,
-  "switch_config_applied": true,
-  "broken": false,
-  "retired": false,
-  "last_build": "2022-02-02T00:00:00",
-  "can_self_schedule": false,
-  "created_at": "2022-01-01T00:00:00",
-  "rack": "A1",
-  "uloc": "U01",
-  "blade": null,
-  "bootmode": "Uefi",
-  "cloud": {
-    "id": 1,
-    "name": "cloud01",
-    "last_redefined": "2022-01-01T00:00:00"
-  },
-  "default_cloud": {
-    "id": 1,
-    "name": "cloud01",
-    "last_redefined": "2022-01-01T00:00:00"
-  },
-  "interfaces": [
-    {
-      "id": 1,
-      "name": "em1",
-      "bios_id": "nic1",
-      "mac_address": "aa:00:bb:11:cc:22",
-      "switch_ip": "10.1.1.18",
-      "switch_port": "xt-0-0/1",
-      "speed": 1000,
-      "vendor": "Intel",
-      "pxe_boot": true,
-      "maintenance": false
-    }
-  ],
-  "disks": [
-    {"id": 1, "disk_type": "nvme", "size_gb": 2000, "count": 10}
-  ],
-  "memory": [
-    {"id": 1, "handle": "MMD", "size_gb": 64}
-  ],
-  "processors": [
-    {
-      "id": 1,
-      "handle": "GPU0",
-      "vendor": "NVIDIA",
-      "product": "A100",
-      "cores": 6912,
-      "threads": 6912,
-      "processor_type": "GPU"
-    }
-  ]
-}
-```
-
-### Host Query Filters (GET /hosts/)
-
-Supported query params (from swagger + `filter_hosts_dict`):
-- `name` -- hostname filter
-- `model` -- hardware model (e.g., "R640", "DGX")
-- `host_type` -- type classification
-- `build` -- boolean
-- `validated` -- boolean
-- `broken` -- boolean
-- `retired` -- boolean
-- `cloud` -- filter by current cloud assignment name
-
-### Processor Model (GPU Detection)
-
-The `Processor` model has a `processor_type` enum with values `"CPU"` and `"GPU"`. This is the field to filter on for GPU hosts. Each processor record includes:
-- `vendor` (e.g., "NVIDIA")
-- `product` (e.g., "A100", "H100")
-- `cores` / `threads`
-- `processor_type` -- the discriminator: `"CPU"` or `"GPU"`
-
-**GPU detection strategy:** Fetch hosts with full detail, check `processors` array for any entry where `processor_type == "GPU"`.
-
-### Availability Endpoint Behavior
-
-`GET /available/` returns **a flat list of hostname strings** (not full host objects):
-```json
-["host01.example.com", "host02.example.com"]
-```
-
-`GET /available/{hostname}/` returns:
-```json
-{"host01.example.com": "True"}
-```
-
-Parameters: `start` (datetime), `end` (datetime), `cloud` (string).
-Default start/end is `datetime.now()` if not provided -- effectively "available right now."
-
-### Determining "Idle" Hosts
-
-A host is considered available/idle in QUADS when:
-1. It has no active schedule overlapping the queried time range
-2. It is not `broken` or `retired`
-3. The `default_cloud` concept: hosts return to their default cloud (typically "cloud01" = spare pool) when unscheduled
-
-### Cloud / Assignment Model
-
-- **Cloud**: Named allocation group (e.g., "cloud01" through "cloudNN"). `cloud01` is conventionally the spare pool.
-- **Assignment**: Links a cloud to an owner, ticket, description. Has `active`, `provisioned`, `validated` flags.
-- **Schedule**: Time-boxed binding of a host to an assignment with `start`/`end` dates.
-- A host's `cloud` field shows its current cloud assignment. If `cloud.name == default_cloud.name`, the host is in its spare pool (idle).
+**No new proxy/API endpoints required.** The chat page is a pure frontend addition that calls existing APIs. The only backend change is a new route to serve the chat page HTML template (same pattern as `dashboard.py`).
 
 ## Table Stakes
 
-Features users expect for this milestone. Missing = milestone feels incomplete.
+Features users expect from any LLM chat playground. Missing any of these and it feels broken.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| QUADS API client module | Foundation for everything else -- fetches host data | Low | httpx AsyncClient, 3-4 endpoints. Read-only, no auth needed for GETs. |
-| Periodic background polling of QUADS | Keep host list fresh without manual refresh | Low | asyncio task on interval, same pattern as health checker. Store results in memory. |
-| Unified node list merging QUADS hosts + etcd nodes | The whole point of v1.3 -- one table showing all systems | Med | Merge logic: match by hostname between QUADS data and etcd-registered nodes. |
-| GPU indicator per host | Must show which QUADS hosts have GPUs (only GPU hosts are useful for vLLM) | Low | Filter `processors` for `processor_type == "GPU"`. Show vendor+product. |
-| Inline "Setup" button for available hosts | Replace the separate setup form | Low | Button in Actions column, calls existing `POST /admin/nodes/setup`. |
-| Inline "Teardown" button for provisioned nodes | Already exists per-node, just ensure it appears in unified list | Low | Already implemented. Carry forward into new table layout. |
-| Host availability status from QUADS | Show whether each host is available or currently assigned | Low | Cross-reference `/available/` response with host list. |
-| Remove separate setup form | Explicit in milestone scope -- everything through node list | Low | Delete the `<section class="card">` setup form from dashboard.html. |
-| QUADS base URL configuration | Configurable QUADS server endpoint | Low | Add `QuadsSettings` to `Settings` with `base_url`, `poll_interval`. |
+| Feature | Why Expected | Complexity | Depends On |
+|---------|-------------|------------|------------|
+| Message input with send button | Core interaction -- user types, hits send, sees response | Low | Nothing |
+| Streaming token display | Every chat UI streams tokens; batch-only feels frozen | Medium | `fetch` + `ReadableStream` parsing SSE from `/v1/chat/completions` |
+| Model selector dropdown | Multiple models served across fleet; user needs to pick one | Low | `GET /v1/models` (already exists) |
+| User/assistant message bubbles | Visual distinction between who said what; standard chat layout | Low | Nothing |
+| Stop generation button | Abort a bad/long response mid-stream; saves time and inference cost | Low | `AbortController` on the fetch call |
+| Auto-scroll during streaming | New tokens should scroll into view; user should not have to chase the output | Low | Scroll-to-bottom on token append |
+| In-session conversation history | Messages persist within the browser tab; clearing requires explicit action | Low | JavaScript array of `{role, content}` objects |
+| System prompt field | Configure model persona/behavior; every playground has this | Low | Prepend `{role: "system", content: ...}` to messages array |
+| Dark/light mode | Dashboard already has it; inconsistency would look broken | Low | Reuse existing CSS variables and theme toggle |
+| Error display | Show connection failures, model unavailable, timeouts clearly in the chat flow | Low | Catch fetch errors, render as error message bubble |
+| New conversation button | Clear messages and start fresh | Low | Reset messages array, clear DOM |
+| Keyboard submit (Enter to send) | Universal expectation; Shift+Enter for newlines | Low | Keydown handler on textarea |
 
 ## Differentiators
 
-Features that set the dashboard apart. Not strictly required but high value.
+Features that add polish. Not expected from an internal ops tool, but valuable if cheap to build.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| State-based action buttons | Button changes based on host state: Available->Setup, Healthy->Teardown, Unhealthy->Teardown, Provisioning->disabled | Low | Switch on merged status in JS render function. Already partially done for teardown button disabling. |
-| Host hardware summary in table | Show GPU model, memory total, model name inline | Low | Condense processor/memory data into short string like "2x A100, 512GB". |
-| Visual status grouping or sorting | Sort nodes by state (available first, then provisioning, healthy, unhealthy) | Low | Client-side sort in JS before rendering. |
-| QUADS cloud/assignment info tooltip | Show who owns a scheduled host (owner, ticket) | Med | Requires additional `/schedules/current/` call to get assignment details. |
-| Filter/search in node list | Filter by hostname, model, status, GPU type | Low | Client-side JS filter on the already-fetched data. |
-| Connection drain indicator | Show "draining (3 active)" during teardown | Low | Already have active_connections data. |
+| Markdown rendering in responses | LLMs output markdown (headers, lists, bold, code blocks); raw text looks bad | Low | marked.js via CDN -- single `<script>` tag, zero build step. Sanitization not critical on internal network with trusted model output. |
+| Code block styling | Models frequently output code; monospace + background makes it readable | Low | CSS only if using marked.js (it outputs `<pre><code>`) |
+| Copy message button | Copy a response to clipboard without manual selection | Low | `navigator.clipboard.writeText()` on click |
+| Temperature slider | Most-used generation parameter; lets user trade creativity vs determinism | Low | HTML `<input type="range">`, send as `temperature` in request body |
+| Max tokens control | Prevent runaway generation; useful for quick tests | Low | HTML number input, send as `max_tokens` |
+| Regenerate response | Retry last assistant message with same prompt; common when output is unsatisfying | Low | Re-send last messages array, replace last assistant message |
+| Copy code block button | Per-code-block copy button inside rendered markdown | Medium | Post-render DOM walk to inject copy buttons on `<pre>` elements |
+| Responsive layout | Usable on tablet/phone for engineers on the go | Low | CSS media queries (same pattern as dashboard) |
 
 ## Anti-Features
 
-Features to explicitly NOT build.
+Features to explicitly NOT build. Each one is a complexity trap for an internal ops playground.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| Write operations to QUADS API | We are a consumer of QUADS data, not a QUADS admin tool. Writing schedules/assignments would create ownership confusion. | Read-only integration. Setup/teardown is our SSH provisioner, not QUADS scheduling. |
-| Full QUADS dashboard clone | QUADS has its own web UI. Duplicating cloud management, schedule editing, etc. is scope creep. | Show only what's needed: host name, availability, GPU info, hardware model. |
-| Auth token management for QUADS | GET endpoints don't require auth. Adding login/token refresh adds complexity for no gain. | Use unauthenticated GET requests. If auth is required in deployment, add basic auth header config. |
-| Real-time QUADS sync (WebSocket/SSE) | QUADS is a Flask app with no push mechanism. Polling is the only option. | Poll on configurable interval (default 60s). QUADS data changes slowly (schedules change hourly/daily). |
-| Auto-provisioning of available hosts | Automatically setting up every idle GPU host is dangerous -- could grab hosts assigned to others. | Manual "Setup" button. Future auto-scaling is explicitly out of scope. |
-| Per-host detail page | Over-engineering for an ops dashboard. | Show essential info inline in the table. Tooltip or expandable row for extras if needed. |
-| Caching QUADS responses in etcd | Adds write load to etcd for data that's already in memory. | In-memory cache in the QUADS client, refreshed by the background poller. |
+| Persistent conversation storage (DB) | Adds backend complexity (schema, migrations, auth). PROJECT.md says "in-session, not persisted". | In-memory JS array, cleared on page refresh. Users who need transcripts can copy. |
+| User authentication | Internal network only (v1 constraint). Auth adds middleware, session management, login UI. | No auth. Same as rest of dashboard. |
+| Conversation branching / tree | Complex UI (carousel, tree navigation). Overkill for a testing playground. | Simple linear conversation. Regenerate overwrites last response. |
+| Multi-turn regeneration carousel | ChatGPT-style variant carousel requires versioned message storage and carousel UI. | Single regenerate: re-run, replace last assistant message. |
+| Syntax highlighting library (Prism.js, highlight.js) | Extra dependency for a secondary feature. Code blocks are readable with just monospace + background. | CSS-only code block styling on `<pre><code>` elements. Add highlight.js later only if users ask. |
+| File/image upload | vLLM text models don't consume images (unless multimodal). Adds file handling complexity. | Text-only input. Add when multimodal models are deployed. |
+| Tool calling / function calling UI | vLLM tool support varies. Complex UI for rendering tool calls and results. | Not in scope. Raw JSON in response is visible enough for debugging. |
+| Prompt templates / prompt library | Management UI, storage, CRUD. Over-engineering for a playground. | System prompt textarea. Users paste their own prompts. |
+| Export conversation (JSON/PDF) | Niche need, adds download logic and formatting. | Copy button per message covers 90% of the need. |
+| WebSocket transport | SSE already works for server-to-client streaming. WebSocket adds connection management complexity for zero benefit. | `fetch` + `ReadableStream` for SSE consumption. |
+| Streaming markdown re-parse debouncing | Only matters at very high token rates with very long messages. Vanilla DOM append is fast enough for vLLM output rates. | Render markdown on completion; append raw text during streaming. Simpler, no flicker. |
+| Multiple concurrent conversations / tabs | UI for managing conversation list, switching, naming. Way beyond a playground. | One conversation at a time. New conversation button resets. |
+| Message editing (edit a previous user message) | Requires re-running from edit point, conversation branching logic. | Type a new message. Regenerate covers the "last message was wrong" case. |
 
 ## Feature Dependencies
 
 ```
-QuadsSettings config  -->  QUADS API client module
-QUADS API client      -->  Background poller (fetches on interval)
-Background poller     -->  In-memory QUADS host cache
-QUADS host cache      -->  Unified node list merge logic
-etcd NodeRegistry     -->  Unified node list merge logic  (already exists)
-Merge logic           -->  Admin API endpoint (GET /admin/nodes returns merged list)
-Admin API endpoint    -->  Dashboard JS render (unified table)
-Dashboard JS render   -->  Inline action buttons (state-based)
-Remove setup form     -->  (independent, do after inline buttons work)
+Model selector dropdown  -->  GET /v1/models (existing endpoint)
+Send message              -->  POST /v1/chat/completions (existing endpoint)
+Streaming display         -->  fetch + ReadableStream SSE parsing
+Stop generation           -->  AbortController (browser native)
+Markdown rendering        -->  marked.js (CDN, no build step)
+Copy code block           -->  Markdown rendering (needs rendered <pre> elements)
+Regenerate                -->  Conversation history (needs message array)
+Temperature / max_tokens  -->  Send message (adds fields to request body)
+Dark/light mode           -->  Existing CSS variables + theme toggle (already built)
+System prompt             -->  Conversation history (prepended as first message)
 ```
-
-## Unified Node List: Merged Data Model
-
-Each row in the unified table represents a host. The merge key is hostname.
-
-```
-Source A: QUADS API  -- knows about ALL lab hosts (available or assigned)
-Source B: etcd registry -- knows about hosts WE have provisioned with vLLM
-
-Cases:
-1. In QUADS, NOT in etcd         -> "available" (or "assigned" if QUADS says scheduled)
-2. In QUADS AND in etcd          -> show etcd status (healthy/unhealthy/provisioning/draining)
-3. NOT in QUADS, in etcd         -> "provisioned" (manually added, not in QUADS inventory)
-4. In QUADS, broken/retired      -> show but grey out, no actions
-```
-
-### Suggested Merged Response Shape
-
-```json
-{
-  "hostname": "host01.example.com",
-  "source": "quads+etcd",
-  "quads_status": "available",
-  "node_status": "healthy",
-  "model_hw": "R640",
-  "gpu": "2x NVIDIA A100",
-  "gpu_count": 2,
-  "memory_gb": 512,
-  "cloud": "cloud01",
-  "vllm_model": "meta-llama/Llama-3-70b",
-  "active_connections": 3,
-  "circuit_breaker_state": "closed",
-  "actions": ["teardown"]
-}
-```
-
-## Inline Action Button UI Patterns
-
-Standard ops dashboard patterns for inline actions:
-
-| Host State | Available Actions | Button Style |
-|------------|-------------------|--------------|
-| Available (idle, has GPU) | Setup | Primary (blue/green) |
-| Available (idle, no GPU) | -- (greyed out "No GPU") | Disabled |
-| Assigned (scheduled to someone else) | -- (disabled, tooltip "Assigned to X") | Disabled |
-| Provisioning | -- (disabled, show spinner or "Provisioning...") | Disabled with loading indicator |
-| Healthy | Teardown | Danger (red/outline) |
-| Unhealthy | Teardown, Retry Setup | Danger + Warning |
-| Draining | -- (disabled, "Draining...") | Disabled |
-| Broken/Retired | -- (disabled) | Greyed out |
-
-**UI pattern:** Single Actions column with contextual button(s). Disabled buttons show tooltip explaining why. This is the standard pattern in Kubernetes dashboards, Foreman, and MAAS.
 
 ## MVP Recommendation
 
-Prioritize:
-1. **QUADS client + config + poller** -- foundation, no UI impact yet, testable in isolation
-2. **Merge logic + admin API update** -- backend delivers unified list
-3. **Dashboard table rewrite** -- render unified list with inline buttons
-4. **Remove setup form** -- cleanup after inline buttons work
+Build in this order -- each step produces a usable increment:
 
-Defer:
-- Cloud/assignment tooltip details: requires extra API call, low priority information
-- Filter/search: useful but not blocking, add when table has enough rows to need it
-- Host hardware summary beyond GPU: nice to have, model name in QUADS is sufficient
+1. **Chat page shell** -- Jinja2 template, nav link from dashboard, CSS using existing variables
+2. **Model selector** -- Fetch `/v1/models`, populate `<select>`
+3. **Message send + streaming display** -- `fetch` POST to `/v1/chat/completions` with `stream: true`, parse SSE via `ReadableStream`, append tokens to DOM
+4. **Stop generation** -- `AbortController.abort()`, show partial response
+5. **System prompt** -- Collapsible textarea, prepend to messages array
+6. **Markdown rendering** -- marked.js via CDN, render on response completion (raw text during stream)
+7. **Copy / regenerate** -- Action buttons on assistant messages
 
-## Complexity Assessment
+**Defer:** Temperature/max_tokens controls, copy code block button, responsive polish. Add when the core flow works.
 
-| Component | Estimated Size | Risk |
-|-----------|---------------|------|
-| QUADS client module | ~80-120 LOC | Low -- straightforward httpx GET calls |
-| Background poller | ~40-60 LOC | Low -- same pattern as health checker thread |
-| Merge logic | ~60-100 LOC | Med -- matching hostnames, handling edge cases (case sensitivity, FQDN vs short name) |
-| Admin API changes | ~30-50 LOC | Low -- extend existing endpoint |
-| Dashboard HTML/JS changes | ~100-150 LOC | Med -- table restructure, state-based buttons |
-| Config additions | ~15-20 LOC | Low -- QuadsSettings model |
-| Tests | ~200-300 LOC | Med -- mock QUADS responses, test merge logic |
+## Implementation Notes
 
-**Total estimate:** ~525-850 new LOC, comparable in scope to v1.1 (dashboard) rather than v1.2 (SSH provisioning).
+### SSE Consumption Pattern (vanilla JS, no dependencies)
+
+`EventSource` API only supports GET. Chat completions require POST with JSON body. Use `fetch` with streaming:
+
+```javascript
+const controller = new AbortController();
+const resp = await fetch("/v1/chat/completions", {
+  method: "POST",
+  headers: {"Content-Type": "application/json"},
+  body: JSON.stringify({model, messages, stream: true}),
+  signal: controller.signal,
+});
+const reader = resp.body.getReader();
+const decoder = new TextDecoder();
+// Parse SSE lines: "data: {...}\n\n" and "data: [DONE]\n\n"
+```
+
+This is the standard pattern used by every chat frontend that talks to OpenAI-compatible APIs without a framework.
+
+### Markdown Rendering Strategy
+
+Render markdown only on response completion (when `[DONE]` arrives or stream stops). During streaming, append raw text to a `<span>` with `white-space: pre-wrap`. This avoids:
+- Flicker from re-parsing incomplete markdown mid-stream
+- Broken rendering from half-open markdown syntax (`**bold` without closing `**`)
+- Complexity of streaming-aware markdown parsers
+
+On completion, replace the raw text span with `marked.parse(fullText)`. Single re-render, no debounce needed.
+
+### No New Backend Dependencies
+
+The chat page calls existing endpoints only:
+- `GET /v1/models` -- already returns `{object: "list", data: [{id: "model-name", ...}]}`
+- `POST /v1/chat/completions` with `stream: true` -- already returns SSE with `data: {choices: [{delta: {content: "token"}}]}` chunks
+
+The only backend addition is one route handler in `dashboard.py` to serve the chat page HTML (identical pattern to existing `/dashboard` and `/dashboard/nodes/{node_id}` routes).
 
 ## Sources
 
-- QUADS swagger.yaml: `src/quads/server/swagger.yaml` in github.com/redhat-performance/quads (OpenAPI 3.0.0, version 3.0.0)
-- QUADS models.py: `src/quads/server/models.py` -- SQLAlchemy models defining Host, Processor, Schedule, Assignment, Cloud
-- QUADS hosts.py blueprint: `src/quads/server/blueprints/hosts.py` -- confirms GET /hosts/ is unauthenticated
-- QUADS available.py blueprint: `src/quads/server/blueprints/available.py` -- returns list of hostname strings
-- QUADS quads_api.py: `src/quads/quads_api.py` -- reference Python client using requests (sync)
-- QUADS HostDao: `src/quads/server/dao/host.py` -- query filter implementation
-- Existing inference-proxy: dashboard.html, dashboard.js, admin.py, models/admin.py, config/settings.py
+- [OpenAI Playground UI](https://platform.openai.com/playground) -- model selector, parameter controls, system prompt pattern
+- [HuggingFace Chat UI (GitHub)](https://github.com/huggingface/chat-ui) -- open source reference for streaming chat, dark mode, model switching
+- [AI Chat UI Best Practices (TheFrontKit)](https://thefrontkit.com/blogs/ai-chat-ui-best-practices) -- streaming, stop button, markdown rendering
+- [Chrome Dev: Render LLM Responses](https://developer.chrome.com/docs/ai/render-llm-responses) -- streaming markdown rendering, debounce, incomplete syntax handling
+- [Streaming UI Patterns (The Prompt Bench)](https://thepromptbench.com/ai-product-ux/streaming-ui-patterns-that-dont-break/) -- SSE transport, cancellation, performance
+- [MDN: Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events) -- EventSource limitations (GET only)
+- [vLLM OpenAI-Compatible Server](https://docs.vllm.ai/en/latest/serving/online_serving/openai_compatible_server/) -- streaming SSE format, chat completions API
+- [AI Chat Interface Design (Setproduct)](https://www.setproduct.com/blog/ai-chat-interface-ui-design) -- stop/regenerate/copy patterns, response lifecycle states
+- [Shape of AI: Regenerate Pattern](https://www.shapeof.ai/patterns/regenerate) -- overwrite vs branching approaches
+- [SSE vs WebSockets for LLM Streaming (Hivenet)](https://www.hivenet.com/post/llm-streaming-sse-websockets) -- SSE is correct for unidirectional token streaming
+- [AI Chat UX Patterns (metacto)](https://www.metacto.com/blogs/ai-chat-ux-patterns-production) -- production chat UI patterns, stop/regenerate lifecycle

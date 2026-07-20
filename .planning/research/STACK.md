@@ -1,150 +1,208 @@
-# Technology Stack
+# Stack Research
 
-**Project:** QUADS LLM Inference Proxy -- v1.3 QUADS Integration
-**Researched:** 2026-07-15
-**Overall Confidence:** HIGH
-**Scope:** Stack additions for QUADS REST API integration, periodic host polling, and unified node list UI. Existing stack (FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2) is validated and NOT re-evaluated here.
+**Domain:** Chatbot playground chat UI (v1.4 milestone)
+**Researched:** 2026-07-20
+**Confidence:** HIGH
+**Scope:** Stack additions for chat playground page with streaming response display, model selection, and in-session conversation history. Existing stack (Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2) is validated and NOT re-evaluated here.
 
-## New Dependencies for v1.3
+## New Python Dependencies for v1.4
 
 **None.**
 
-Zero new runtime or dev dependencies are needed. The existing stack covers every requirement for this milestone.
+Zero new runtime or dev dependencies. The backend already exposes every endpoint the chat UI needs.
 
-## Why No New Dependencies
+## Why No New Python Dependencies
 
-The QUADS REST API is a standard Flask/JSON REST service. Our existing httpx client handles HTTP calls. Pydantic handles response modeling. The background polling pattern already exists (health checker thread). The dashboard already uses Jinja2 + vanilla JS.
+The chat playground is a pure frontend feature consuming existing API endpoints:
 
-### QUADS API Surface (what we actually call)
+| Requirement | Existing Endpoint | Notes |
+|-------------|-------------------|-------|
+| Send chat messages with streaming | `POST /v1/chat/completions` (stream=true) | SSE response, already implemented in `api/routes.py` |
+| List available models | `GET /v1/models` | Returns OpenAI-compatible model list, filters to HEALTHY nodes only |
+| Serve chat page HTML | Jinja2 + `dashboard_router` pattern | New route in `api/dashboard.py`, same pattern as `/dashboard` and `/dashboard/nodes/{node_id}` |
+| Serve JS/CSS assets | `StaticFiles` mount at `/static` | Already configured in `main.py` line 264 |
 
-The QUADS server exposes a Flask REST API at `/api/v3/`. Key endpoints we need:
+The backend is done. v1.4 is a frontend-only milestone.
 
-| Endpoint | Method | Auth Required | Returns | Purpose |
-|----------|--------|---------------|---------|---------|
-| `/api/v3/hosts` | GET | No | `list[HostDict]` | List all hosts with model, cloud, processors, broken/retired flags |
-| `/api/v3/hosts?model={model}` | GET | No | `list[HostDict]` | Filter hosts by hardware model |
-| `/api/v3/hosts/{hostname}` | GET | No | `HostDict` | Single host details |
-| `/api/v3/available` | GET | No | `list[str]` | List hostnames currently available (no active schedule) |
+## Frontend Stack
 
-All GET endpoints are unauthenticated. Write operations use `@check_access(["admin"])` with Basic/Bearer auth, but we only need reads. This means no auth library needed.
+### Core Technologies
 
-Source: QUADS server source at `github.com/redhat-performance/quads`, specifically:
-- `src/quads/server/blueprints/hosts.py` -- GET endpoints have no `@check_access` decorator
-- `src/quads/server/blueprints/available.py` -- GET endpoints have no `@check_access` decorator
-- `src/quads/server/config.py` -- `API_VERSION = "v3"`
+| Technology | Version | Purpose | Why Recommended |
+|------------|---------|---------|-----------------|
+| Vanilla JS (fetch + ReadableStream) | Browser-native | SSE consumption from POST requests | `EventSource` is GET-only and cannot send a request body. `fetch()` with `response.body.getReader()` handles POST-based SSE streaming. ~30 lines of parsing code. No library needed. All modern browsers support `ReadableStream`. |
+| marked.js (CDN) | >=18.0 | Markdown-to-HTML rendering | LLM responses contain markdown (code blocks, bold, lists, headers). Without rendering, users see raw ```` ```python ```` markers and `**bold**` text. One `<script>` tag, one function call: `marked.parse(text)`. 98% CommonMark compliant, MIT licensed. |
+| CSS custom properties | Browser-native | Chat UI styling | Existing `dashboard.css` defines a full design system (colors, spacing, typography, dark/light themes). The chat page reuses these variables for visual consistency. No new CSS framework. |
+| Jinja2 template | >=3.1 (installed) | Chat page HTML shell | Same pattern as `dashboard.html` and `node_detail.html`: Jinja2 renders the HTML shell, JS handles all dynamic behavior. |
 
-### QUADS Host JSON Shape
+### CDN Integration
 
-From the QUADS `Host` SQLAlchemy model and its `Serialize.as_dict()` method, hosts serialize to:
+```html
+<!-- marked.js for markdown rendering -->
+<script src="https://cdn.jsdelivr.net/npm/marked@18/lib/marked.umd.min.js"></script>
+```
 
-```json
-{
-  "id": 1,
-  "name": "host01.example.com",
-  "model": "R750xa",
-  "host_type": "scalelab",
-  "build": false,
-  "validated": true,
-  "broken": false,
-  "retired": false,
-  "rack": "b01",
-  "cloud": {"id": 1, "name": "cloud01", ...},
-  "default_cloud": {"id": 2, "name": "cloud02", ...},
-  "processors": [
-    {"id": 1, "handle": "GPU0", "vendor": "NVIDIA", "product": "A100", "cores": null, "threads": null, "processor_type": "GPU"},
-    {"id": 2, "handle": "CPU0", "vendor": "Intel", "product": "Xeon 8380", "cores": 40, "threads": 80, "processor_type": "CPU"}
-  ],
-  "interfaces": [...],
-  "memory": [...],
-  "disks": [...],
-  "last_build": "Mon, 01 Jul 2026 00:00:00 GMT",
-  "created_at": "Mon, 01 Jan 2026 00:00:00 GMT"
+Pin to major version (`@18`) for stability while getting patch updates. The UMD build exposes `marked.parse()` globally.
+
+### SSE Parsing from POST (the key pattern)
+
+Browser `EventSource` only supports GET. The chat completions endpoint is POST. The standard approach is `fetch()` + `ReadableStream`:
+
+```javascript
+// ponytail: ~30 lines replaces any SSE client library
+async function streamChat(messages, model, onToken, onDone, onError) {
+  var resp = await fetch("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: model, messages: messages, stream: true }),
+  });
+  if (!resp.ok) { onError(await resp.json()); return; }
+  var reader = resp.body.getReader();
+  var decoder = new TextDecoder();
+  var buf = "";
+  while (true) {
+    var chunk = await reader.read();
+    if (chunk.done) break;
+    buf += decoder.decode(chunk.value, { stream: true });
+    var parts = buf.split("\n\n");
+    buf = parts.pop();  // keep incomplete fragment
+    for (var i = 0; i < parts.length; i++) {
+      var line = parts[i].replace(/^data: /, "");
+      if (line === "[DONE]") { onDone(); return; }
+      if (line) onToken(JSON.parse(line));
+    }
+  }
+  onDone();
 }
 ```
 
-GPU hosts are identified by having at least one processor with `processor_type == "GPU"`.
+This matches the SSE format emitted by FastAPI's `EventSourceResponse` in `api/routes.py`. Each event is `data: {json}\n\n`, terminated by `data: [DONE]\n\n`.
 
-## Existing Stack Coverage
+### Conversation History (in-session)
 
-| v1.3 Requirement | Covered By | How | Confidence |
-|-------------------|------------|-----|------------|
-| HTTP client for QUADS API | **httpx** (already installed) | `httpx.Client` (sync) for polling thread, same pattern as health checker's `httpx.Client(timeout=5.0)` | HIGH |
-| QUADS host data models | **Pydantic v2** (already installed) | New `QuadsHost` model in `models/` -- parse JSON response, extract GPU info, map to unified node state | HIGH |
-| Background host polling | **threading.Thread** (stdlib) | Same pattern as `run_health_checker` and `run_watcher` -- dedicated thread with `stop_event.wait(timeout=interval)` | HIGH |
-| Configuration (QUADS URL, poll interval) | **pydantic-settings** (already installed) | New `QuadsSettings` sub-model: `base_url`, `poll_interval`, `enabled` | HIGH |
-| Unified node list UI | **Jinja2 + vanilla JS** (already installed) | Extend existing dashboard template. New `/admin/quads/hosts` JSON endpoint for JS polling | HIGH |
-| Structured logging | **structlog** (already installed) | Log QUADS API calls with host counts, errors, poll timing | HIGH |
+A JS array holds the message history. Each user message and assistant response is appended. The full array is sent as `messages` in each request, giving the model conversational context.
 
-### httpx usage: sync Client in thread (matching existing pattern)
-
-The codebase uses `httpx.Client` (synchronous) in background threads already:
-
-```python
-# From resilience/health_checker.py line 72:
-client = httpx.Client(timeout=_PROBE_TIMEOUT)
+```javascript
+// ponytail: conversation state is just an array
+var conversationHistory = [];
+// Push { role: "user", content: "..." } on send
+// Push { role: "assistant", content: "..." } after stream completes
+// Clear on "New Chat" button click
+// Lost on page refresh (requirement: in-session, not persisted)
 ```
 
-The QUADS poller follows the exact same pattern -- a `threading.Thread` with a sync `httpx.Client` making periodic GET requests. No new async HTTP client needed; no `asyncio.to_thread()` wrapping needed.
+No localStorage, no IndexedDB, no persistence. Requirement explicitly says "in-session, not persisted."
+
+### Model Selection
+
+`fetch('/v1/models')` returns `{ object: "list", data: [{ id: "model-name", ... }] }`. Populate a `<select>` element. Refresh on page load.
+
+## New Files
+
+| File | Purpose | Pattern Source |
+|------|---------|---------------|
+| `templates/chat.html` | Jinja2 HTML shell for chat page | Same structure as `dashboard.html` |
+| `static/js/chat.js` | SSE streaming, message rendering, model selection, conversation state | Same vanilla JS pattern as `dashboard.js` |
+| `static/css/chat.css` | Chat-specific layout (message bubbles, input area, model selector) | Uses CSS custom properties from `dashboard.css` |
+
+### Dashboard Route Addition
+
+One new route in `api/dashboard.py`:
 
 ```python
-# ponytail: same pattern as health_checker.py
-def run_quads_poller(
-    quads_client: QuadsClient,
-    registry: QuadsHostRegistry,  # or whatever holds the QUADS host list
-    stop_event: threading.Event,
-    interval: float = 300.0,
-) -> None:
-    while not stop_event.is_set():
-        hosts = quads_client.get_hosts()
-        available = quads_client.get_available()
-        registry.update(hosts, available)
-        if stop_event.wait(timeout=interval):
-            break
+@dashboard_router.get("/dashboard/chat", response_class=HTMLResponse)
+async def chat_playground(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request=request, name="chat.html")
 ```
 
-### Why NOT use httpx.AsyncClient for QUADS API
+No new router. No new dependencies. Follows the exact pattern of the existing `dashboard` and `node_detail` routes.
 
-The health checker and etcd watcher both run as background threads with sync clients. The QUADS poller is the same class of work -- periodic polling that runs independently of request handling. Using `httpx.AsyncClient` would require either:
-- Running in an asyncio task (which would share the event loop with request handling -- bad for a 5-minute poll cycle), or
-- `asyncio.to_thread()` wrapping (pointless complexity when sync httpx works directly)
+### Navigation
 
-Sync `httpx.Client` in a thread is the established pattern. Follow it.
+The top-bar nav in all templates needs a link to `/dashboard/chat`. Currently the brand text is the only nav element. Add simple text links:
+
+```html
+<nav class="top-bar">
+  <div class="brand">...</div>
+  <a href="/dashboard">Fleet</a>
+  <a href="/dashboard/chat">Chat</a>
+  <button class="theme-toggle">...</button>
+</nav>
+```
+
+## Alternatives Considered
+
+| Recommended | Alternative | Why Not |
+|-------------|-------------|---------|
+| Vanilla JS fetch + ReadableStream | EventSource API | EventSource is GET-only. Chat completions is POST. Cannot send request body. |
+| Vanilla JS fetch + ReadableStream | fetch-event-source (npm) | Adds npm/build step to a project that has none. The manual parser is ~30 lines. |
+| marked.js via CDN | No markdown rendering (plain text) | LLM output with raw markdown markers (`**bold**`, ``` ``` ```) is ugly and confusing. The one `<script>` tag is worth it. |
+| marked.js via CDN | markdown-it via CDN | markdown-it is ~100KB vs marked's ~40KB. Both work. marked is faster and has wider CDN adoption. |
+| marked.js via CDN | Bundled/vendored marked.js | CDN is simpler (no file to maintain). Vendoring is fine too if CDN access is a concern on the internal network -- download the UMD file to `/static/vendor/`. |
+| CSS custom properties (existing) | Tailwind CSS | Adding Tailwind to a project with an established CSS design system is churn. The existing custom properties cover colors, spacing, typography, and dark mode. |
+| In-memory JS array | localStorage persistence | Requirement says "in-session, not persisted." localStorage would persist across tabs/refreshes, which is explicitly out of scope. |
+| Single chat.css file | Inline styles or extending dashboard.css | Separate file keeps chat-specific styles isolated. dashboard.css has the shared design system; chat.css has the chat layout. SRP for stylesheets. |
 
 ## What NOT to Add
 
 | Technology | Why Not |
 |------------|---------|
-| requests | httpx is already installed and is the modern replacement. Adding requests alongside httpx is redundant. QUADS's own client uses `requests.Session` but we write our own thin client with httpx. |
-| aiohttp | httpx already handles HTTP. Adding aiohttp for one API client is waste. |
-| quads (pip package) | The QUADS Python package is a CLI/server tool, not an API client library. It pulls in Flask, SQLAlchemy, and dozens of dependencies. We need 2 GET endpoints. Write a 30-line httpx client. |
-| APScheduler / schedule | Background polling is `while True: do_thing(); stop_event.wait(interval)`. That's 4 lines. No scheduler library needed. |
-| tenacity | Retry logic for QUADS API calls can be a simple try/except with logging. The poller runs every N minutes anyway -- a failed poll just waits for the next cycle. No exponential backoff library needed for "try again in 5 minutes." |
-| cachetools / cachelib | The QUADS host list is an in-memory dict/list updated by the poller thread. That IS the cache. No cache library needed. |
-| WebSocket / SSE libraries | The dashboard already uses JS polling (`setInterval` + `fetch`). The unified node list follows the same pattern. No real-time push needed for a list that changes every few hours. |
+| React / Vue / Svelte | Existing pattern is vanilla JS + Jinja2. Adding a frontend framework for one chat page is massive scope creep. The dashboard, node detail page, and chat page are all the same pattern. |
+| npm / webpack / vite | No build step exists in this project. Adding one for marked.js (available via CDN) is unjustified. |
+| highlight.js / Prism.js | Syntax highlighting in code blocks is nice but not required for a playground. Defer until requested. If added later, one more CDN `<script>` tag. |
+| WebSocket | SSE via fetch handles the unidirectional streaming. WebSocket adds bidirectional complexity for a request-response pattern. The proxy endpoint is SSE, not WebSocket. |
+| DOMPurify | XSS protection for rendered markdown. Internal network only, no auth, no external access. Mention as future consideration if gateway ever becomes external-facing. |
+| Any state management library | Conversation history is one array. No Zustand, no Redux, no signals. |
+| Server-side chat session storage | Requirement is "in-session, not persisted." No database, no file, no Redis. |
+| tenacity (retry on chat requests) | If the streaming request fails, show the error. User can retry manually. Auto-retry mid-conversation is confusing UX. |
+| AbortController polyfill | Native in all browsers since 2017. Use `AbortController` directly to cancel in-flight streaming requests (e.g., when user clicks "Stop generating"). |
 
 ## Integration Points with Existing App
 
-### Settings (pydantic-settings)
+### Template Structure (matching existing pattern)
 
-```python
-class QuadsSettings(BaseModel):
-    """QUADS API integration configuration."""
-    base_url: str = ""  # Empty = QUADS integration disabled
-    poll_interval: int = 300  # 5 minutes between polls
-    request_timeout: int = 30
+All three pages share the same HTML skeleton:
+1. `<head>` with fonts, CSS, theme script
+2. `<nav class="top-bar">` with brand and theme toggle
+3. `<div class="dashboard">` wrapper with `<header>` and `<main>`
+4. `<div id="toast-container">` for notifications
+5. `<footer>`
+6. Page-specific JS at bottom
+
+`chat.html` follows this exactly. The `showToast()` function is duplicated across `dashboard.js` and `node_detail.js` already -- the chat page duplicates it again (or a future refactor extracts it to a shared `common.js`; not this milestone's problem).
+
+### CSS Design System Reuse
+
+Chat-specific CSS (`chat.css`) imports no frameworks. It uses CSS custom properties already defined in `dashboard.css`:
+
+- `--surface`, `--bg`, `--text`, `--text-light` for container/text colors
+- `--primary`, `--border`, `--radius` for interactive elements
+- `--shadow-sm`, `--shadow-md` for elevation
+- `[data-theme="dark"]` overrides for dark mode (automatic, same mechanism)
+- Font families: Open Sans (body), IBM Plex Mono (code/monospace), Poppins (headings)
+
+Both `dashboard.css` and `chat.css` are loaded on the chat page.
+
+### API Contract
+
+The chat page consumes the OpenAI-compatible API as a regular client:
+
+```
+POST /v1/chat/completions
+Content-Type: application/json
+
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "messages": [
+    {"role": "user", "content": "Hello"}
+  ],
+  "stream": true
+}
 ```
 
-Added as `quads: QuadsSettings = QuadsSettings()` in root `Settings`. Env var: `INFERENCE_PROXY_QUADS__BASE_URL=https://quads.example.com/api/v3`.
+Response: SSE stream of `ChatCompletionChunk` objects (defined in `models/openai.py`), terminated by `data: [DONE]`.
 
-When `base_url` is empty, QUADS integration is disabled -- the gateway works exactly as v1.2. Feature flag via configuration, no code branching needed beyond "start the poller thread or don't."
-
-### Lifespan (main.py)
-
-The QUADS poller thread starts alongside the existing watcher and health checker threads in the lifespan context manager. Same `stop_event` for coordinated shutdown.
-
-### Dashboard
-
-Extend the existing `/admin/nodes` JSON endpoint (or add a parallel `/admin/quads/hosts` endpoint) that the dashboard JS fetches. The unified node list merges QUADS hosts with etcd-registered nodes client-side or server-side.
+The chat page is just another client of the proxy. No special backend treatment needed.
 
 ## Installation
 
@@ -155,23 +213,28 @@ Extend the existing `/admin/nodes` JSON endpoint (or add a parallel `/admin/quad
 
 ## Key Version Constraints
 
-No new version constraints. All existing constraints from v1.2 remain valid.
+No new version constraints. All existing constraints from v1.3 remain valid.
 
-| Existing Dependency | Minimum | Still Valid |
-|---------------------|---------|-------------|
-| httpx >= 0.28 | Stable sync and async client APIs | Yes |
-| Pydantic >= 2.10 | Frozen model support, model_copy | Yes |
-| pydantic-settings >= 2.14 | Nested env var resolution | Yes |
-| structlog >= 26.1.0 | Context variables, async-safe | Yes |
-| Jinja2 >= 3.1 | Template rendering for dashboard | Yes |
+| Existing Dependency | Minimum | Still Valid | Chat Page Relevance |
+|---------------------|---------|-------------|---------------------|
+| FastAPI >= 0.135 | Built-in EventSourceResponse | Yes | Backend SSE endpoint already uses this |
+| Jinja2 >= 3.1 | Template rendering | Yes | New `chat.html` template |
+| Pydantic >= 2.10 | ChatCompletionRequest model | Yes | Request validation on existing endpoint |
+
+| CDN Dependency | Version | Purpose |
+|----------------|---------|---------|
+| marked.js | @18 (latest major) | Markdown rendering of LLM responses. Pin to major for stability. |
 
 ## Sources
 
-- QUADS GitHub: https://github.com/redhat-performance/quads
-- QUADS API client source: `src/quads/quads_api.py` -- shows endpoint patterns (GET /hosts, GET /available)
-- QUADS Host model: `src/quads/server/models.py` -- Host columns (name, model, broken, retired, processors with GPU type)
-- QUADS blueprints: `src/quads/server/blueprints/hosts.py` -- GET endpoints are unauthenticated
-- QUADS available blueprint: `src/quads/server/blueprints/available.py` -- returns list of hostname strings
-- QUADS server config: `src/quads/server/config.py` -- `API_VERSION = "v3"`
-- QUADS auth decorator: `src/quads/server/blueprints/__init__.py` -- `check_access` only on write endpoints
-- QUADS swagger: `src/quads/server/swagger.yaml` -- OpenAPI 3.0.0 spec, base URL `https://quads.example.com/api/v3/`
+- MDN ReadableStream: https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams -- verified fetch + getReader() pattern for POST SSE
+- SSE from POST via fetch: https://www.web-developpeur.com/en/blog/sse-fetch-readable-stream-api-key -- confirmed EventSource is GET-only, fetch+ReadableStream is standard approach
+- marked.js official docs: https://marked.js.org/ -- latest v18.0.6, CDN via jsDelivr
+- marked.js CDN: https://www.jsdelivr.com/package/npm/marked -- UMD build at `/lib/marked.umd.js`
+- Existing codebase: `api/routes.py` -- SSE format uses `format_sse_event(data_str=...)`, emits `data: {json}\n\n`
+- Existing codebase: `api/dashboard.py` -- template rendering pattern with Jinja2Templates
+- Existing codebase: `models/openai.py` -- ChatCompletionChunk model defines the SSE event shape
+
+---
+*Stack research for: chatbot playground chat UI (v1.4)*
+*Researched: 2026-07-20*

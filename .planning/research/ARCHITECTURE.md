@@ -1,18 +1,18 @@
-# Architecture: QUADS API Integration (v1.3)
+# Architecture: Chatbot Playground (v1.4)
 
-**Domain:** QUADS REST API integration into existing LLM inference gateway
-**Researched:** 2026-07-15
+**Domain:** Chat UI integration into existing LLM inference gateway dashboard
+**Researched:** 2026-07-20
 **Overall confidence:** HIGH
 
-## Decision: QUADS Client as a New Service Layer, Not an Extension of Provisioner
+## Decision: Browser-Side SSE Consumer Against Existing Proxy Endpoint
 
-Add a `QUADSClient` in a new `inference_proxy/quads/` package. Do NOT bolt QUADS calls onto `NodeProvisioner` -- the provisioner orchestrates SSH setup sequences; the QUADS client discovers what hosts exist in the lab. Different responsibilities, different change frequencies.
+The chat page is a pure frontend addition. The backend already has everything needed: `POST /v1/chat/completions` with `stream: true` returns SSE, and `GET /v1/models` returns available models. No new backend endpoints required.
 
-The unified node list is a **read-side merge** in the admin API layer. The QUADS client provides "what hosts exist," the NodeRegistry provides "what nodes are running." The admin endpoint merges them. No new data store needed.
+The only backend change is one new route handler in `dashboard.py` that serves a `chat.html` Jinja2 template, plus a nav link added to the top bar across all templates. The real work is in a new `chat.js` and chat-specific CSS.
 
-**Why not extend NodeProvisioner?** The provisioner already has a clear job: run SSH sequences and register nodes in etcd. Adding QUADS polling and host discovery to it violates SRP and creates a class that changes for two unrelated reasons (QUADS API changes vs SSH setup changes).
+**Why not WebSocket?** The proxy speaks SSE (OpenAI protocol). Adding a WebSocket layer between browser and proxy creates a translation hop that must parse SSE and re-emit over WS. The browser can consume SSE directly from `/v1/chat/completions` -- zero backend changes, zero protocol translation.
 
-**Why not a separate microservice?** Same reasoning as v1.2 -- the gateway already owns the NodeRegistry, dashboard, and admin API. A separate service would need IPC just to produce a merged view. YAGNI.
+**Why not `EventSource`?** The browser's `EventSource` API only supports GET requests. The OpenAI chat completions endpoint is POST. Use `fetch()` with `ReadableStream` instead -- native in all modern browsers, no library needed.
 
 ## Architecture Overview
 
@@ -22,453 +22,378 @@ The unified node list is a **read-side merge** in the admin API layer. The QUADS
               |                                                    |
               |  +----------+  +-----------+  +------------------+ |
               |  | /v1/*    |  | /admin/*  |  | /dashboard       | |
-              |  | (proxy)  |  | (fleet)   |  | (UI)             | |
-              |  +----------+  +-----+-----+  +--------+---------+ |
-              |                      |                 |           |
-              |          +-----------v-----------------v------+    |
-              |          | /admin/nodes  (MODIFIED)            |    |
-              |          |   Merges QUADS hosts + etcd nodes   |    |
-              |          +-----+-------------------+-----------+    |
-              |                |                   |               |
-              |     +----------v------+  +---------v-----------+   |
-              |     | QUADSClient     |  | NodeRegistry        |   |
-              |     | (HTTP to QUADS) |  | (etcd-backed)       |   |
-              |     +----------+------+  +---------------------+   |
-              |                |                                   |
-              |     +----------v------+                            |
-              |     | QUADSPoller     |                            |
-              |     | (background     |                            |
-              |     |  asyncio.Task)  |                            |
-              |     +-----------------+                            |
+              |  | (proxy)  |  | (fleet)   |  | /dashboard/chat  | |
+              |  +----------+  +-----------+  +------------------+ |
+              |       ^                              |             |
+              |       |  POST /v1/chat/completions   |             |
+              |       |  GET /v1/models              |             |
+              |       +------------------------------+             |
               |                                                    |
-              |  Existing unchanged:                               |
-              |  +------------+ +----------+ +------------------+  |
-              |  | Watcher    | | HealthChk| | NodeProvisioner  |  |
-              |  | (thread)   | | (thread) | | (asyncio tasks)  |  |
-              |  +------------+ +----------+ +------------------+  |
+              |  (No new backend logic. Chat page calls existing   |
+              |   /v1/* endpoints directly from browser JS.)       |
               +----------------------------------------------------+
-                     |                              |
-              +------v------+              +--------v--------+
-              | etcd        |              | QUADS API       |
-              | /nodes/*    |              | /api/v3/hosts   |
-              +-------------+              | /api/v3/available|
-                                           +-----------------+
+                     |
+              Browser (chat.js)
+                     |
+              +------v-------------------------------------------------+
+              |  1. fetch GET /v1/models  -->  populate model selector  |
+              |  2. User types message, clicks send                    |
+              |  3. fetch POST /v1/chat/completions {stream: true}     |
+              |     with full conversation history as messages[]        |
+              |  4. ReadableStream reader parses SSE text/event-stream |
+              |  5. Extract delta.content from each chunk              |
+              |  6. Append tokens to assistant message bubble in DOM   |
+              |  7. On [DONE], mark message complete                   |
+              +--------------------------------------------------------+
 ```
 
 ## New Components
 
 | Component | Responsibility | Lives In | Communicates With |
 |-----------|---------------|----------|-------------------|
-| **QUADSClient** | HTTP calls to QUADS REST API. Get hosts, check availability, filter by cloud. Stateless. | `inference_proxy/quads/client.py` | QUADS API server (external) |
-| **QUADSPoller** | Background asyncio.Task that periodically calls QUADSClient and caches results in-memory | `inference_proxy/quads/poller.py` | QUADSClient |
-| **QUADSHost** | Pydantic model for a QUADS host (name, model, cloud, broken, retired, etc.) | `inference_proxy/models/quads.py` | QUADSClient, admin API, dashboard |
-| **QUADSSettings** | QUADS API URL, poll interval, cloud filter, auth token | `inference_proxy/config/settings.py` (add nested model) | Settings |
-| **UnifiedNodeResponse** | Admin response model merging QUADS host info + etcd node info | `inference_proxy/models/admin.py` (extend) | Admin API, dashboard |
+| **Chat route** | Serve `chat.html` template | `inference_proxy/api/dashboard.py` (add route) | Jinja2Templates |
+| **chat.html** | HTML shell: nav, model selector, message list, input area | `inference_proxy/templates/chat.html` | chat.js, dashboard.css + chat CSS |
+| **chat.js** | SSE consumption, conversation state, DOM rendering | `inference_proxy/static/js/chat.js` | `/v1/models`, `/v1/chat/completions` |
+| **chat.css** | Chat-specific styles (bubbles, input area, streaming indicator) | `inference_proxy/static/css/chat.css` | dashboard.css (inherits design tokens) |
 
 ### Modified Components
 
 | Component | Change | Why |
 |-----------|--------|-----|
-| `settings.py` | Add `QUADSSettings` nested model | QUADS API URL, poll interval, spare pool cloud name |
-| `admin.py` | Modify `GET /admin/nodes` to merge QUADS + etcd data | Unified node list is the core v1.3 deliverable |
-| `dependencies.py` | Add `get_quads_poller()` | Follow existing DI pattern |
-| `main.py` lifespan | Create QUADSClient, QUADSPoller, store in `app.state` | Follow existing lifespan pattern |
-| `dashboard.html` | Replace setup form with inline actions per node, show QUADS hosts as "available" rows | v1.3 UI redesign |
-| `models/admin.py` | Add `UnifiedNodeResponse` model | Merged view needs a richer response model |
+| `dashboard.py` | Add `GET /dashboard/chat` route | Serves chat template, follows existing pattern |
+| `dashboard.html` | Add "Chat" nav link in top-bar | Navigation between fleet and chat pages |
+| `node_detail.html` | Add "Chat" nav link in top-bar | Consistent navigation |
+| `dashboard.css` | Add nav link styles (`.nav-links`) | Top-bar gets page links between brand and theme toggle |
 
-## Data Flow: Unified Node List
+No changes to: `main.py`, `routes.py`, `admin.py`, `settings.py`, models, or any backend logic.
 
-This is the central design question. Two data sources produce one merged view.
+## Data Flow: User Input to Streamed Response
 
-### Source 1: QUADS API (all lab hosts)
+### Step 1: Page Load -- Fetch Available Models
 
 ```
-QUADS API /api/v3/hosts  -->  QUADSClient.get_hosts()
-QUADS API /api/v3/available  -->  QUADSClient.get_available()
+Browser                           Gateway
+  |                                  |
+  |-- GET /v1/models --------------->|
+  |<-- { data: [{id: "meta-llama/..."}] }
+  |                                  |
+  v                                  |
+  Populate <select> with model IDs   |
 ```
 
-Returns: hostname, model, cloud assignment, broken/retired flags. The `/available` endpoint returns hostnames of hosts not currently scheduled (in the spare pool).
+The existing `GET /v1/models` endpoint already returns OpenAI-compatible model list, filtered to only HEALTHY nodes. No change needed.
 
-### Source 2: etcd NodeRegistry (provisioned nodes)
+### Step 2: User Sends Message
 
-```
-etcd /nodes/*  -->  NodeRegistry.get_all()
-```
-
-Returns: node_id (hostname), endpoint, model, status (HEALTHY/UNHEALTHY/PROVISIONING/DRAINING).
-
-### Merge Logic
-
-The merge happens at request time in the admin endpoint. No persistent merged store.
-
-```python
-def merge_node_list(
-    quads_hosts: list[QUADSHost],
-    registry_nodes: list[Node],
-    provisioning_tasks: list[ProvisioningState],
-) -> list[UnifiedNodeResponse]:
-    """Merge QUADS hosts with etcd-registered nodes.
-
-    Priority: etcd node data wins over QUADS data for provisioned hosts.
-    QUADS hosts not in etcd appear as "available".
-    etcd nodes not in QUADS appear as-is (manually registered).
-    """
-    etcd_by_hostname: dict[str, Node] = {n.node_id: n for n in registry_nodes}
-    provisioning_by_hostname: dict[str, ProvisioningState] = {
-        t.hostname: t for t in provisioning_tasks
-    }
-
-    result = []
-    seen_hostnames: set[str] = set()
-
-    for host in quads_hosts:
-        seen_hostnames.add(host.name)
-        node = etcd_by_hostname.get(host.name)
-        task = provisioning_by_hostname.get(host.name)
-
-        if node is not None:
-            # Provisioned -- use etcd status, enrich with QUADS metadata
-            result.append(UnifiedNodeResponse(
-                hostname=host.name,
-                source="etcd",
-                status=node.status.value,
-                model=node.model or host.model,
-                cloud=host.cloud,
-                endpoint=node.endpoint,
-                # ... circuit breaker, connections, etc.
-            ))
-        elif task is not None and task.current_step not in ("complete", "failed"):
-            # Currently provisioning
-            result.append(UnifiedNodeResponse(
-                hostname=host.name,
-                source="provisioning",
-                status="provisioning",
-                provisioning_step=task.current_step,
-                model=host.model,
-                cloud=host.cloud,
-            ))
-        else:
-            # Available in QUADS, not provisioned
-            result.append(UnifiedNodeResponse(
-                hostname=host.name,
-                source="quads",
-                status="available" if host.available else "assigned",
-                model=host.model,
-                cloud=host.cloud,
-                broken=host.broken,
-                retired=host.retired,
-            ))
-
-    # etcd nodes not in QUADS (manually registered or QUADS unavailable)
-    for node_id, node in etcd_by_hostname.items():
-        if node_id not in seen_hostnames:
-            result.append(UnifiedNodeResponse(
-                hostname=node_id,
-                source="etcd",
-                status=node.status.value,
-                model=node.model,
-                endpoint=node.endpoint,
-            ))
-
-    return result
+```javascript
+// Conversation state lives in JS memory (array of {role, content} objects)
+const messages = [
+  { role: "system", content: "You are a helpful assistant." },  // optional
+  { role: "user", content: "Hello" },
+  { role: "assistant", content: "Hi there!" },  // from previous exchange
+  { role: "user", content: "What is 2+2?" },    // new message
+];
 ```
 
-### Node States in the Unified View
+The full conversation history is sent with every request. This is standard OpenAI protocol -- the server is stateless, the client maintains context.
 
-| State | Source | Available Actions | UI Treatment |
-|-------|--------|-------------------|-------------|
-| `available` | QUADS (in spare pool, not provisioned) | Setup | Green "Available" badge, Setup button |
-| `assigned` | QUADS (scheduled to a cloud, not spare pool) | None | Grey "Assigned" badge, no actions |
-| `provisioning` | etcd (PROVISIONING status) or in-flight task | Cancel (future) | Yellow "Provisioning" badge + step name |
-| `healthy` | etcd (HEALTHY) | Teardown | Green "Healthy" badge, Teardown button |
-| `unhealthy` | etcd (UNHEALTHY) | Teardown, Retry | Red "Unhealthy" badge, Teardown button |
-| `draining` | etcd (DRAINING) | None (in progress) | Orange "Draining" badge |
-| `broken` | QUADS (broken=true) | None | Red "Broken" badge |
-| `retired` | QUADS (retired=true) | None | Grey "Retired" badge |
+### Step 3: Streaming Request via fetch + ReadableStream
 
-## QUADSClient Design
+```javascript
+const response = await fetch("/v1/chat/completions", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    model: selectedModel,
+    messages: messages,
+    stream: true,
+  }),
+});
 
-### HTTP Client
-
-Use `httpx.AsyncClient` -- already in the stack, no new dependency. The QUADS API is standard REST/JSON.
-
-```python
-class QUADSClient:
-    """Async client for the QUADS REST API (v3).
-
-    Stateless. All methods are async and return parsed Pydantic models.
-    """
-
-    def __init__(self, settings: QUADSSettings) -> None:
-        self._base_url = settings.api_url.rstrip("/")
-        self._client = httpx.AsyncClient(
-            base_url=self._base_url,
-            timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0),
-            # ponytail: auth token header if QUADS v3 RBAC is enabled
-            headers={"Authorization": f"Bearer {settings.token}"} if settings.token else {},
-        )
-
-    async def get_hosts(self, **filters: str) -> list[QUADSHost]:
-        """GET /api/v3/hosts with optional filters."""
-        response = await self._client.get("/api/v3/hosts", params=filters)
-        response.raise_for_status()
-        return [QUADSHost.model_validate(h) for h in response.json()]
-
-    async def get_available(
-        self, start: str | None = None, end: str | None = None
-    ) -> set[str]:
-        """GET /api/v3/available -- returns set of available hostnames."""
-        params: dict[str, str] = {}
-        if start:
-            params["start"] = start
-        if end:
-            params["end"] = end
-        response = await self._client.get("/api/v3/available", params=params)
-        response.raise_for_status()
-        return set(response.json())  # API returns list of hostname strings
-
-    async def close(self) -> None:
-        await self._client.aclose()
+const reader = response.body.getReader();
+const decoder = new TextDecoder();
 ```
 
-**Key detail:** The QUADS `/api/v3/available` endpoint returns a list of hostname strings (not full host objects). The client must call `get_hosts()` separately for full metadata, then cross-reference with `get_available()` to mark which hosts are available. This matches how the QUADS Python client itself works (`filter_available` makes N+1 calls).
+**Why `fetch()` not `EventSource`?** `EventSource` only supports GET. The OpenAI API is POST. `fetch()` with `ReadableStream` is the standard approach used by every chat UI (ChatGPT, Open WebUI, etc.).
 
-### Optimization: Single Call Strategy
+### Step 4: Parse SSE Events from ReadableStream
 
-Instead of calling both `/hosts` and `/available`, call `/hosts` once (gets all hosts with their cloud assignment), then determine availability by checking if the host's current cloud equals the spare pool cloud (typically `cloud01`). This avoids the N+1 problem in the QUADS client.
+The SSE wire format from vLLM (via the proxy) looks like:
 
-```python
-async def get_hosts_with_availability(self, spare_pool_cloud: str = "cloud01") -> list[QUADSHost]:
-    """Get all hosts and infer availability from cloud assignment."""
-    hosts = await self.get_hosts()
-    available = await self.get_available()
-    for host in hosts:
-        host.available = host.name in available
-    return hosts
+```
+data: {"id":"cmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
+
+data: {"id":"cmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"cmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}]}
+
+data: [DONE]
+
 ```
 
-This keeps it to 2 API calls per poll cycle regardless of host count.
+Parser logic (in `chat.js`):
 
-## QUADSPoller Design
-
-### Why a Poller Instead of On-Demand Calls
-
-The dashboard polls `/admin/nodes` every N seconds. If each poll triggered QUADS API calls, the gateway would make 2 HTTP requests to QUADS per dashboard poll. With multiple dashboard tabs open, this multiplies. A background poller decouples QUADS fetch frequency from dashboard request frequency.
-
-### Implementation
-
-```python
-class QUADSPoller:
-    """Background poller that caches QUADS host data in memory.
-
-    Runs as an asyncio.Task started in lifespan. Caches the latest
-    successful response. On QUADS API failure, serves stale data.
-    """
-
-    def __init__(self, client: QUADSClient, settings: QUADSSettings) -> None:
-        self._client = client
-        self._interval = settings.poll_interval
-        self._hosts: list[QUADSHost] = []
-        self._last_fetch: datetime | None = None
-        self._task: asyncio.Task[None] | None = None
-
-    def get_hosts(self) -> list[QUADSHost]:
-        """Return cached QUADS hosts. Non-async, thread-safe read."""
-        return list(self._hosts)  # shallow copy
-
-    async def start(self) -> None:
-        self._task = asyncio.create_task(self._poll_loop())
-
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._task
-
-    async def _poll_loop(self) -> None:
-        while True:
-            try:
-                hosts = await self._client.get_hosts_with_availability()
-                self._hosts = hosts
-                self._last_fetch = datetime.now(timezone.utc)
-            except Exception:
-                logger.warning("quads_poll_failed", exc_info=True)
-                # Serve stale data on failure -- better than empty
-            await asyncio.sleep(self._interval)
+```javascript
+// ponytail: minimal SSE parser, handles split chunks across read boundaries
+let buffer = "";
+while (true) {
+  const { done, value } = await reader.read();
+  if (done) break;
+  buffer += decoder.decode(value, { stream: true });
+  const lines = buffer.split("\n");
+  buffer = lines.pop();  // keep incomplete line in buffer
+  for (const line of lines) {
+    if (!line.startsWith("data: ")) continue;
+    const data = line.slice(6);
+    if (data === "[DONE]") { /* finalize */ return; }
+    const chunk = JSON.parse(data);
+    const content = chunk.choices?.[0]?.delta?.content;
+    if (content) appendToken(content);
+  }
+}
 ```
 
-### Coordination with Existing Background Tasks
+**Edge case: chunk boundaries.** A single `reader.read()` call may return a partial SSE event (the TCP segment can split anywhere). The buffer + split approach handles this correctly -- incomplete lines stay in the buffer until the next read fills them in.
 
-| Background Task | Runs As | Interval | Shares State With |
-|----------------|---------|----------|-------------------|
-| etcd watcher | `threading.Thread` | Continuous (blocking watch) | NodeRegistry (thread-safe) |
-| Health checker | `threading.Thread` | 30s (configurable) | NodeRegistry, CircuitBreakerRegistry |
-| **QUADS poller** | `asyncio.Task` | 60s (configurable) | Internal cache only |
+### Step 5: Render Tokens to DOM
 
-The QUADS poller does NOT write to NodeRegistry. It maintains its own cache. This means:
-- No lock contention with the watcher or health checker.
-- No risk of QUADS data overwriting etcd-sourced data.
-- The merge happens at read time in the admin endpoint, not at write time.
+Each token is appended to the current assistant message element. No full re-render per token -- just `textContent +=` or `insertAdjacentText`.
 
-**Why asyncio.Task, not threading.Thread?** The QUADS client uses httpx.AsyncClient (async). No need for a thread. This is different from the etcd watcher and health checker, which use threads because etcd3gw and the health check httpx.Client are synchronous.
-
-### Failure Modes
-
-| Failure | Behavior | Recovery |
-|---------|----------|----------|
-| QUADS API unreachable | Serve stale cached data. Log warning. | Next successful poll refreshes cache. |
-| QUADS API returns error | Same as unreachable -- stale data. | Automatic on next poll. |
-| Gateway restart | Cache starts empty. First poll fills it. | Automatic within one poll interval. |
-| QUADS returns empty list | Cache becomes empty. Dashboard shows only etcd nodes. | Normal -- QUADS may have no hosts. |
-
-## Settings Addition
-
-```python
-class QUADSSettings(BaseModel):
-    """QUADS API integration configuration."""
-
-    api_url: str = "http://quads.example.com:8080"
-    poll_interval: int = Field(default=60, ge=10)  # seconds
-    spare_pool_cloud: str = "cloud01"  # hosts in this cloud are "available"
-    token: str = ""  # QUADS v3 auth token, empty = no auth
-    enabled: bool = True  # disable QUADS integration entirely
+```
+User message bubble  -->  static, added to DOM on send
+Assistant bubble     -->  created on first token, tokens appended incrementally
 ```
 
-Added to root `Settings`:
-```python
-quads: QUADSSettings = QUADSSettings()
+### Step 6: On Completion
+
+When `[DONE]` arrives:
+1. Push the completed assistant message `{role: "assistant", content: fullText}` to the conversation array
+2. Re-enable the input field
+3. Scroll to bottom
+
+## Conversation State Management
+
+**In-memory only.** Per PROJECT.md requirements: "Conversation history (in-session, not persisted)."
+
+```javascript
+// ponytail: conversation state is just an array. No store, no framework.
+let conversationMessages = [];
+let currentModel = null;
+
+function addUserMessage(content) {
+  conversationMessages.push({ role: "user", content });
+  renderUserBubble(content);
+}
+
+function addAssistantMessage(content) {
+  conversationMessages.push({ role: "assistant", content });
+  // bubble was already rendered token-by-token during streaming
+}
+
+function clearConversation() {
+  conversationMessages = [];
+  // clear DOM
+}
 ```
 
-Env var example: `INFERENCE_PROXY_QUADS__API_URL=http://quads.lab:8080`
+Model switching should clear the conversation (different models have different context windows and behaviors). Show a confirmation before clearing if there are messages.
 
-## Lifespan Changes
+## Component Boundaries
 
-```python
-# In main.py lifespan, after existing setup:
+### chat.html (Template)
 
-if resolved_settings.quads.enabled:
-    quads_http_client = httpx.AsyncClient(...)
-    quads_client = QUADSClient(resolved_settings.quads)
-    quads_poller = QUADSPoller(quads_client, resolved_settings.quads)
-    await quads_poller.start()
-    app.state.quads_poller = quads_poller
-else:
-    app.state.quads_poller = None
+Follows the exact same pattern as `dashboard.html` and `node_detail.html`:
+- Same `<head>` block (fonts, CSS links, theme init script)
+- Same `<nav class="top-bar">` with brand + nav links + theme toggle
+- Page-specific content in `<div class="dashboard">` (reuse the layout class)
+- Template variables: none needed (model list fetched via JS, same as dashboard pattern)
 
-# In shutdown:
-if app.state.quads_poller:
-    await app.state.quads_poller.stop()
-    await quads_client.close()
+```html
+<!-- Key structural elements -->
+<nav class="top-bar">
+  <!-- brand, nav links (Fleet | Chat), theme toggle -->
+</nav>
+<div class="dashboard">
+  <header class="dashboard-header">
+    <h1>Chat Playground</h1>
+    <div class="header-right">
+      <select id="model-select">...</select>
+      <button id="clear-btn">Clear</button>
+    </div>
+  </header>
+  <main>
+    <div id="chat-messages" class="chat-messages">
+      <!-- message bubbles rendered by JS -->
+    </div>
+    <form id="chat-input-form" class="chat-input-form">
+      <textarea id="chat-input" rows="1" placeholder="Type a message..."></textarea>
+      <button type="submit" id="send-btn">Send</button>
+    </form>
+  </main>
+</div>
 ```
 
-## Admin API Changes
+### chat.js (JavaScript Module)
 
-The existing `GET /admin/nodes` returns `list[AdminNodeResponse]` with only etcd-registered nodes. This changes to return `list[UnifiedNodeResponse]` with merged QUADS + etcd data.
+Responsibilities:
+1. Fetch model list on load, populate selector
+2. Manage conversation array (in-memory)
+3. Handle form submission (send message)
+4. Execute streaming fetch to `/v1/chat/completions`
+5. Parse SSE events, render tokens
+6. Handle errors (network, model unavailable, proxy errors)
+7. Auto-resize textarea, scroll management
+8. Abort in-flight request on new send or clear
 
-```python
-@admin_router.get("/admin/nodes")
-async def list_nodes(
-    registry: NodeRegistry = Depends(get_registry),
-    quads_poller: QUADSPoller | None = Depends(get_quads_poller),
-    node_selector: NodeSelector = Depends(get_node_selector),
-    cb_registry: CircuitBreakerRegistry = Depends(get_circuit_breaker_registry),
-    provisioner: NodeProvisioner = Depends(get_provisioner),
-) -> list[UnifiedNodeResponse]:
-    quads_hosts = quads_poller.get_hosts() if quads_poller else []
-    registry_nodes = registry.get_all()
-    # ... merge and return
+**Does NOT duplicate:** `showToast()` -- the chat page can include its own minimal version or inline it. The dashboard's toast is in `dashboard.js` (not a shared module), and the chat page has different toast needs (error display during streaming). Keep it self-contained rather than extracting a shared module for two toast call sites.
+
+### chat.css (Styles)
+
+Imports design tokens from `dashboard.css` (CSS custom properties are inherited). Chat-specific styles:
+
+```css
+/* Chat-specific layout -- uses existing --surface, --border, --text tokens */
+.chat-messages { /* scrollable message area */ }
+.chat-bubble { /* message bubble base */ }
+.chat-bubble-user { /* right-aligned, primary background */ }
+.chat-bubble-assistant { /* left-aligned, surface background */ }
+.chat-input-form { /* sticky bottom input bar */ }
+.chat-streaming { /* pulsing cursor indicator during streaming */ }
 ```
 
-**Backward compatibility note:** The response schema changes from `AdminNodeResponse` to `UnifiedNodeResponse`. Since the only consumer is the dashboard JS, and we are modifying that too, this is not a breaking change for external clients (there are none -- internal network only).
+The chat page links BOTH `dashboard.css` (for tokens, top-bar, card, toast styles) and `chat.css` (for chat-specific layout).
 
-## Dashboard UI Changes
+## Navigation Update
 
-### Remove
-- The standalone "Provision Node" form (`<section class="card">` with hostname input)
+The top-bar currently has brand + theme toggle with no page navigation. Adding a chat page requires nav links.
 
-### Modify
-- Node table gains a "Source" column (QUADS / etcd / both)
-- Status column shows the unified state (available, assigned, healthy, unhealthy, etc.)
-- Actions column shows state-appropriate buttons:
-  - Available: "Setup" button (calls `POST /admin/nodes/setup`)
-  - Healthy: "Teardown" button (calls `DELETE /admin/nodes/{id}`)
-  - Unhealthy: "Teardown" button
-  - Provisioning: step progress text, no action buttons
-  - Assigned/Broken/Retired: no action buttons
+```html
+<!-- Updated top-bar pattern (all three templates) -->
+<nav class="top-bar" aria-label="Primary">
+  <div class="brand">...</div>
+  <div class="nav-links">
+    <a href="/dashboard" class="nav-link">Fleet</a>
+    <a href="/dashboard/chat" class="nav-link">Chat</a>
+  </div>
+  <button class="theme-toggle">...</button>
+</nav>
+```
 
-### JS Changes
-- Fetch loop already calls `/admin/nodes` -- no new endpoint needed
-- Node row rendering function gains state-based action button logic
-- Toast notifications already exist from v1.2 -- reuse for setup/teardown feedback
+Active state via template variable or URL check in JS. Keep it simple -- CSS class on current page link or check `location.pathname` in the inline script.
+
+## Error Handling
+
+| Error | Detection | User-Visible Behavior |
+|-------|-----------|----------------------|
+| No models available | `GET /v1/models` returns empty `data[]` | Model selector shows "No models available", send disabled |
+| Model goes unhealthy mid-conversation | `POST /v1/chat/completions` returns 503 | Error message in chat area, model selector refreshes |
+| Network error during streaming | `reader.read()` throws | Error message appended to assistant bubble, retry possible |
+| SSE error event from proxy | `data` contains error JSON (proxy wraps backend errors) | Parse error, display in chat as error bubble |
+| Request aborted (user clicked stop/clear) | `AbortController.abort()` | Clean up partial response, re-enable input |
+
+### AbortController for In-Flight Requests
+
+```javascript
+let currentAbortController = null;
+
+async function sendMessage(content) {
+  if (currentAbortController) currentAbortController.abort();
+  currentAbortController = new AbortController();
+
+  const response = await fetch("/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: currentModel, messages: conversationMessages, stream: true }),
+    signal: currentAbortController.signal,
+  });
+  // ... stream processing
+}
+```
+
+This handles: stop button, clear conversation while streaming, switching models while streaming.
+
+## Patterns to Follow
+
+### Pattern 1: Same Template/JS/CSS Split as Dashboard
+
+**What:** Jinja2 renders HTML shell, JS fetches data and renders dynamically.
+**Why:** Proven in v1.1-v1.3 across dashboard and node_detail. No build step, no framework.
+**Apply to:** Chat page uses the same structure.
+
+### Pattern 2: Vanilla `fetch()` for API Calls
+
+**What:** Direct `fetch()` calls to `/v1/*` endpoints, same-origin.
+**Why:** No CORS issues (same origin). No API key needed (internal network, no auth in v1). Already established in `dashboard.js`.
+
+### Pattern 3: CSS Custom Properties for Theming
+
+**What:** All colors reference `--primary`, `--surface`, `--text`, etc.
+**Why:** Dark/light mode toggle already works via `[data-theme]`. Chat CSS inherits this automatically.
+
+## Anti-Patterns to Avoid
+
+### Anti-Pattern: Adding a Backend "Chat Session" Layer
+**What:** Creating a chat session model, storing conversation server-side, adding session management endpoints.
+**Why bad:** Requirements say "in-session, not persisted." The OpenAI protocol is stateless -- client sends full message history. Adding server-side sessions creates state management complexity, memory growth, cleanup concerns.
+**Instead:** Conversation array lives in browser JS memory. Page refresh clears it. Done.
+
+### Anti-Pattern: WebSocket Chat Protocol
+**What:** Adding a WebSocket endpoint that wraps the SSE proxy.
+**Why bad:** Adds a protocol translation layer (SSE -> WS -> browser). Two connection types to maintain. The proxy already speaks SSE perfectly. `fetch()` + `ReadableStream` consumes SSE natively.
+**Instead:** Direct `fetch()` POST to `/v1/chat/completions` with stream reader.
+
+### Anti-Pattern: Shared JS Module Extraction
+**What:** Extracting `showToast()`, action buttons, etc. into a shared module before the chat page needs them.
+**Why bad:** Two pages sharing a toast function is not worth a module system. The dashboard and chat pages have different concerns. Premature extraction creates coupling.
+**Instead:** Chat page has its own self-contained `chat.js`. If a third page appears, consider extraction then.
+
+### Anti-Pattern: Markdown Rendering Library
+**What:** Adding a markdown parser (marked.js, etc.) for assistant responses.
+**Why bad:** Adds a dependency. LLM responses may contain markdown, but rendering plain text is functional and simpler. The requirement is "streaming response display," not "rich text rendering."
+**Instead:** Render as plain text with `textContent`. Add markdown rendering later if users request it, and only then evaluate whether `<pre>` blocks for code and basic formatting suffice before pulling in a library.
 
 ## File Layout
 
 ```
 inference_proxy/
-    quads/                       # NEW package
-        __init__.py
-        client.py                # QUADSClient (async HTTP to QUADS API)
-        poller.py                # QUADSPoller (background cache)
-    models/
-        quads.py                 # NEW: QUADSHost Pydantic model
-        admin.py                 # MODIFY: add UnifiedNodeResponse
-    config/
-        settings.py              # MODIFY: add QUADSSettings
-        dependencies.py          # MODIFY: add get_quads_poller()
     api/
-        admin.py                 # MODIFY: merge logic in GET /admin/nodes
-        merge.py                 # NEW: merge_node_list() function
+        dashboard.py             # MODIFY: add GET /dashboard/chat route
     templates/
-        dashboard.html           # MODIFY: unified table, inline actions
-    main.py                      # MODIFY: create QUADSClient/Poller in lifespan
+        dashboard.html           # MODIFY: add nav links
+        node_detail.html         # MODIFY: add nav links
+        chat.html                # NEW: chat page template
+    static/
+        css/
+            dashboard.css        # MODIFY: add .nav-links styles
+            chat.css             # NEW: chat-specific styles
+        js/
+            dashboard.js         # UNCHANGED
+            node_detail.js       # UNCHANGED
+            chat.js              # NEW: SSE consumer, conversation state, DOM rendering
 ```
 
-New files: 4 (`client.py`, `poller.py`, `quads.py`, `merge.py`).
-Modified files: 5 (`settings.py`, `dependencies.py`, `admin.py`, `dashboard.html`, `main.py`).
-
-## Anti-Patterns to Avoid
-
-### Anti-Pattern: Writing QUADS Data to etcd or NodeRegistry
-**What:** Syncing QUADS hosts into etcd so the watcher picks them up.
-**Why bad:** etcd is the source of truth for provisioned nodes. Mixing QUADS discovery data into it conflates "what exists" with "what is running." Creates ghost nodes that the health checker tries to probe.
-**Instead:** Keep QUADS data in a separate in-memory cache. Merge at read time.
-
-### Anti-Pattern: Calling QUADS API on Every Dashboard Poll
-**What:** Making HTTP calls to QUADS inside the `/admin/nodes` handler.
-**Why bad:** Couples dashboard latency to QUADS API latency. Multiple dashboard tabs multiply QUADS API load. QUADS outage makes the entire node list fail.
-**Instead:** Background poller with cached results. Dashboard reads from cache.
-
-### Anti-Pattern: Making QUADSClient Synchronous
-**What:** Using `requests` or sync httpx for QUADS API calls.
-**Why bad:** Would need `asyncio.to_thread()` wrapping (like etcd3gw). httpx.AsyncClient is already in the stack and the poller runs on the event loop.
-**Instead:** Use httpx.AsyncClient natively. The poller is an asyncio.Task, not a thread.
-
-### Anti-Pattern: Tight Coupling Between Merge Logic and Admin Route
-**What:** Putting all merge logic inline in the route handler.
-**Why bad:** Merge logic is testable business logic. Inline in the handler makes it harder to test without HTTP fixtures.
-**Instead:** Extract `merge_node_list()` into `api/merge.py`. Pure function, easy to unit test.
+New files: 3 (`chat.html`, `chat.js`, `chat.css`).
+Modified files: 3 (`dashboard.py`, `dashboard.html`, `node_detail.html`) + minor CSS additions to `dashboard.css`.
 
 ## Build Order (Suggested Phase Structure)
 
 Based on dependency analysis:
 
-1. **QUADSClient + QUADSHost model + QUADSSettings** -- Foundation. No integration with existing code yet. Fully testable in isolation with httpx mocking.
+1. **Nav links + chat route + empty template** -- Wire `GET /dashboard/chat` in `dashboard.py`, add nav links to all templates, create bare `chat.html` with layout but no functionality. Deployable: clicking "Chat" shows a placeholder page.
 
-2. **QUADSPoller + lifespan wiring** -- Depends on QUADSClient. Adds background polling. Dashboard still shows old data at this point.
+2. **Model selector + chat layout** -- Fetch `/v1/models` on page load, populate `<select>`. Build the chat message area and input form HTML/CSS. No streaming yet.
 
-3. **UnifiedNodeResponse model + merge function** -- Pure data transformation. Testable without HTTP. Depends on QUADSHost existing.
+3. **Streaming SSE consumer** -- Implement `fetch()` + `ReadableStream` SSE parsing in `chat.js`. Send messages, parse tokens, render to DOM. This is the core feature.
 
-4. **Admin API modification** -- Wire merge into `GET /admin/nodes`. Depends on poller and merge function. Existing dashboard JS breaks at this point (schema changed).
+4. **Polish: error handling, abort, UX** -- AbortController for stop/clear, error display, auto-resize textarea, scroll management, keyboard shortcuts (Enter to send, Shift+Enter for newline), empty state messaging.
 
-5. **Dashboard UI update** -- Remove setup form, add inline actions, update table rendering for unified response. Fix the JS to match new schema. This is the user-visible deliverable.
-
-Each phase can be tested and committed independently. Phase 4-5 should ship together to avoid a broken dashboard window.
+Each phase is independently testable and shippable. Phase 3 is the critical path -- phases 1-2 are scaffolding, phase 4 is polish.
 
 ## Sources
 
-- [QUADS API documentation](https://github.com/redhat-performance/quads/blob/master/docs/quads-api.md) - HIGH confidence
-- [QUADS server blueprints (hosts)](https://github.com/redhat-performance/quads/blob/latest/src/quads/server/blueprints/hosts.py) - HIGH confidence
-- [QUADS server blueprints (available)](https://github.com/redhat-performance/quads/blob/latest/src/quads/server/blueprints/available.py) - HIGH confidence
-- [QUADS Python client (quads_api.py)](https://github.com/redhat-performance/quads/blob/latest/src/quads/quads_api.py) - HIGH confidence
-- [QUADS 2.2 release (GPU awareness)](https://github.com/redhat-performance/quads/releases/tag/v2.2.4) - MEDIUM confidence
 - Existing codebase: `inference_proxy/` source files - HIGH confidence
+- [MDN: ReadableStream](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) - HIGH confidence
+- [MDN: Using readable streams](https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams) - HIGH confidence
+- [MDN: AbortController](https://developer.mozilla.org/en-US/docs/Web/API/AbortController) - HIGH confidence
+- [OpenAI streaming API docs](https://platform.openai.com/docs/api-reference/streaming) - HIGH confidence
+- vLLM OpenAI-compatible SSE format matches OpenAI spec - HIGH confidence (verified in existing `routes.py` SSE handling)
