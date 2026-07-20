@@ -190,9 +190,13 @@ function createActionButton(action, nodeId) {
   btn.type = "button";
   btn.className = config.css;
   btn.textContent = config.label;
-  btn.addEventListener("click", function () {
+  btn.addEventListener("click", async function () {
     btn.disabled = true;
-    handleAction(action, nodeId);
+    try {
+      await handleAction(action, nodeId);
+    } finally {
+      btn.disabled = false;
+    }
   });
   return btn;
 }

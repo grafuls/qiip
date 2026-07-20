@@ -281,7 +281,7 @@ class TestTasksEndpoint:
             "started_at": "2026-07-07T12:00:00Z",
             "updated_at": "2026-07-07T12:05:00Z",
         }
-        mock_provisioner._etcd_client.get_prefix.return_value = [
+        mock_provisioner.list_tasks_raw.return_value = [
             (json.dumps(task_data).encode(), {"key": b"/provisioning/gpu01"}),
         ]
 
@@ -297,7 +297,7 @@ class TestTasksEndpoint:
         client: TestClient,
         mock_provisioner: MagicMock,
     ) -> None:
-        mock_provisioner._etcd_client.get_prefix.return_value = []
+        mock_provisioner.list_tasks_raw.return_value = []
         response = client.get("/admin/provisioning/tasks")
         assert response.status_code == 200
         assert response.json() == []

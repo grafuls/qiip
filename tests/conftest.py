@@ -9,7 +9,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from inference_proxy.config.dependencies import (
     get_circuit_breaker_registry,
@@ -135,6 +135,7 @@ def app(
     application.dependency_overrides[get_unified_node_service] = lambda: _unified_svc
     mock_provisioner = MagicMock()
     mock_provisioner._etcd_client = MagicMock()
+    mock_provisioner.list_tasks_raw = AsyncMock(return_value=[])
     application.state.provisioner = mock_provisioner
     application.dependency_overrides[get_provisioner] = lambda: mock_provisioner
     yield application

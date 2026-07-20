@@ -8,7 +8,6 @@ and circuit breaker state for the operations dashboard.
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -86,21 +85,26 @@ async def setup_node(
             detail=f"Setup already in progress for '{hostname}'",
         )
 
-    # D-10/D-11: live QUADS re-validation
-    if quads_client is not None:
-        try:
-            available = await quads_client.get_available()
-        except QUADSConnectionError as exc:
-            raise HTTPException(
-                status_code=503, detail="QUADS unavailable"
-            ) from exc
-        if hostname not in available:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Host '{hostname}' is not available in QUADS",
-            )
-
+    # Add before any await to close TOCTOU window (CR-01)
     pending_hosts.add(hostname)
+
+    # D-10/D-11: live QUADS re-validation
+    try:
+        if quads_client is not None:
+            try:
+                available = await quads_client.get_available()
+            except QUADSConnectionError as exc:
+                raise HTTPException(
+                    status_code=503, detail="QUADS unavailable"
+                ) from exc
+            if hostname not in available:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Host '{hostname}' is not available in QUADS",
+                )
+    except Exception:
+        pending_hosts.discard(hostname)
+        raise
 
     async def _provision_and_cleanup() -> None:
         try:
@@ -121,9 +125,7 @@ async def list_provisioning_tasks(
     provisioner: NodeProvisioner = Depends(get_provisioner),
 ) -> list[TaskStatusResponse]:
     """Return status of all provisioning/teardown operations from etcd."""
-    results = await asyncio.to_thread(
-        provisioner._etcd_client.get_prefix, "/provisioning/"
-    )
+    results = await provisioner.list_tasks_raw()
     tasks: list[TaskStatusResponse] = []
     for value_bytes, _metadata in results:
         data = json.loads(value_bytes)

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+import re
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class AdminNodeResponse(BaseModel):
@@ -55,6 +57,16 @@ class SetupRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     hostname: str
+
+    @field_validator("hostname")
+    @classmethod
+    def validate_hostname(cls, v: str) -> str:
+        v = v.strip()
+        if not v or len(v) > 253:
+            raise ValueError("hostname must be 1-253 characters")
+        if not re.fullmatch(r"[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?", v):
+            raise ValueError("hostname contains invalid characters")
+        return v
 
 
 class SetupResponse(BaseModel):

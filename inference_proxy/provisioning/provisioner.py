@@ -82,6 +82,12 @@ class NodeProvisioner:
         self._provision_started_at: datetime | None = None
         self._background_tasks: set[asyncio.Task[None]] = set()
 
+    async def list_tasks_raw(self) -> list[tuple[bytes, object]]:
+        """Return raw provisioning task entries from etcd."""
+        return await asyncio.to_thread(
+            self._etcd_client.get_prefix, "/provisioning/"
+        )
+
     async def _update_state(
         self,
         hostname: str,
