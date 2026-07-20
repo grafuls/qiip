@@ -164,7 +164,7 @@ async function refreshDashboard() {
       tbody.textContent = "";
       const emptyRow = document.createElement("tr");
       const emptyCell = document.createElement("td");
-      emptyCell.colSpan = 10;
+      emptyCell.colSpan = 7;
       emptyCell.textContent = "No nodes found";
       emptyRow.appendChild(emptyCell);
       tbody.appendChild(emptyRow);
@@ -191,10 +191,6 @@ async function refreshDashboard() {
         tdGpuModel.textContent = node.gpu_model || "—";
         tr.appendChild(tdGpuModel);
 
-        const tdEndpoint = document.createElement("td");
-        tdEndpoint.textContent = node.state === "available" ? "—" : node.endpoint;
-        tr.appendChild(tdEndpoint);
-
         const tdModel = document.createElement("td");
         tdModel.textContent = node.state === "available" ? "—" : node.model;
         tr.appendChild(tdModel);
@@ -205,21 +201,6 @@ async function refreshDashboard() {
         stateBadge.textContent = node.state;
         tdState.appendChild(stateBadge);
         tr.appendChild(tdState);
-
-        const tdConn = document.createElement("td");
-        tdConn.textContent = node.state === "available" ? "—" : node.active_connections;
-        tr.appendChild(tdConn);
-
-        const tdCb = document.createElement("td");
-        if (node.state === "available") {
-          tdCb.textContent = "—";
-        } else {
-          const cbBadge = document.createElement("span");
-          cbBadge.className = `badge badge-${node.circuit_breaker_state}`;
-          cbBadge.textContent = node.circuit_breaker_state;
-          tdCb.appendChild(cbBadge);
-        }
-        tr.appendChild(tdCb);
 
         const tdReqs = document.createElement("td");
         tdReqs.textContent = node.state === "available" ? "—" : (perNode[node.node_id] || 0);

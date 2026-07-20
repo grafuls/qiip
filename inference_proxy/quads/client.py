@@ -10,6 +10,7 @@ Per D-09: all API errors surface as QUADSConnectionError.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -72,16 +73,25 @@ class QUADSClient:
         logger.debug("fetched QUADS hosts", count=len(hosts))
         return hosts
 
-    async def get_available(self) -> list[str]:
-        """Fetch available hostnames from QUADS, normalized (D-07/D-08)."""
-        data = await self._get("/api/v3/available")
+    async def get_available(
+        self, *, end: datetime | None = None
+    ) -> list[str]:
+        """Fetch available hostnames from QUADS, normalized (D-07/D-08).
+
+        When *end* is given, passes it as a query param so QUADS returns
+        only hosts available for the entire window ``[now, end)``.
+        """
+        params: dict[str, str] = {}
+        if end is not None:
+            params["end"] = end.isoformat()
+        data = await self._get("/api/v3/available", params=params)
         return [canonical_hostname(h) for h in data]
 
-    async def _get(self, path: str) -> Any:
+    async def _get(self, path: str, params: dict[str, str] | None = None) -> Any:
         """GET a JSON endpoint, wrapping errors in QUADSConnectionError."""
         url = f"{self._base_url}{path}"
         try:
-            resp = await self._client.get(url)
+            resp = await self._client.get(url, params=params)
             resp.raise_for_status()
         except httpx.HTTPError as exc:
             raise QUADSConnectionError(str(exc)) from exc

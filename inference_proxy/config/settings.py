@@ -129,6 +129,8 @@ class QUADSSettings(BaseModel):
     timeout: float = 10.0
     poll_interval: int = 300
     verify_ssl: bool = True
+    schedule_check_interval: int = 300
+    schedule_lookahead_hours: int = 24
 
 
 class Settings(BaseSettings):

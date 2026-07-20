@@ -68,18 +68,15 @@ class TestDashboardTemplate:
 class TestDashboardTableStructure:
     """Dashboard HTML contains the node fleet table structure (NODE-01, D-01, D-02)."""
 
-    def test_contains_all_ten_column_headers(self, client: TestClient) -> None:
-        """HTML contains all 10 th elements for the node table."""
+    def test_contains_all_column_headers(self, client: TestClient) -> None:
+        """HTML contains all th elements for the node table."""
         response = client.get("/dashboard")
         headers = [
             "Node ID",
             "GPU Vendor",
             "GPU Model",
-            "Endpoint",
             "Model",
             "State",
-            "Active Connections",
-            "Circuit Breaker",
             "Requests",
             "Actions",
         ]
