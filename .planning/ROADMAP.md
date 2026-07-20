@@ -62,29 +62,41 @@
 ## Phase Details
 
 ### Phase 19: Chat Page and Streaming
+
 **Goal**: Users can have a conversation with any healthy inference model through the browser
 **Depends on**: Phase 18 (existing dashboard, proxy endpoints)
 **Requirements**: CHAT-01, CHAT-02, CHAT-03
 **Success Criteria** (what must be TRUE):
+
   1. User can navigate to the chat page from the dashboard
   2. User can type a message and receive a response from a healthy inference endpoint
   3. User can see tokens appear incrementally as the model generates its response (real-time streaming)
   4. User can select which model to chat with from available healthy models
   5. Conversation history is visible in the chat area and persists within the browser session
+
 **Plans**: 2 plans
 Plans:
+**Wave 1**
+
 - [ ] 19-01-PLAN.md — Chat page structure, server wiring, template, CSS, and tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 19-02-PLAN.md — Chat streaming interaction (chat.js: SSE, model selector, markdown, auto-scroll)
+
 **UI hint**: yes
 
 ### Phase 20: Chat Configuration
+
 **Goal**: Users can customize chat behavior and appearance
 **Depends on**: Phase 19
 **Requirements**: CFG-01, CFG-02
 **Success Criteria** (what must be TRUE):
+
   1. User can set a system prompt that is included with every request to the model
   2. Chat page follows the same dark/light mode toggle as the existing dashboard
   3. System prompt persists across messages within the same session
+
 **Plans**: TBD
 **UI hint**: yes
 
