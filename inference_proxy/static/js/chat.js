@@ -1,2 +1,215 @@
-// ponytail: placeholder — Plan 02 wires this up with streaming, model selection, and send logic
+// ponytail: vanilla fetch + ReadableStream SSE, no EventSource (POST required)
 "use strict";
+
+function showToast(message, type) {
+  var container = document.getElementById("toast-container");
+  var toast = document.createElement("div");
+  toast.className = "toast toast-" + (type || "info");
+  toast.textContent = message;
+  container.appendChild(toast);
+  requestAnimationFrame(function () { toast.classList.add("toast-visible"); });
+  setTimeout(function () {
+    toast.classList.remove("toast-visible");
+    setTimeout(function () { toast.remove(); }, 300);
+  }, 4000);
+}
+
+var messages = [];
+var messageArea;
+var messageAreaInner;
+var emptyState;
+var chatInput;
+var sendBtn;
+var modelSelect;
+var streaming = false;
+
+function isNearBottom(el, threshold) {
+  return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+}
+
+function hideEmptyState() {
+  if (emptyState && emptyState.style.display !== "none") {
+    emptyState.style.display = "none";
+  }
+}
+
+function addMessage(role, content) {
+  hideEmptyState();
+  var bubble = document.createElement("div");
+  bubble.className = "message-bubble bubble-" + role;
+  if (role === "user") {
+    bubble.textContent = content;
+  } else {
+    // ponytail: marked.parse for markdown; XSS accepted per threat model T-19-03 (internal tool)
+    bubble.innerHTML = marked.parse(content || "");
+  }
+  messageAreaInner.appendChild(bubble);
+  messageArea.scrollTop = messageArea.scrollHeight;
+  return bubble;
+}
+
+function setInputEnabled(enabled) {
+  sendBtn.disabled = !enabled;
+  chatInput.disabled = !enabled;
+}
+
+async function streamResponse(bubble) {
+  var rawText = "";
+  var cursor = document.createElement("span");
+  cursor.className = "streaming-cursor";
+  bubble.appendChild(cursor);
+
+  try {
+    var resp = await fetch("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: modelSelect.value,
+        messages: messages,
+        stream: true,
+      }),
+    });
+
+    if (!resp.ok) {
+      var errData = await resp.json().catch(function () { return {}; });
+      var errMsg = (errData.error && errData.error.message) || "Request failed: HTTP " + resp.status;
+      bubble.textContent = errMsg;
+      bubble.classList.add("bubble-error");
+      return;
+    }
+
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = "";
+
+    while (true) {
+      var result = await reader.read();
+      if (result.done) break;
+
+      buffer += decoder.decode(result.value, { stream: true });
+      var lines = buffer.split("\n");
+      // ponytail: last element may be incomplete line, keep in buffer
+      buffer = lines.pop();
+
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i].trim();
+        if (!line.startsWith("data: ")) continue;
+        var data = line.slice(6);
+        if (data === "[DONE]") continue;
+
+        try {
+          var parsed = JSON.parse(data);
+          if (parsed.error && parsed.error.message) {
+            bubble.textContent = parsed.error.message;
+            bubble.classList.add("bubble-error");
+            return;
+          }
+          var delta = parsed.choices && parsed.choices[0] && parsed.choices[0].delta;
+          if (delta && delta.content) {
+            rawText += delta.content;
+            var shouldScroll = isNearBottom(messageArea, 40);
+            bubble.innerHTML = marked.parse(rawText);
+            bubble.appendChild(cursor);
+            if (shouldScroll) {
+              messageArea.scrollTop = messageArea.scrollHeight;
+            }
+          }
+        } catch (e) {
+          // ponytail: skip malformed SSE chunks silently
+        }
+      }
+    }
+
+    // finalize
+    bubble.innerHTML = marked.parse(rawText);
+    messages.push({ role: "assistant", content: rawText });
+  } catch (err) {
+    showToast("Could not reach the server. Check your connection.", "error");
+    if (!rawText) {
+      bubble.textContent = "Connection error";
+      bubble.classList.add("bubble-error");
+    }
+  } finally {
+    var cur = bubble.querySelector(".streaming-cursor");
+    if (cur) cur.remove();
+    streaming = false;
+    setInputEnabled(true);
+    chatInput.focus();
+  }
+}
+
+function sendMessage() {
+  var text = chatInput.value.trim();
+  if (!text || streaming || !modelSelect.value) return;
+  streaming = true;
+
+  messages.push({ role: "user", content: text });
+  addMessage("user", text);
+  chatInput.value = "";
+  chatInput.style.height = "auto";
+  setInputEnabled(false);
+
+  var bubble = addMessage("assistant", "");
+  streamResponse(bubble);
+}
+
+async function loadModels() {
+  try {
+    var resp = await fetch("/v1/models");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var data = await resp.json();
+    var models = data.data || [];
+    modelSelect.textContent = "";
+
+    if (models.length === 0) {
+      var opt = document.createElement("option");
+      opt.textContent = "No models available";
+      opt.disabled = true;
+      opt.selected = true;
+      modelSelect.appendChild(opt);
+      sendBtn.disabled = true;
+      return;
+    }
+
+    for (var i = 0; i < models.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = models[i].id;
+      opt.textContent = models[i].id;
+      modelSelect.appendChild(opt);
+    }
+  } catch (e) {
+    modelSelect.textContent = "";
+    var opt = document.createElement("option");
+    opt.textContent = "No models available";
+    opt.disabled = true;
+    opt.selected = true;
+    modelSelect.appendChild(opt);
+    sendBtn.disabled = true;
+  }
+}
+
+document.addEventListener("DOMContentLoaded", function () {
+  messageArea = document.getElementById("message-area");
+  messageAreaInner = messageArea.querySelector(".message-area-inner");
+  emptyState = document.getElementById("empty-state");
+  chatInput = document.getElementById("chat-input");
+  sendBtn = document.getElementById("send-btn");
+  modelSelect = document.getElementById("model-select");
+
+  loadModels();
+
+  sendBtn.addEventListener("click", sendMessage);
+
+  chatInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
+
+  // ponytail: auto-grow textarea, capped at 200px via CSS max-height
+  chatInput.addEventListener("input", function () {
+    this.style.height = "auto";
+    this.style.height = this.scrollHeight + "px";
+  });
+});
