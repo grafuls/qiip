@@ -58,13 +58,18 @@ class UnifiedNodeService:
         result: list[AdminNodeResponse] = []
 
         for hostname, host in quads_map.items():
-            etcd_node = etcd_map.get(hostname)
+            etcd_node = etcd_map.pop(hostname, None)
             if etcd_node is not None:
                 # D-05: etcd status wins
                 result.append(self._from_etcd(etcd_node, host))
             elif hostname in available_set:
                 result.append(self._from_available(host))
             # else: not available and not in etcd -> skip
+
+        # Unmanaged nodes live in etcd but not in QUADS
+        for node in etcd_map.values():
+            if not node.managed:
+                result.append(self._from_etcd(node))
 
         return sorted(result, key=lambda r: r.node_id)
 
@@ -87,6 +92,7 @@ class UnifiedNodeService:
             gpu_vendor=host.gpu_vendor if host else None,
             gpu_model=host.gpu_model if host else None,
             gpu_count=host.gpu_count if host else None,
+            managed=node.managed,
         )
 
     @staticmethod

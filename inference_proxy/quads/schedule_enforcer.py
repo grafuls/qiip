@@ -86,6 +86,8 @@ class ScheduleEnforcer:
 
         available_set = set(available)
         for node in self._registry.get_all():
+            if not node.managed:
+                continue
             if node.status not in _ACTIONABLE_STATUSES:
                 continue
             if node.node_id in available_set:

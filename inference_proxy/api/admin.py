@@ -88,9 +88,9 @@ async def setup_node(
     # Add before any await to close TOCTOU window (CR-01)
     pending_hosts.add(hostname)
 
-    # D-10/D-11: live QUADS re-validation
+    # D-10/D-11: live QUADS re-validation (skip for unmanaged nodes)
     try:
-        if quads_client is not None:
+        if body.managed and quads_client is not None:
             try:
                 available = await quads_client.get_available()
             except QUADSConnectionError as exc:
@@ -108,7 +108,7 @@ async def setup_node(
 
     async def _provision_and_cleanup() -> None:
         try:
-            await provisioner.provision(hostname)
+            await provisioner.provision(hostname, managed=body.managed)
         finally:
             pending_hosts.discard(hostname)
 

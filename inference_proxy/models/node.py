@@ -62,3 +62,4 @@ class Node(BaseModel):
     last_heartbeat: datetime | None = None
     capabilities: NodeCapabilities = Field(default_factory=NodeCapabilities)
     active_connections: int = 0
+    managed: bool = True

@@ -181,6 +181,13 @@ async function refreshDashboard() {
         idLink.textContent = node.node_id.split(".")[0];
         idLink.title = node.node_id;
         tdId.appendChild(idLink);
+        if (node.managed === false) {
+          const tag = document.createElement("span");
+          tag.className = "badge badge-standalone";
+          tag.textContent = "standalone";
+          tdId.appendChild(document.createTextNode(" "));
+          tdId.appendChild(tag);
+        }
         tr.appendChild(tdId);
 
         const tdGpuVendor = document.createElement("td");
@@ -283,12 +290,13 @@ document.addEventListener("DOMContentLoaded", function () {
     const btn = document.getElementById("setup-btn");
     const hostname = input.value.trim();
     if (!hostname) return;
+    const standalone = document.getElementById("setup-standalone").checked;
     btn.disabled = true;
     try {
       const resp = await fetch("/admin/nodes/setup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hostname }),
+        body: JSON.stringify({ hostname, managed: !standalone }),
       });
       if (resp.ok) {
         showToast(`Setup started for ${hostname}`, "success");

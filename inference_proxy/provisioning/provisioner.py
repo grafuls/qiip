@@ -175,7 +175,7 @@ class NodeProvisioner:
         if failures:
             raise PreflightError(hostname, failures)
 
-    async def provision(self, hostname: str) -> None:
+    async def provision(self, hostname: str, *, managed: bool = True) -> None:
         """Run full provisioning sequence on *hostname*.
 
         Sequence: preflight -> register PROVISIONING -> setup.sh ->
@@ -205,6 +205,7 @@ class NodeProvisioner:
             status=NodeStatus.PROVISIONING,
             model="",
             last_heartbeat=datetime.now(timezone.utc),
+            managed=managed,
         )
         key, value = node_to_etcd(node, self._etcd_client.prefix)
         try:
@@ -221,7 +222,7 @@ class NodeProvisioner:
             await self._update_state(hostname, ProvisioningStep.HEALTH_POLL)
             await self._poll_health(hostname)
             await self._update_state(hostname, ProvisioningStep.REGISTERING)
-            await self._register_node(hostname, model)
+            await self._register_node(hostname, model, managed=managed)
             await self._update_state(hostname, ProvisioningStep.COMPLETE)
         except (RemoteCommandError, SSHConnectionError, ProvisioningError) as exc:
             await self._update_state(
@@ -300,7 +301,7 @@ class NodeProvisioner:
                     )
                 await asyncio.sleep(self._settings.health_poll_interval)
 
-    async def _register_node(self, hostname: str, model: str) -> None:
+    async def _register_node(self, hostname: str, model: str, *, managed: bool = True) -> None:
         """Register node in etcd with correct fields (D-11, D-12)."""
         node = Node(
             node_id=hostname,
@@ -308,6 +309,7 @@ class NodeProvisioner:
             status=NodeStatus.HEALTHY,
             model=model,
             last_heartbeat=datetime.now(timezone.utc),
+            managed=managed,
         )
         key, value = node_to_etcd(node, self._etcd_client.prefix)
         # ponytail: etcd3gw is sync, asyncio.to_thread wraps it (Pitfall 5)

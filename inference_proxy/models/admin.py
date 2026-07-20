@@ -35,6 +35,7 @@ class AdminNodeResponse(BaseModel):
     gpu_vendor: str | None = None
     gpu_model: str | None = None
     gpu_count: int | None = None
+    managed: bool = True
 
 
 class AdminMetricsResponse(BaseModel):
@@ -57,6 +58,7 @@ class SetupRequest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     hostname: str
+    managed: bool = True
 
     @field_validator("hostname")
     @classmethod

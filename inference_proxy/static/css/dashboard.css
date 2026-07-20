@@ -215,6 +215,15 @@ h1 {
 .setup-form button:hover:not(:disabled) { background: var(--primary-hover); }
 .setup-form button:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.standalone-label {
+  font-size: 0.75rem;
+  color: var(--text-light);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  white-space: nowrap;
+}
+
 /* --- Tables --- */
 .table-wrap { overflow-x: auto; }
 
@@ -286,6 +295,12 @@ tbody tr:last-child td { border-bottom: none; }
 .badge-provisioning {
   background: rgba(59, 130, 246, 0.08);
   color: var(--primary);
+}
+
+.badge-standalone {
+  background: rgba(139, 92, 246, 0.08);
+  color: var(--secondary);
+  font-size: 0.625rem;
 }
 
 /* --- Action buttons --- */
