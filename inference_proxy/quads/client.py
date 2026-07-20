@@ -83,7 +83,7 @@ class QUADSClient:
         """
         params: dict[str, str] = {}
         if end is not None:
-            params["end"] = end.isoformat()
+            params["end"] = end.strftime("%Y-%m-%dT%H:%M")
         data = await self._get("/api/v3/available", params=params)
         return [canonical_hostname(h) for h in data]
 
