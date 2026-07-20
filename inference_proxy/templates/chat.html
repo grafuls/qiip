@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>QUADS -- Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Open+Sans:wght@400;500;600;700&family=Poppins:wght@500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/dashboard.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/chat.css') }}">
+    <script>var __t=localStorage.getItem('theme')||'dark';document.documentElement.dataset.theme=__t;</script>
+</head>
+<body>
+    <nav class="top-bar" aria-label="Primary">
+        <div class="brand">
+            <span class="brand-icon" aria-hidden="true">Q</span>
+            QUADS
+            <span class="brand-sep" aria-hidden="true"></span>
+            <span class="brand-sub">Inference Proxy</span>
+        </div>
+        <div class="nav-links">
+            <a href="/dashboard" class="nav-link">Dashboard</a>
+            <a href="/chat" class="nav-link">Chat</a>
+        </div>
+        <button class="theme-toggle" onclick="let t=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=t;localStorage.setItem('theme',t);this.textContent=t==='dark'?'☀️':'🌙'" aria-label="Toggle theme"><script>document.write(__t==='dark'?'☀️':'🌙')</script></button>
+    </nav>
+
+    <div class="chat-page">
+        <div class="model-selector-bar">
+            <select id="model-select">
+                <option value="">Loading models...</option>
+            </select>
+        </div>
+
+        <div class="message-area" id="message-area" role="log" aria-live="polite">
+            <div class="message-area-inner">
+                <div class="empty-state" id="empty-state">
+                    <h2>Start a conversation</h2>
+                    <p>Select a model above and type a message to begin.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="input-bar">
+            <textarea id="chat-input" placeholder="Type a message..." rows="1"></textarea>
+            <button id="send-btn" type="button">Send</button>
+        </div>
+    </div>
+
+    <div id="toast-container"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked@18/lib/marked.umd.min.js"></script>
+    <script src="{{ url_for('static', path='js/chat.js') }}"></script>
+</body>
+</html>
