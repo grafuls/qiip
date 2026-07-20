@@ -170,6 +170,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if resolved_settings.quads.base_url is not None:
             quads_http = httpx.AsyncClient(
                 timeout=httpx.Timeout(resolved_settings.quads.timeout),
+                verify=resolved_settings.quads.verify_ssl,
             )
             quads_client = QUADSClient(
                 quads_http, resolved_settings.quads.base_url

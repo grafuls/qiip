@@ -3,7 +3,7 @@
 Tests cover:
 - GET /dashboard returns 200 with text/html content type (DASH-01)
 - Dashboard served by same app as API (DASH-03)
-- HTML contains Simple.css CDN link and dashboard assets (TMPL-01, TMPL-02)
+- HTML contains Google Fonts and dashboard assets (TMPL-01, TMPL-02)
 - Table structure with 10 column headers including GPU Vendor, GPU Model, State, Actions (NODE-01)
 - Badge CSS classes for status, circuit breaker, and provisioning states (NODE-02)
 - Manual setup toggle and QUADS status element (D-04, D-05, D-09)
@@ -42,10 +42,10 @@ class TestDashboardRoute:
 class TestDashboardTemplate:
     """Dashboard HTML includes expected asset references (TMPL-01, TMPL-02)."""
 
-    def test_contains_simple_css_cdn_link(self, client: TestClient) -> None:
-        """HTML contains the Simple.css CDN link."""
+    def test_contains_google_fonts_link(self, client: TestClient) -> None:
+        """HTML contains Google Fonts link for Open Sans, Poppins, IBM Plex Mono."""
         response = client.get("/dashboard")
-        assert "cdn.simplecss.org/simple.css" in response.text
+        assert "fonts.googleapis.com" in response.text
 
     def test_contains_dashboard_css_link(self, client: TestClient) -> None:
         """HTML contains link to dashboard.css."""
@@ -57,12 +57,12 @@ class TestDashboardTemplate:
         response = client.get("/dashboard")
         assert "dashboard.js" in response.text
 
-    def test_simple_css_loaded_before_dashboard_css(self, client: TestClient) -> None:
-        """Simple.css CDN link appears before dashboard.css link in the HTML."""
+    def test_fonts_loaded_before_dashboard_css(self, client: TestClient) -> None:
+        """Google Fonts link appears before dashboard.css link in the HTML."""
         response = client.get("/dashboard")
-        simple_pos = response.text.index("cdn.simplecss.org/simple.css")
+        fonts_pos = response.text.index("fonts.googleapis.com")
         dashboard_pos = response.text.index("dashboard.css")
-        assert simple_pos < dashboard_pos
+        assert fonts_pos < dashboard_pos
 
 
 class TestDashboardTableStructure:
