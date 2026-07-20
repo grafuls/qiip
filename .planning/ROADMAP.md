@@ -78,7 +78,7 @@
 Plans:
 **Wave 1**
 
-- [ ] 19-01-PLAN.md — Chat page structure, server wiring, template, CSS, and tests
+- [x] 19-01-PLAN.md — Chat page structure, server wiring, template, CSS, and tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -122,5 +122,5 @@ Plans:
 | 16. Background Polling | v1.3 | 1/1 | Complete | 2026-07-16 |
 | 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete | 2026-07-16 |
 | 18. Dashboard UI Update | v1.3 | 2/2 | Complete | 2026-07-17 |
-| 19. Chat Page and Streaming | v1.4 | 0/2 | Not started | - |
+| 19. Chat Page and Streaming | v1.4 | 1/2 | In Progress|  |
 | 20. Chat Configuration | v1.4 | 0/? | Not started | - |
