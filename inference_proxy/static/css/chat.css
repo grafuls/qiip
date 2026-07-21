@@ -225,6 +225,87 @@
   margin-bottom: 0;
 }
 
+/* --- System prompt toggle --- */
+.system-prompt-toggle {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--text-light);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  transition: color 0.15s;
+}
+
+.system-prompt-toggle:hover {
+  color: var(--text);
+}
+
+.chevron {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: transform 0.2s ease;
+}
+
+.system-prompt-toggle[aria-expanded="true"] .chevron {
+  transform: rotate(180deg);
+}
+
+/* --- System prompt panel --- */
+.system-prompt-panel {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.2s ease, padding 0.2s ease;
+  padding: 0 32px;
+  background: var(--surface);
+  border-bottom: 1px solid transparent;
+}
+
+.system-prompt-panel.expanded {
+  max-height: 300px;
+  padding: 16px 32px;
+  border-bottom-color: var(--border);
+}
+
+.system-prompt-inner {
+  max-width: 768px;
+  margin: 0 auto;
+}
+
+#system-prompt {
+  width: 100%;
+  min-height: 72px;
+  max-height: 200px;
+  resize: vertical;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  font-family: 'Open Sans', sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--bg);
+  outline: none;
+}
+
+#system-prompt:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+#system-prompt::placeholder {
+  color: var(--disabled);
+}
+
 /* --- Responsive --- */
 @media (max-width: 768px) {
   .model-selector-bar {
@@ -242,6 +323,14 @@
   .input-bar {
     padding: 16px;
   }
+
+  .system-prompt-panel {
+    padding: 0 16px;
+  }
+
+  .system-prompt-panel.expanded {
+    padding: 16px;
+  }
 }
 
 /* --- Reduced motion --- */
@@ -255,6 +344,18 @@
   }
 
   .nav-link {
+    transition: none;
+  }
+
+  .system-prompt-panel {
+    transition: none;
+  }
+
+  .chevron {
+    transition: none;
+  }
+
+  .system-prompt-toggle {
     transition: none;
   }
 }

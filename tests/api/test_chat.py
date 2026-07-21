@@ -93,6 +93,45 @@ class TestChatTemplate:
         assert 'id="toast-container"' in response.text
 
 
+class TestChatSystemPrompt:
+    """System prompt HTML elements are present with correct attributes (CFG-01, CFG-02)."""
+
+    def test_contains_system_prompt_toggle(self, client: TestClient) -> None:
+        """HTML contains button with class='system-prompt-toggle' (CFG-01)."""
+        response = client.get("/chat")
+        assert 'class="system-prompt-toggle"' in response.text
+
+    def test_toggle_has_aria_expanded(self, client: TestClient) -> None:
+        """Toggle button has aria-expanded='false' by default (CFG-01)."""
+        response = client.get("/chat")
+        assert 'aria-expanded="false"' in response.text
+
+    def test_toggle_has_aria_controls(self, client: TestClient) -> None:
+        """Toggle button has aria-controls linking to panel (CFG-01)."""
+        response = client.get("/chat")
+        assert 'aria-controls="system-prompt-panel"' in response.text
+
+    def test_contains_system_prompt_panel(self, client: TestClient) -> None:
+        """HTML contains collapsible panel div (CFG-01)."""
+        response = client.get("/chat")
+        assert 'id="system-prompt-panel"' in response.text
+
+    def test_contains_system_prompt_textarea(self, client: TestClient) -> None:
+        """HTML contains system prompt textarea (CFG-01)."""
+        response = client.get("/chat")
+        assert 'id="system-prompt"' in response.text
+
+    def test_textarea_has_aria_label(self, client: TestClient) -> None:
+        """System prompt textarea has aria-label for accessibility (CFG-02)."""
+        response = client.get("/chat")
+        assert 'aria-label="System prompt"' in response.text
+
+    def test_textarea_has_placeholder(self, client: TestClient) -> None:
+        """System prompt textarea has placeholder text (CFG-01)."""
+        response = client.get("/chat")
+        assert 'placeholder="You are a helpful assistant..."' in response.text
+
+
 class TestChatNavigation:
     """Both pages have cross-navigation links (D-03)."""
 

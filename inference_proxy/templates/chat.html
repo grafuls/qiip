@@ -31,6 +31,13 @@
             <select id="model-select">
                 <option value="">Loading models...</option>
             </select>
+            <button class="system-prompt-toggle" aria-expanded="false" aria-controls="system-prompt-panel">System Prompt <span class="chevron" aria-hidden="true"></span></button>
+        </div>
+
+        <div id="system-prompt-panel" class="system-prompt-panel">
+            <div class="system-prompt-inner">
+                <textarea id="system-prompt" aria-label="System prompt" rows="3" placeholder="You are a helpful assistant..."></textarea>
+            </div>
         </div>
 
         <div class="message-area" id="message-area" role="log" aria-live="polite">
