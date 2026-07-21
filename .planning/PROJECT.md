@@ -61,7 +61,12 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Active
 
-No active requirements — v1.4 milestone complete.
+**v1.5 Node Setup Enhancements:**
+- [ ] Redfish power on/off/restart
+- [ ] Redfish power status query
+- [ ] Auto-power-on before SSH provisioning
+- [ ] Step-level error capture for failed provisioning steps
+- [ ] Dashboard error display for provisioning failures
 
 ### Out of Scope
 
@@ -72,6 +77,17 @@ No active requirements — v1.4 milestone complete.
 - Multi-tenancy — future work
 - Geographic distribution — future work
 - Model caching/optimization — future work
+
+## Current Milestone: v1.5 Node Setup Enhancements
+
+**Goal:** Add Redfish-based power management and improve provisioning failure diagnostics
+
+**Target features:**
+- Power on/off/restart via Redfish API (On, ForceOff, GracefulRestart, ForceRestart)
+- Power status query (On/Off/PoweringOn/PoweringOff)
+- Auto-power-on before SSH provisioning starts
+- Step-level error capture for failed provisioning steps
+- Dashboard error display showing failure details inline
 
 ## Context
 
@@ -146,4 +162,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-21 after v1.4 Chatbot Playground milestone*
+*Last updated: 2026-07-21 after v1.5 Node Setup Enhancements milestone start*

@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Chatbot Playground
-status: Awaiting next milestone
-stopped_at: Completed 20-01-PLAN.md
-last_updated: "2026-07-21T15:00:00.965Z"
-last_activity: 2026-07-21 — Milestone v1.4 completed and archived
+milestone: v1.5
+milestone_name: Node Setup Enhancements
+status: planning
+last_updated: "2026-07-21T16:41:00.616Z"
+last_activity: 2026-07-21
 progress:
-  total_phases: 2
-  completed_phases: 2
-  total_plans: 3
-  completed_plans: 3
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-07-20)
 
 ## Current Position
 
-Phase: Milestone v1.4 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-21 — Milestone v1.4 completed and archived
+Status: Defining requirements
+Last activity: 2026-07-21 — Milestone v1.5 started
 
 ## Performance Metrics
 
