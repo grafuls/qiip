@@ -22,6 +22,8 @@ var chatInput;
 var sendBtn;
 var modelSelect;
 var streaming = false;
+var systemPromptTextarea;
+var systemPromptToggle;
 
 function isNearBottom(el, threshold) {
   return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
@@ -63,11 +65,14 @@ async function streamResponse(bubble) {
     var resp = await fetch("/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: modelSelect.value,
-        messages: messages,
-        stream: true,
-      }),
+      body: JSON.stringify(function () {
+        var payloadMessages = messages.slice();
+        var sp = systemPromptTextarea ? systemPromptTextarea.value.trim() : "";
+        if (sp) {
+          payloadMessages.unshift({ role: "system", content: sp });
+        }
+        return { model: modelSelect.value, messages: payloadMessages, stream: true };
+      }()),
     });
 
     if (!resp.ok) {
@@ -195,6 +200,28 @@ document.addEventListener("DOMContentLoaded", function () {
   chatInput = document.getElementById("chat-input");
   sendBtn = document.getElementById("send-btn");
   modelSelect = document.getElementById("model-select");
+  systemPromptTextarea = document.getElementById("system-prompt");
+  systemPromptToggle = document.querySelector(".system-prompt-toggle");
+
+  // ponytail: restore saved system prompt from localStorage
+  var savedPrompt = localStorage.getItem("systemPrompt");
+  if (savedPrompt !== null && systemPromptTextarea) {
+    systemPromptTextarea.value = savedPrompt;
+  }
+
+  if (systemPromptToggle) {
+    systemPromptToggle.addEventListener("click", function () {
+      var expanded = this.getAttribute("aria-expanded") === "true";
+      this.setAttribute("aria-expanded", expanded ? "false" : "true");
+      document.getElementById("system-prompt-panel").classList.toggle("expanded");
+    });
+  }
+
+  if (systemPromptTextarea) {
+    systemPromptTextarea.addEventListener("input", function () {
+      localStorage.setItem("systemPrompt", this.value);
+    });
+  }
 
   loadModels();
 
