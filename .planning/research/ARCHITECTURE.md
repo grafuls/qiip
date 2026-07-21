@@ -1,399 +1,545 @@
-# Architecture: Chatbot Playground (v1.4)
+# Architecture: Redfish Power Management & Provisioning Diagnostics (v1.5)
 
-**Domain:** Chat UI integration into existing LLM inference gateway dashboard
-**Researched:** 2026-07-20
+**Domain:** BMC power management integration into existing provisioning pipeline
+**Researched:** 2026-07-21
 **Overall confidence:** HIGH
 
-## Decision: Browser-Side SSE Consumer Against Existing Proxy Endpoint
+## Decision: Direct httpx Calls to Redfish REST API
 
-The chat page is a pure frontend addition. The backend already has everything needed: `POST /v1/chat/completions` with `stream: true` returns SSE, and `GET /v1/models` returns available models. No new backend endpoints required.
+The Redfish API is a simple REST protocol. Power state is a GET returning a JSON field. Power actions are a POST with a `ResetType` body. That is the entire surface area needed.
 
-The only backend change is one new route handler in `dashboard.py` that serves a `chat.html` Jinja2 template, plus a nav link added to the top bar across all templates. The real work is in a new `chat.js` and chat-specific CSS.
+The project already has httpx. Adding `python-redfish-library` or importing `badfish` (which uses aiohttp) would add a dependency for what amounts to two HTTP calls. Use httpx directly with basic auth, same as the QUADS client pattern.
 
-**Why not WebSocket?** The proxy speaks SSE (OpenAI protocol). Adding a WebSocket layer between browser and proxy creates a translation hop that must parse SSE and re-emit over WS. The browser can consume SSE directly from `/v1/chat/completions` -- zero backend changes, zero protocol translation.
+**Why not Badfish as a library?** Badfish is the QUADS ecosystem's Redfish tool (same GitHub org). It uses aiohttp internally -- adding aiohttp as a transitive dependency violates the "zero new deps when httpx can do it" constraint established in v1.3. Badfish is also focused on boot order management; its power operations are a subset of its CLI. The gateway needs two Redfish calls total. Direct httpx is less code than wiring Badfish's factory pattern.
 
-**Why not `EventSource`?** The browser's `EventSource` API only supports GET requests. The OpenAI chat completions endpoint is POST. Use `fetch()` with `ReadableStream` instead -- native in all modern browsers, no library needed.
+**Why not python-redfish-library?** It is synchronous (uses requests internally). The gateway is async-first. Wrapping sync calls in `asyncio.to_thread()` is workable (the etcd3gw precedent) but unnecessary complexity when httpx.AsyncClient handles this natively.
 
 ## Architecture Overview
 
 ```
-              +----------------------------------------------------+
-              |               FastAPI Gateway                      |
-              |                                                    |
-              |  +----------+  +-----------+  +------------------+ |
-              |  | /v1/*    |  | /admin/*  |  | /dashboard       | |
-              |  | (proxy)  |  | (fleet)   |  | /dashboard/chat  | |
-              |  +----------+  +-----------+  +------------------+ |
-              |       ^                              |             |
-              |       |  POST /v1/chat/completions   |             |
-              |       |  GET /v1/models              |             |
-              |       +------------------------------+             |
-              |                                                    |
-              |  (No new backend logic. Chat page calls existing   |
-              |   /v1/* endpoints directly from browser JS.)       |
-              +----------------------------------------------------+
-                     |
-              Browser (chat.js)
-                     |
-              +------v-------------------------------------------------+
-              |  1. fetch GET /v1/models  -->  populate model selector  |
-              |  2. User types message, clicks send                    |
-              |  3. fetch POST /v1/chat/completions {stream: true}     |
-              |     with full conversation history as messages[]        |
-              |  4. ReadableStream reader parses SSE text/event-stream |
-              |  5. Extract delta.content from each chunk              |
-              |  6. Append tokens to assistant message bubble in DOM   |
-              |  7. On [DONE], mark message complete                   |
-              +--------------------------------------------------------+
+                     +---------------------------------------------+
+                     |            FastAPI Gateway                   |
+                     |                                              |
+                     |  provisioning/             redfish/          |
+                     |    provisioner.py             client.py      |
+                     |    (orchestrator)             (thin httpx    |
+                     |         |                      wrapper)      |
+                     |         |                         ^          |
+                     |         +--- power_on_if_needed --+          |
+                     |         |                                    |
+                     |         +--- preflight (SSH) ----> ssh_client|
+                     |         +--- setup.sh -----------> ssh_client|
+                     |         +--- start-vllm.sh ------> ssh_client|
+                     |         +--- health poll --------> httpx     |
+                     |         +--- register -----------> etcd      |
+                     |                                              |
+                     |  api/admin.py                                |
+                     |    POST /admin/nodes/{id}/power              |
+                     |    GET  /admin/nodes/{id}/power              |
+                     |         |                                    |
+                     |         +-----> redfish/client.py            |
+                     |                     |                        |
+                     +---------------------|------------------------+
+                                           |
+                                    HTTPS (basic auth)
+                                           |
+                                    +------v------+
+                                    |  BMC/iDRAC  |
+                                    |  Redfish    |
+                                    |  endpoint   |
+                                    | mgmt-<host> |
+                                    +-------------+
 ```
 
 ## New Components
 
 | Component | Responsibility | Lives In | Communicates With |
 |-----------|---------------|----------|-------------------|
-| **Chat route** | Serve `chat.html` template | `inference_proxy/api/dashboard.py` (add route) | Jinja2Templates |
-| **chat.html** | HTML shell: nav, model selector, message list, input area | `inference_proxy/templates/chat.html` | chat.js, dashboard.css + chat CSS |
-| **chat.js** | SSE consumption, conversation state, DOM rendering | `inference_proxy/static/js/chat.js` | `/v1/models`, `/v1/chat/completions` |
-| **chat.css** | Chat-specific styles (bubbles, input area, streaming indicator) | `inference_proxy/static/css/chat.css` | dashboard.css (inherits design tokens) |
+| **RedfishClient** | GET power state, POST reset action | `inference_proxy/redfish/client.py` | BMC via httpx over HTTPS |
+| **RedfishSettings** | BMC credentials, hostname template, timeouts | `inference_proxy/config/settings.py` (new sub-model) | Consumed by RedfishClient constructor |
+| **Power admin endpoints** | HTTP API for manual power operations | `inference_proxy/api/admin.py` (new routes) | RedfishClient |
+| **Power actions in dashboard** | UI buttons for power on/off/restart | `inference_proxy/static/js/dashboard.js` (ACTION_CONFIG additions) | `/admin/nodes/{id}/power` |
 
 ### Modified Components
 
 | Component | Change | Why |
 |-----------|--------|-----|
-| `dashboard.py` | Add `GET /dashboard/chat` route | Serves chat template, follows existing pattern |
-| `dashboard.html` | Add "Chat" nav link in top-bar | Navigation between fleet and chat pages |
-| `node_detail.html` | Add "Chat" nav link in top-bar | Consistent navigation |
-| `dashboard.css` | Add nav link styles (`.nav-links`) | Top-bar gets page links between brand and theme toggle |
+| `provisioner.py` | Add `_power_on_if_needed()` before preflight | Auto-power-on before SSH provisioning |
+| `state.py` | Add `POWERING_ON` to ProvisioningStep enum | Track power-on step in provisioning state |
+| `settings.py` | Add `RedfishSettings` sub-model to root `Settings` | BMC credentials and hostname pattern |
+| `dependencies.py` | Add `get_redfish_client()` dependency provider | Inject RedfishClient into admin routes |
+| `main.py` | Create RedfishClient in lifespan, store in app.state | Same lifecycle pattern as QUADSClient |
+| `admin.py` | Add power action and power status endpoints | Expose power management to dashboard |
+| `models/admin.py` | Add `PowerActionRequest`, `PowerStatusResponse` models | Request/response types for power endpoints |
+| `dashboard.js` | Add `power_on`, `power_off`, `power_restart` to ACTION_CONFIG | Dashboard power action buttons |
+| `unified_nodes.py` | Add power actions to `_STATE_ACTIONS` for `available` state | Nodes that are off can be powered on |
+| `node_detail.js` | Show error details inline (already partially implemented) | Better error visibility |
+| `dashboard.js` | Show last error on main dashboard node row | Inline error display without navigating to detail |
 
-No changes to: `main.py`, `routes.py`, `admin.py`, `settings.py`, models, or any backend logic.
+## RedfishClient Design
 
-## Data Flow: User Input to Streamed Response
+Follows the exact pattern of `QUADSClient`: thin httpx wrapper, constructor-injected AsyncClient, typed errors.
 
-### Step 1: Page Load -- Fetch Available Models
+```python
+class RedfishError(Exception):
+    """Raised when Redfish API call fails."""
 
-```
-Browser                           Gateway
-  |                                  |
-  |-- GET /v1/models --------------->|
-  |<-- { data: [{id: "meta-llama/..."}] }
-  |                                  |
-  v                                  |
-  Populate <select> with model IDs   |
-```
+class RedfishClient:
+    """Thin async wrapper around httpx for Redfish power operations.
 
-The existing `GET /v1/models` endpoint already returns OpenAI-compatible model list, filtered to only HEALTHY nodes. No change needed.
+    Constructor-injected httpx.AsyncClient (DIP). All BMCs share
+    credentials (lab environment, same as SSH pattern).
+    """
 
-### Step 2: User Sends Message
+    def __init__(
+        self,
+        http_client: httpx.AsyncClient,
+        settings: RedfishSettings,
+    ) -> None:
+        self._client = http_client
+        self._username = settings.username
+        self._password = settings.password
+        self._bmc_template = settings.bmc_hostname_template
+        self._system_id = settings.system_id
 
-```javascript
-// Conversation state lives in JS memory (array of {role, content} objects)
-const messages = [
-  { role: "system", content: "You are a helpful assistant." },  // optional
-  { role: "user", content: "Hello" },
-  { role: "assistant", content: "Hi there!" },  // from previous exchange
-  { role: "user", content: "What is 2+2?" },    // new message
-];
-```
+    def _bmc_url(self, hostname: str, path: str) -> str:
+        bmc_host = self._bmc_template.format(hostname=hostname)
+        return f"https://{bmc_host}/redfish/v1/Systems/{self._system_id}{path}"
 
-The full conversation history is sent with every request. This is standard OpenAI protocol -- the server is stateless, the client maintains context.
+    async def get_power_state(self, hostname: str) -> str:
+        """Return PowerState (On, Off, PoweringOn, PoweringOff)."""
+        url = self._bmc_url(hostname, "")
+        resp = await self._client.get(
+            url, auth=(self._username, self._password)
+        )
+        resp.raise_for_status()
+        return resp.json()["PowerState"]
 
-### Step 3: Streaming Request via fetch + ReadableStream
-
-```javascript
-const response = await fetch("/v1/chat/completions", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    model: selectedModel,
-    messages: messages,
-    stream: true,
-  }),
-});
-
-const reader = response.body.getReader();
-const decoder = new TextDecoder();
-```
-
-**Why `fetch()` not `EventSource`?** `EventSource` only supports GET. The OpenAI API is POST. `fetch()` with `ReadableStream` is the standard approach used by every chat UI (ChatGPT, Open WebUI, etc.).
-
-### Step 4: Parse SSE Events from ReadableStream
-
-The SSE wire format from vLLM (via the proxy) looks like:
-
-```
-data: {"id":"cmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}
-
-data: {"id":"cmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hello"},"finish_reason":null}]}
-
-data: {"id":"cmpl-...","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"!"},"finish_reason":"stop"}]}
-
-data: [DONE]
-
+    async def reset(self, hostname: str, reset_type: str) -> None:
+        """POST ComputerSystem.Reset action."""
+        url = self._bmc_url(hostname, "/Actions/ComputerSystem.Reset")
+        resp = await self._client.post(
+            url,
+            json={"ResetType": reset_type},
+            auth=(self._username, self._password),
+        )
+        resp.raise_for_status()
 ```
 
-Parser logic (in `chat.js`):
+**BMC hostname derivation:** QUADS uses `mgmt-<hostname>` convention. Configurable via `bmc_hostname_template` setting with `{hostname}` placeholder, default `"mgmt-{hostname}"`. This handles the common case and lets operators override for non-standard environments.
 
-```javascript
-// ponytail: minimal SSE parser, handles split chunks across read boundaries
-let buffer = "";
-while (true) {
-  const { done, value } = await reader.read();
-  if (done) break;
-  buffer += decoder.decode(value, { stream: true });
-  const lines = buffer.split("\n");
-  buffer = lines.pop();  // keep incomplete line in buffer
-  for (const line of lines) {
-    if (!line.startsWith("data: ")) continue;
-    const data = line.slice(6);
-    if (data === "[DONE]") { /* finalize */ return; }
-    const chunk = JSON.parse(data);
-    const content = chunk.choices?.[0]?.delta?.content;
-    if (content) appendToken(content);
-  }
-}
+**System ID:** Most vendors use `/redfish/v1/Systems/1` but Dell uses `System.Embedded.1` and others vary. Configurable via `system_id` setting, default `"1"`. All lab servers are typically the same vendor, so one setting covers the fleet.
+
+**SSL verification:** BMCs use self-signed certs. The httpx.AsyncClient is created with `verify=False` (same as typical Redfish tooling). Scoped to the Redfish client's httpx instance -- the proxy client and QUADS client keep their own SSL settings.
+
+## RedfishSettings Design
+
+```python
+class RedfishSettings(BaseModel):
+    """Redfish BMC configuration.
+
+    When ``username`` is ``None`` (the default), Redfish features are
+    disabled. Setting it via ``INFERENCE_PROXY_REDFISH__USERNAME``
+    activates the integration. Same opt-in pattern as QUADSSettings.
+    """
+
+    username: str | None = None
+    password: str | None = None
+    bmc_hostname_template: str = "mgmt-{hostname}"
+    system_id: str = "1"
+    connect_timeout: float = 10.0
+    read_timeout: float = 30.0
+    power_on_wait: int = 120  # seconds to wait for power on before preflight
+    power_on_poll_interval: int = 5  # seconds between power state polls
 ```
 
-**Edge case: chunk boundaries.** A single `reader.read()` call may return a partial SSE event (the TCP segment can split anywhere). The buffer + split approach handles this correctly -- incomplete lines stay in the buffer until the next read fills them in.
+**Opt-in pattern:** When `username` is None, Redfish is disabled. The provisioner skips the power-on step. The admin power endpoints return 503 ("Redfish not configured"). Matches the QUADS opt-in pattern (`base_url: str | None = None`).
 
-### Step 5: Render Tokens to DOM
+**Credentials via env vars:** `INFERENCE_PROXY_REDFISH__USERNAME` and `INFERENCE_PROXY_REDFISH__PASSWORD`. Environment variables, not config files -- the existing pydantic-settings pattern handles this. Operators already set `INFERENCE_PROXY_QUADS__BASE_URL` the same way.
 
-Each token is appended to the current assistant message element. No full re-render per token -- just `textContent +=` or `insertAdjacentText`.
+## Provisioner Integration: Auto-Power-On
+
+The provisioning sequence gains one new step at the front:
 
 ```
-User message bubble  -->  static, added to DOM on send
-Assistant bubble     -->  created on first token, tokens appended incrementally
+PENDING -> POWERING_ON (new) -> PREFLIGHT -> UPLOADING_SCRIPTS -> ... -> COMPLETE
 ```
 
-### Step 6: On Completion
+Implementation in `provisioner.py`:
 
-When `[DONE]` arrives:
-1. Push the completed assistant message `{role: "assistant", content: fullText}` to the conversation array
-2. Re-enable the input field
-3. Scroll to bottom
+```python
+async def _power_on_if_needed(
+    self, hostname: str, redfish: RedfishClient | None
+) -> None:
+    """Check power state; if off, power on and wait."""
+    if redfish is None:
+        return  # Redfish not configured, skip
 
-## Conversation State Management
+    try:
+        state = await redfish.get_power_state(hostname)
+    except Exception:
+        logger.warning("redfish_power_check_failed", hostname=hostname)
+        return  # Best-effort: proceed to SSH preflight, which will fail
+                # if the machine is actually off
 
-**In-memory only.** Per PROJECT.md requirements: "Conversation history (in-session, not persisted)."
+    if state == "On":
+        return  # Already on
 
-```javascript
-// ponytail: conversation state is just an array. No store, no framework.
-let conversationMessages = [];
-let currentModel = null;
+    await self._update_state(hostname, ProvisioningStep.POWERING_ON)
+    await redfish.reset(hostname, "On")
 
-function addUserMessage(content) {
-  conversationMessages.push({ role: "user", content });
-  renderUserBubble(content);
-}
-
-function addAssistantMessage(content) {
-  conversationMessages.push({ role: "assistant", content });
-  // bubble was already rendered token-by-token during streaming
-}
-
-function clearConversation() {
-  conversationMessages = [];
-  // clear DOM
-}
+    # Poll until On or timeout
+    deadline = asyncio.get_running_loop().time() + self._settings.power_on_wait
+    while asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(self._settings.power_on_poll_interval)
+        try:
+            state = await redfish.get_power_state(hostname)
+            if state == "On":
+                return
+        except Exception:
+            pass  # BMC may be temporarily unresponsive during power-on
+    raise ProvisioningError(
+        f"Timed out waiting for {hostname} to power on"
+    )
 ```
 
-Model switching should clear the conversation (different models have different context windows and behaviors). Show a confirmation before clearing if there are messages.
+**Best-effort semantics:** If Redfish is not configured or the BMC is unreachable, provisioning proceeds to SSH preflight. The preflight TCP probe (port 22) will fail if the machine is actually off, giving a clear error. This avoids making Redfish a hard dependency of provisioning.
+
+**Constructor change:** `NodeProvisioner.__init__` gains an optional `redfish_client: RedfishClient | None = None` parameter. Injected in `main.py` lifespan, same as all other dependencies.
+
+## Admin API: Power Endpoints
+
+Two new routes in `admin.py`:
+
+```
+GET  /admin/nodes/{node_id}/power   -> PowerStatusResponse
+POST /admin/nodes/{node_id}/power   -> PowerActionResponse (202)
+```
+
+### GET Power Status
+
+Returns the current Redfish power state for any known host. Does not require the node to be registered in etcd (useful for checking if an available QUADS host is powered on before setup).
+
+```python
+class PowerStatusResponse(BaseModel):
+    hostname: str
+    power_state: str  # On, Off, PoweringOn, PoweringOff
+```
+
+### POST Power Action
+
+Triggers a Redfish reset action. Accepts a `ResetType` from the supported set.
+
+```python
+class PowerActionRequest(BaseModel):
+    reset_type: str  # On, ForceOff, GracefulRestart, ForceRestart
+
+class PowerActionResponse(BaseModel):
+    hostname: str
+    reset_type: str
+    status: str  # "accepted"
+```
+
+**Validation:** The endpoint validates `reset_type` against `{"On", "ForceOff", "GracefulRestart", "ForceRestart"}`. The Redfish spec defines more reset types but these four cover the use cases in PROJECT.md.
+
+**Not async background:** Unlike provisioning, power actions are fire-and-forget POST to the BMC. The Redfish POST returns quickly (the BMC handles the actual power sequence). No need for `fire_background()`.
+
+## Provisioning Error Capture Enhancement
+
+### Current State
+
+The existing `ProvisioningState` model already has `failed_step: str | None` and `error: str | None`. The provisioner populates these when exceptions occur. The node_detail.js already renders error text.
+
+### Gap
+
+The error messages are exception `str()` representations, which are sometimes terse (e.g., `"Command 'bash auto-vllm-container/setup.sh' on host1 exited with status 1"`). No stderr capture, no structured detail.
+
+### Enhancement: Capture stderr in error field
+
+When `RemoteCommandError` is raised during `_run_setup()`, the error message does not include stderr (stderr is logged but not stored). The fix is to capture the last N lines of stderr output during step execution and include them in the error field written to etcd.
+
+```python
+# In provisioner.py _run_setup method:
+stderr_lines: list[str] = []
+async for stream, line in self._ssh_client.run_streaming(
+    hostname, "bash auto-vllm-container/setup.sh"
+):
+    if stream == "stdout":
+        # ... existing step marker parsing ...
+    else:
+        stderr_lines.append(line)
+        logger.warning("setup_stderr", line=line, hostname=hostname)
+
+# On exception, include stderr context:
+# error = f"{exc}\nstderr: {chr(10).join(stderr_lines[-10:])}"
+```
+
+**Bounded:** Only last 10 stderr lines stored to keep etcd values reasonable. This is diagnostic context, not a full log.
+
+### Enhancement: Failed step name precision
+
+Currently `failed_step` is set to the exception class name (`"RemoteCommandError"`, `"SSHConnectionError"`). Change to the actual provisioning step name that was active when the failure occurred (`"uploading_scripts"`, `"nvidia_driver"`, etc.). This is more useful for operators.
+
+The provisioner already tracks which step it is in via `_update_state()`. Capture the last step name and use it as `failed_step` instead of the exception class name.
+
+### Dashboard: Inline error on main node list
+
+The main dashboard (`dashboard.js`) does not show errors -- operators must click through to node_detail to see failure details. Add a column or tooltip showing the last error for nodes in `failed` state.
+
+Implementation: The `/admin/provisioning/tasks` endpoint already returns error data. The dashboard refresh can fetch tasks alongside nodes and merge the last error for each hostname into the node row display.
+
+Alternatively, add `last_error: str | None` to `AdminNodeResponse` and populate it in `UnifiedNodeService` by checking provisioning tasks in etcd. This keeps the dashboard fetch simple (one endpoint).
+
+**Recommendation:** Add `last_error` to `AdminNodeResponse`. The unified node service already merges data from multiple sources. Adding provisioning task error lookup is a natural extension. The dashboard just renders it.
+
+## Data Flow: Power On + Provision
+
+```
+Operator clicks "Setup" on dashboard
+         |
+         v
+POST /admin/nodes/setup  {hostname: "host1.lab.example.com"}
+         |
+         v
+provisioner.provision("host1.lab.example.com")
+         |
+         +-- _power_on_if_needed(hostname, redfish_client)
+         |       |
+         |       +-- GET https://mgmt-host1.lab.example.com/redfish/v1/Systems/1
+         |       |   -> PowerState: "Off"
+         |       |
+         |       +-- POST https://mgmt-host1.lab.example.com/redfish/v1/Systems/1/Actions/ComputerSystem.Reset
+         |       |   body: {"ResetType": "On"}
+         |       |
+         |       +-- Poll GET .../Systems/1  every 5s for up to 120s
+         |       |   -> PowerState: "On"
+         |       |
+         +-- preflight(hostname)
+         |       |
+         |       +-- TCP probe port 22 (SSH reachability)
+         |       +-- SSH: nvidia-smi (GPU check)
+         |       +-- SSH: df (disk check)
+         |
+         +-- [... existing provisioning steps ...]
+```
+
+## Data Flow: Manual Power Action from Dashboard
+
+```
+Operator clicks "Power Off" on a healthy node
+         |
+         v
+POST /admin/nodes/host1.lab.example.com/power  {reset_type: "ForceOff"}
+         |
+         v
+admin.py route handler
+         |
+         +-- redfish_client.reset("host1.lab.example.com", "ForceOff")
+         |       |
+         |       +-- POST https://mgmt-host1.lab.example.com/.../ComputerSystem.Reset
+         |       |   body: {"ResetType": "ForceOff"}
+         |       |   <- 200/204 OK
+         |       |
+         +-- return PowerActionResponse(status="accepted")
+```
+
+## Data Flow: Error Display
+
+```
+Provisioning fails at nvidia_driver step
+         |
+         v
+provisioner._run_setup() catches RemoteCommandError
+         |
+         +-- _update_state(hostname, FAILED,
+         |       failed_step="nvidia_driver",
+         |       error="Command exited with status 1\nstderr: E: nvidia-driver not found...")
+         |
+         +-- etcd key /provisioning/host1 updated
+         |
+Dashboard polls /admin/nodes (includes last_error from provisioning tasks)
+         |
+         v
+Node row shows:  [host1] [NVIDIA] [A100] [—] [failed] [nvidia_driver: nvidia-driver not found...]
+                                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                                        inline error text, truncated with tooltip
+```
 
 ## Component Boundaries
 
-### chat.html (Template)
+### redfish/client.py
 
-Follows the exact same pattern as `dashboard.html` and `node_detail.html`:
-- Same `<head>` block (fonts, CSS links, theme init script)
-- Same `<nav class="top-bar">` with brand + nav links + theme toggle
-- Page-specific content in `<div class="dashboard">` (reuse the layout class)
-- Template variables: none needed (model list fetched via JS, same as dashboard pattern)
+Single responsibility: translate hostname + action into Redfish HTTP calls. Does not know about provisioning, etcd, or dashboard. Injected into provisioner and admin routes independently.
 
-```html
-<!-- Key structural elements -->
-<nav class="top-bar">
-  <!-- brand, nav links (Fleet | Chat), theme toggle -->
-</nav>
-<div class="dashboard">
-  <header class="dashboard-header">
-    <h1>Chat Playground</h1>
-    <div class="header-right">
-      <select id="model-select">...</select>
-      <button id="clear-btn">Clear</button>
-    </div>
-  </header>
-  <main>
-    <div id="chat-messages" class="chat-messages">
-      <!-- message bubbles rendered by JS -->
-    </div>
-    <form id="chat-input-form" class="chat-input-form">
-      <textarea id="chat-input" rows="1" placeholder="Type a message..."></textarea>
-      <button type="submit" id="send-btn">Send</button>
-    </form>
-  </main>
-</div>
+- Depends on: httpx, RedfishSettings
+- Depended on by: NodeProvisioner, admin power endpoints
+- Does NOT depend on: NodeRegistry, etcd, SSHClient, ProvisioningState
+
+### provisioner.py (modified)
+
+Gains `redfish_client` as an optional constructor parameter. The `provision()` method calls `_power_on_if_needed()` as the first step. If Redfish is None, the step is skipped.
+
+- New dependency: RedfishClient (optional, via constructor)
+- No change to: SSHClient, EtcdClient, ProvisioningSettings dependencies
+
+### admin.py (modified)
+
+Gains two new routes for power management. The routes use `get_redfish_client()` dependency injection, returning 503 if Redfish is not configured.
+
+### unified_nodes.py (modified)
+
+`_STATE_ACTIONS` extended: nodes in `available` state gain a `power_on` action. Nodes in `healthy`/`unhealthy` state gain `power_off` and `power_restart` actions alongside existing teardown/retry. The `failed` state shows the error.
+
+## ProvisioningStep Enum Update
+
+```python
+class ProvisioningStep(StrEnum):
+    PENDING = "pending"
+    POWERING_ON = "powering_on"    # NEW
+    PREFLIGHT = "preflight"
+    UPLOADING_SCRIPTS = "uploading_scripts"
+    # ... rest unchanged ...
 ```
 
-### chat.js (JavaScript Module)
-
-Responsibilities:
-1. Fetch model list on load, populate selector
-2. Manage conversation array (in-memory)
-3. Handle form submission (send message)
-4. Execute streaming fetch to `/v1/chat/completions`
-5. Parse SSE events, render tokens
-6. Handle errors (network, model unavailable, proxy errors)
-7. Auto-resize textarea, scroll management
-8. Abort in-flight request on new send or clear
-
-**Does NOT duplicate:** `showToast()` -- the chat page can include its own minimal version or inline it. The dashboard's toast is in `dashboard.js` (not a shared module), and the chat page has different toast needs (error display during streaming). Keep it self-contained rather than extracting a shared module for two toast call sites.
-
-### chat.css (Styles)
-
-Imports design tokens from `dashboard.css` (CSS custom properties are inherited). Chat-specific styles:
-
-```css
-/* Chat-specific layout -- uses existing --surface, --border, --text tokens */
-.chat-messages { /* scrollable message area */ }
-.chat-bubble { /* message bubble base */ }
-.chat-bubble-user { /* right-aligned, primary background */ }
-.chat-bubble-assistant { /* left-aligned, surface background */ }
-.chat-input-form { /* sticky bottom input bar */ }
-.chat-streaming { /* pulsing cursor indicator during streaming */ }
-```
-
-The chat page links BOTH `dashboard.css` (for tokens, top-bar, card, toast styles) and `chat.css` (for chat-specific layout).
-
-## Navigation Update
-
-The top-bar currently has brand + theme toggle with no page navigation. Adding a chat page requires nav links.
-
-```html
-<!-- Updated top-bar pattern (all three templates) -->
-<nav class="top-bar" aria-label="Primary">
-  <div class="brand">...</div>
-  <div class="nav-links">
-    <a href="/dashboard" class="nav-link">Fleet</a>
-    <a href="/dashboard/chat" class="nav-link">Chat</a>
-  </div>
-  <button class="theme-toggle">...</button>
-</nav>
-```
-
-Active state via template variable or URL check in JS. Keep it simple -- CSS class on current page link or check `location.pathname` in the inline script.
-
-## Error Handling
-
-| Error | Detection | User-Visible Behavior |
-|-------|-----------|----------------------|
-| No models available | `GET /v1/models` returns empty `data[]` | Model selector shows "No models available", send disabled |
-| Model goes unhealthy mid-conversation | `POST /v1/chat/completions` returns 503 | Error message in chat area, model selector refreshes |
-| Network error during streaming | `reader.read()` throws | Error message appended to assistant bubble, retry possible |
-| SSE error event from proxy | `data` contains error JSON (proxy wraps backend errors) | Parse error, display in chat as error bubble |
-| Request aborted (user clicked stop/clear) | `AbortController.abort()` | Clean up partial response, re-enable input |
-
-### AbortController for In-Flight Requests
-
-```javascript
-let currentAbortController = null;
-
-async function sendMessage(content) {
-  if (currentAbortController) currentAbortController.abort();
-  currentAbortController = new AbortController();
-
-  const response = await fetch("/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model: currentModel, messages: conversationMessages, stream: true }),
-    signal: currentAbortController.signal,
-  });
-  // ... stream processing
-}
-```
-
-This handles: stop button, clear conversation while streaming, switching models while streaming.
-
-## Patterns to Follow
-
-### Pattern 1: Same Template/JS/CSS Split as Dashboard
-
-**What:** Jinja2 renders HTML shell, JS fetches data and renders dynamically.
-**Why:** Proven in v1.1-v1.3 across dashboard and node_detail. No build step, no framework.
-**Apply to:** Chat page uses the same structure.
-
-### Pattern 2: Vanilla `fetch()` for API Calls
-
-**What:** Direct `fetch()` calls to `/v1/*` endpoints, same-origin.
-**Why:** No CORS issues (same origin). No API key needed (internal network, no auth in v1). Already established in `dashboard.js`.
-
-### Pattern 3: CSS Custom Properties for Theming
-
-**What:** All colors reference `--primary`, `--surface`, `--text`, etc.
-**Why:** Dark/light mode toggle already works via `[data-theme]`. Chat CSS inherits this automatically.
-
-## Anti-Patterns to Avoid
-
-### Anti-Pattern: Adding a Backend "Chat Session" Layer
-**What:** Creating a chat session model, storing conversation server-side, adding session management endpoints.
-**Why bad:** Requirements say "in-session, not persisted." The OpenAI protocol is stateless -- client sends full message history. Adding server-side sessions creates state management complexity, memory growth, cleanup concerns.
-**Instead:** Conversation array lives in browser JS memory. Page refresh clears it. Done.
-
-### Anti-Pattern: WebSocket Chat Protocol
-**What:** Adding a WebSocket endpoint that wraps the SSE proxy.
-**Why bad:** Adds a protocol translation layer (SSE -> WS -> browser). Two connection types to maintain. The proxy already speaks SSE perfectly. `fetch()` + `ReadableStream` consumes SSE natively.
-**Instead:** Direct `fetch()` POST to `/v1/chat/completions` with stream reader.
-
-### Anti-Pattern: Shared JS Module Extraction
-**What:** Extracting `showToast()`, action buttons, etc. into a shared module before the chat page needs them.
-**Why bad:** Two pages sharing a toast function is not worth a module system. The dashboard and chat pages have different concerns. Premature extraction creates coupling.
-**Instead:** Chat page has its own self-contained `chat.js`. If a third page appears, consider extraction then.
-
-### Anti-Pattern: Markdown Rendering Library
-**What:** Adding a markdown parser (marked.js, etc.) for assistant responses.
-**Why bad:** Adds a dependency. LLM responses may contain markdown, but rendering plain text is functional and simpler. The requirement is "streaming response display," not "rich text rendering."
-**Instead:** Render as plain text with `textContent`. Add markdown rendering later if users request it, and only then evaluate whether `<pre>` blocks for code and basic formatting suffice before pulling in a library.
+One new member. No existing members removed or renamed. Backward compatible with existing etcd data.
 
 ## File Layout
 
 ```
 inference_proxy/
+    redfish/
+        __init__.py              # NEW
+        client.py                # NEW: RedfishClient (thin httpx wrapper)
+    config/
+        settings.py              # MODIFY: add RedfishSettings sub-model
+        dependencies.py          # MODIFY: add get_redfish_client()
+    provisioning/
+        provisioner.py           # MODIFY: add _power_on_if_needed(), improve error capture
+        state.py                 # MODIFY: add POWERING_ON step
     api/
-        dashboard.py             # MODIFY: add GET /dashboard/chat route
-    templates/
-        dashboard.html           # MODIFY: add nav links
-        node_detail.html         # MODIFY: add nav links
-        chat.html                # NEW: chat page template
+        admin.py                 # MODIFY: add power action/status endpoints
+    models/
+        admin.py                 # MODIFY: add PowerActionRequest, PowerStatusResponse, PowerActionResponse
+    services/
+        unified_nodes.py         # MODIFY: add power actions, last_error field
     static/
-        css/
-            dashboard.css        # MODIFY: add .nav-links styles
-            chat.css             # NEW: chat-specific styles
         js/
-            dashboard.js         # UNCHANGED
-            node_detail.js       # UNCHANGED
-            chat.js              # NEW: SSE consumer, conversation state, DOM rendering
+            dashboard.js         # MODIFY: add power actions to ACTION_CONFIG, inline error display
+            node_detail.js       # MODIFY: (minor) error display improvements
+    templates/
+        dashboard.html           # MODIFY: (minor) add error column to node table
+tests/
+    redfish/
+        __init__.py              # NEW
+        test_client.py           # NEW
+    provisioning/
+        test_provisioner.py      # MODIFY: test power-on-if-needed flow
+        test_state.py            # MODIFY: test POWERING_ON member
+    api/
+        test_admin.py            # MODIFY: test power endpoints
+    services/
+        test_unified_nodes.py    # MODIFY: test power actions in state map
 ```
 
-New files: 3 (`chat.html`, `chat.js`, `chat.css`).
-Modified files: 3 (`dashboard.py`, `dashboard.html`, `node_detail.html`) + minor CSS additions to `dashboard.css`.
+New files: 3 production (`redfish/__init__.py`, `redfish/client.py`) + 2 test.
+Modified files: 10 production + 4 test.
 
 ## Build Order (Suggested Phase Structure)
 
-Based on dependency analysis:
+Based on dependency analysis, bottom-up:
 
-1. **Nav links + chat route + empty template** -- Wire `GET /dashboard/chat` in `dashboard.py`, add nav links to all templates, create bare `chat.html` with layout but no functionality. Deployable: clicking "Chat" shows a placeholder page.
+### Phase 1: RedfishClient + Settings + Tests
 
-2. **Model selector + chat layout** -- Fetch `/v1/models` on page load, populate `<select>`. Build the chat message area and input form HTML/CSS. No streaming yet.
+- `RedfishSettings` sub-model in `settings.py`
+- `redfish/client.py` with `get_power_state()` and `reset()`
+- `tests/redfish/test_client.py` (mock httpx responses with pytest-httpx)
+- Wire into `main.py` lifespan (create client if configured, store in app.state)
+- `dependencies.py`: add `get_redfish_client()`
 
-3. **Streaming SSE consumer** -- Implement `fetch()` + `ReadableStream` SSE parsing in `chat.js`. Send messages, parse tokens, render to DOM. This is the core feature.
+**Deliverable:** RedfishClient exists, is tested, is injected. Nothing uses it yet.
+**Why first:** Zero dependencies on other v1.5 work. Foundation for everything else.
 
-4. **Polish: error handling, abort, UX** -- AbortController for stop/clear, error display, auto-resize textarea, scroll management, keyboard shortcuts (Enter to send, Shift+Enter for newline), empty state messaging.
+### Phase 2: Admin Power Endpoints
 
-Each phase is independently testable and shippable. Phase 3 is the critical path -- phases 1-2 are scaffolding, phase 4 is polish.
+- `PowerActionRequest`, `PowerStatusResponse`, `PowerActionResponse` in `models/admin.py`
+- `GET /admin/nodes/{id}/power` and `POST /admin/nodes/{id}/power` in `admin.py`
+- Tests for power endpoints
+- Dashboard ACTION_CONFIG additions for power actions
+- `_STATE_ACTIONS` updates in `unified_nodes.py`
+
+**Deliverable:** Operators can check power state and trigger power on/off/restart from dashboard.
+**Why second:** Depends on RedfishClient from Phase 1. Independent of provisioning changes.
+
+### Phase 3: Auto-Power-On in Provisioner
+
+- Add `POWERING_ON` to `ProvisioningStep`
+- Add `redfish_client` parameter to `NodeProvisioner.__init__`
+- Implement `_power_on_if_needed()` in provisioner
+- Call it as first step in `provision()`
+- Update `main.py` to pass redfish_client to provisioner
+- Tests
+
+**Deliverable:** Setup button auto-powers-on machines before SSH provisioning.
+**Why third:** Depends on RedfishClient (Phase 1). Modifies provisioner behavior.
+
+### Phase 4: Provisioning Error Diagnostics
+
+- Improve error capture in provisioner (stderr context, precise step names)
+- Add `last_error` field to `AdminNodeResponse`
+- Populate `last_error` in `UnifiedNodeService`
+- Dashboard inline error display for failed nodes
+- Tests
+
+**Deliverable:** Operators see failure details directly on dashboard without clicking through.
+**Why last:** Independent of Redfish (could be reordered), but grouping with v1.5 makes sense. Benefits from the POWERING_ON step existing (tests can verify error display for power failures too).
+
+## Patterns to Follow
+
+### Pattern: Thin Client Wrapper (QUADSClient precedent)
+
+`RedfishClient` follows the exact shape of `QUADSClient`: constructor takes an httpx.AsyncClient and settings, methods do one HTTP call each, all errors wrapped in `RedfishError`. No business logic in the client -- the provisioner and admin routes own the orchestration.
+
+### Pattern: Optional Feature via None Settings (QUADSSettings precedent)
+
+`RedfishSettings.username is None` means Redfish is disabled. The lifespan creates `app.state.redfish_client = None`. The provisioner skips power-on. The admin endpoint returns 503. No feature flags, no booleans -- the None pattern already works for QUADS.
+
+### Pattern: Same httpx Instance Lifecycle (QUADS httpx precedent)
+
+A dedicated `httpx.AsyncClient` for Redfish, created in lifespan, closed on shutdown. Separate from the proxy client and QUADS client. Each has its own timeout and SSL settings.
+
+## Anti-Patterns to Avoid
+
+### Anti-Pattern: Importing Badfish
+
+**What:** `from badfish.main import badfish_factory` to reuse QUADS ecosystem tooling.
+**Why bad:** Adds aiohttp as a transitive dependency. Badfish is CLI-oriented with a heavy factory pattern. The gateway needs two HTTP calls. The coupling to Badfish's release cycle is not worth it.
+**Instead:** Direct httpx calls. Two methods, ~30 lines total.
+
+### Anti-Pattern: Session-Based Redfish Auth
+
+**What:** Create a Redfish session (POST to SessionService), cache X-Auth-Token, manage session lifecycle.
+**Why bad:** BMCs have low session limits (often 4-8). Session management adds cleanup complexity. The gateway makes infrequent power calls -- not a high-throughput scenario.
+**Instead:** Basic auth per request. Simple, stateless, no session leak risk. BMCs handle basic auth without session count pressure.
+
+### Anti-Pattern: Polling BMC Power State Continuously
+
+**What:** Background thread polling every BMC for power state, like the health checker polls vLLM /health.
+**Why bad:** BMCs are slow. N hosts * frequent polls = timeout cascade on the management network. Power state changes are rare and operator-initiated.
+**Instead:** Query power state on demand (when dashboard loads, when provisioning starts). No background polling.
+
+### Anti-Pattern: Storing BMC Credentials in etcd
+
+**What:** Per-host BMC credentials in etcd alongside node registration.
+**Why bad:** etcd is not a secrets store. Credentials would be visible via etcd API. Lab servers share credentials anyway.
+**Instead:** Environment variables via pydantic-settings. Same as SSH key path.
 
 ## Sources
 
+- [DMTF Redfish python-redfish-library](https://github.com/DMTF/python-redfish-library) - HIGH confidence
+- [DMTF Redfish Tacklebox (power reset types)](https://github.com/DMTF/Redfish-Tacklebox/blob/main/docs/rf_power_reset.md) - HIGH confidence
+- [OpenBMC Redfish Cheatsheet](https://github.com/openbmc/docs/blob/master/REDFISH-cheatsheet.md) - HIGH confidence
+- [QUADS Badfish (quadsproject Redfish tool)](https://github.com/quadsproject/badfish) - HIGH confidence
+- [Advantech Redfish Power Operations](https://advantech-ncg.zendesk.com/hc/en-us/articles/44142031579417) - MEDIUM confidence
+- [Dell iDRAC Redfish API Guide](https://www.dell.com/support/manuals/en-us/idrac7-8-lifecycle-controller-v2.40.40.40/redfish%202.40.40.40/power) - MEDIUM confidence
+- [HPE Redfish Authentication](https://servermanagementportal.ext.hpe.com/docs/concepts/redfishauthentication) - MEDIUM confidence
 - Existing codebase: `inference_proxy/` source files - HIGH confidence
-- [MDN: ReadableStream](https://developer.mozilla.org/en-US/docs/Web/API/ReadableStream) - HIGH confidence
-- [MDN: Using readable streams](https://developer.mozilla.org/en-US/docs/Web/API/Streams_API/Using_readable_streams) - HIGH confidence
-- [MDN: AbortController](https://developer.mozilla.org/en-US/docs/Web/API/AbortController) - HIGH confidence
-- [OpenAI streaming API docs](https://platform.openai.com/docs/api-reference/streaming) - HIGH confidence
-- vLLM OpenAI-compatible SSE format matches OpenAI spec - HIGH confidence (verified in existing `routes.py` SSE handling)

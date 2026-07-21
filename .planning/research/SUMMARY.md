@@ -1,184 +1,199 @@
 # Project Research Summary
 
-**Project:** QUADS LLM Inference Proxy -- v1.3 QUADS Integration
-**Domain:** QUADS REST API integration for GPU host discovery and unified node management
-**Researched:** 2026-07-15
+**Project:** QUADS LLM Inference Proxy -- v1.5 Redfish Power Management & Provisioning Diagnostics
+**Domain:** BMC power management integration into existing bare-metal provisioning pipeline
+**Researched:** 2026-07-21
 **Confidence:** HIGH
 
 ## Executive Summary
 
-v1.3 integrates the QUADS bare-metal lab management API into the existing inference gateway to provide a unified view of all GPU hosts -- both those already provisioned with vLLM (tracked in etcd) and those available in the lab (tracked in QUADS). The integration is read-only: the gateway polls QUADS for host inventory and availability, merges that data with etcd-registered nodes at request time, and presents a single table with inline Setup/Teardown actions. Zero new dependencies are needed. The existing stack (httpx, Pydantic, structlog, Jinja2, pydantic-settings) covers every requirement.
+The v1.5 milestone adds two capabilities to the inference proxy: Redfish-based power management (on/off/restart/status via BMC) and improved provisioning failure diagnostics (step-level error capture with dashboard display). Both features plug into the existing provisioning pipeline and admin dashboard without architectural upheaval. The critical finding across all research areas is that **zero new dependencies are needed**. httpx already handles Redfish REST calls natively (2 endpoints: GET power state, POST reset action), and the existing `ProvisioningState` model already has the `failed_step` and `error` fields -- they just need to be populated correctly.
 
-The recommended approach is a new `inference_proxy/quads/` package containing a thin httpx-based QUADS API client and a background asyncio.Task poller that caches host data in memory. The admin API merges QUADS hosts with etcd nodes via a pure function, and the dashboard renders one unified table with state-driven action buttons. The merge key is hostname. The setup form is removed in favor of inline buttons, but a manual hostname input is retained as a fallback for QUADS outages. Total estimated scope is 525-850 new LOC across 4 new files and 5 modified files -- comparable to v1.1 (dashboard), not v1.2 (provisioning).
+The recommended approach is to build a thin `RedfishClient` following the exact `QUADSClient` pattern (constructor-injected httpx.AsyncClient, typed errors, Basic auth), wire it into the provisioner as an optional dependency, and extend the admin API with power endpoints. The client must use a dedicated httpx instance with Redfish-specific timeouts (10s connect, 60s read) and scoped `verify=False` for self-signed BMC certificates. The opt-in pattern (Redfish disabled when `username` is None) matches the existing QUADS feature toggle.
 
-The primary risks are: (1) a race condition between clicking "Setup" and the host appearing in etcd -- during the gap, duplicate setups can fire; (2) stale QUADS cache leading operators to provision hosts that were just assigned to another team; (3) hostname format mismatch between QUADS (FQDN) and etcd (short name) causing duplicate entries in the merged view; (4) QUADS API unavailability degrading the entire dashboard. All are preventable with specific patterns detailed in this summary.
+The primary risks are operational, not architectural. Redfish power actions are not idempotent (ForceOff on an off server returns HTTP 400), power state transitions are asynchronous (HTTP 200 means "accepted" not "done"), and BMC credentials can leak into logs and error displays if not handled with `SecretStr`. All five critical pitfalls are well-documented from MAAS, OpenShift Ironic, and StarlingX experiences and have straightforward mitigations: check-before-act for idempotency, post-action polling for async transitions, and `SecretStr` + error sanitization for credential safety.
 
 ## Key Findings
 
 ### Recommended Stack
 
-No new dependencies. The existing stack handles everything.
+No new Python dependencies. The existing stack (httpx >= 0.28, FastAPI >= 0.135, Pydantic >= 2.10, pydantic-settings >= 2.14, structlog >= 26.1.0) covers everything. Three Redfish Python libraries were evaluated and rejected:
 
-**Reused (zero additions):**
-- **httpx** (sync Client in thread or AsyncClient in task) -- HTTP calls to QUADS REST API, same pattern as health checker
-- **Pydantic v2** -- `QUADSHost` model for parsing QUADS JSON responses, `UnifiedNodeResponse` for merged API output
-- **pydantic-settings** -- `QUADSSettings` sub-model (base_url, poll_interval, enabled)
-- **structlog** -- log QUADS poll timing, failures, host counts
-- **Jinja2 + vanilla JS** -- extend existing dashboard, no build step
+**Core technologies (all existing):**
+- **httpx**: Redfish REST client -- async, connection pooling, Basic auth built-in, already used for proxy engine and QUADS client
+- **pydantic-settings**: `RedfishSettings` sub-model for BMC credentials and timeouts -- env var injection via `INFERENCE_PROXY_REDFISH__*`
+- **Pydantic SecretStr**: BMC password masking in logs, repr, and model_dump -- prevents credential leaks
 
-**What NOT to add:**
-- `quads` pip package (pulls Flask + SQLAlchemy for 2 GET endpoints)
-- `requests` (httpx already installed)
-- APScheduler/schedule (4 lines of `while/sleep` suffice)
-- tenacity (failed poll retries on next cycle anyway)
-- cachetools (in-memory dict IS the cache)
-- WebSocket/SSE libs (JS polling already works)
-
-### QUADS API Reference
-
-All GET endpoints are **unauthenticated** (verified against QUADS blueprints source). Write endpoints use `@check_access` but we only read.
-
-| Endpoint | Returns | Purpose |
-|----------|---------|---------|
-| `GET /api/v3/hosts` | `list[HostDict]` | All hosts with model, cloud, processors, broken/retired |
-| `GET /api/v3/hosts?model={m}` | `list[HostDict]` | Filter by hardware model |
-| `GET /api/v3/available` | `list[str]` | Hostnames currently available (no active schedule) |
-| `GET /api/v3/schedules/current` | Schedule list | Current assignments (for tooltip info, deferred) |
-
-GPU hosts identified by `processors` array containing entries with `processor_type == "GPU"`. Host availability determined by presence in `/available` response or by `cloud.name == default_cloud.name` (spare pool).
+**Evaluated and rejected:**
+- `redfish` (DMTF): sync `requests`-based, 6 transitive deps, overkill for 2 endpoints
+- `sushy` (OpenStack): OpenStack dependency ecosystem, designed for Ironic drivers
+- `python-ilorest-library` (HPE): vendor-locked, namespace conflict with DMTF package
 
 ### Expected Features
 
 **Must have (table stakes):**
-- QUADS API client module (httpx, 3-4 endpoints, read-only)
-- Background polling of QUADS on configurable interval
-- Unified node list merging QUADS hosts + etcd nodes by hostname
-- GPU indicator per host (vendor + product from processors)
-- Host availability status from QUADS
-- Inline "Setup" button for available GPU hosts
-- Inline "Teardown" button for provisioned nodes
-- QUADS base URL + poll interval configuration
-- Remove standalone setup form (replace with inline actions)
+- Power on via Redfish -- cannot SSH into a powered-off server
+- Power off (ForceOff) -- operators need to stop nodes when SSH is unavailable
+- Power restart (GracefulRestart, ForceRestart) -- common ops action for hung servers
+- Power status query -- know if On/Off before attempting operations
+- Auto-power-on before provisioning -- if off when setup triggered, power on and wait for SSH
+- Step-level error capture -- `failed_step` must show actual provisioning step name, not exception class
+- Dashboard error display for failed nodes -- inline error on fleet table, not buried in node detail
 
-**Should have (differentiators):**
-- State-based action buttons (available->Setup, healthy->Teardown, provisioning->disabled)
-- Hardware summary inline (GPU model, memory)
-- Visual status grouping/sorting
-- Filter/search in node list
+**Should have (differentiators, cheap to add):**
+- Power status column in fleet table (one Redfish GET per node, cached)
+- Power action buttons in dashboard (extend existing ACTION_CONFIG)
+- BMC reachability check before power operations
+- Collapsible error detail on dashboard
 
 **Defer (v2+):**
-- Cloud/assignment tooltip details (extra API call, low-value info)
-- Write operations to QUADS API (we are a consumer, not admin)
-- Auto-provisioning of available hosts (dangerous scope creep)
-- Per-host detail pages (inline info suffices)
-- Real-time QUADS sync (QUADS has no push mechanism)
+- Per-host BMC credential storage
+- IPMI fallback for servers without Redfish
+- Continuous power state polling (background thread)
+- Chassis/thermal/fan monitoring via Redfish
+- Provisioning log streaming to dashboard
+- Firmware update via Redfish
 
 ### Architecture Approach
 
-New `inference_proxy/quads/` package with `QUADSClient` (stateless async HTTP) and `QUADSPoller` (asyncio.Task caching results in memory). The merge happens at read time in the admin endpoint via a pure function -- QUADS data never enters etcd or NodeRegistry. The poller maintains its own cache, separate from the proxy httpx client (different timeout settings). Dashboard JS renders one table from a single unified API endpoint.
+Four new/modified components, all following established codebase patterns. `RedfishClient` mirrors `QUADSClient` exactly: thin httpx wrapper, constructor-injected AsyncClient, typed `RedfishError`. The provisioner gains an optional `redfish_client` parameter and a `_power_on_if_needed()` step before preflight. Admin API gets two new routes (`GET/POST /admin/nodes/{id}/power`). The dashboard extends `ACTION_CONFIG` and `_STATE_ACTIONS` for power buttons and inline error display.
 
-**New components:**
-1. **QUADSClient** (`quads/client.py`) -- async httpx calls to QUADS API, returns Pydantic models
-2. **QUADSPoller** (`quads/poller.py`) -- background asyncio.Task, caches host list, tracks staleness
-3. **QUADSHost** (`models/quads.py`) -- Pydantic model for QUADS host data
-4. **merge_node_list()** (`api/merge.py`) -- pure function merging QUADS + etcd + pending hosts
+**Major components:**
+1. **RedfishClient** (`redfish/client.py`) -- GET power state, POST reset action, Basic auth, dedicated httpx instance
+2. **RedfishSettings** (sub-model in `settings.py`) -- BMC credentials (SecretStr), hostname template, system ID, timeouts
+3. **Power admin endpoints** (routes in `admin.py`) -- HTTP API for manual power operations, returns 503 if Redfish not configured
+4. **Provisioner power-on step** (modified `provisioner.py`) -- POWERING_ON step before PREFLIGHT, polls SSH port 22 after power-on
 
-**Modified components:**
-5. `settings.py` -- add `QUADSSettings` nested model
-6. `dependencies.py` -- add `get_quads_poller()` DI
-7. `admin.py` -- `GET /admin/nodes` returns `UnifiedNodeResponse`
-8. `main.py` -- create/destroy QUADSClient and QUADSPoller in lifespan
-9. `dashboard.html` -- unified table, inline actions, remove setup form
+**Key patterns to follow:**
+- Optional feature via None settings (QUADSSettings precedent)
+- Dedicated httpx.AsyncClient per subsystem (separate TLS/timeout profiles)
+- Dependency injection via `dependencies.py` providers
 
-### Critical Pitfalls (Ranked)
+### Critical Pitfalls
 
-1. **Setup race condition** -- Between clicking "Setup" and etcd registration (10+ seconds), the host appears available in the UI, inviting duplicate setups. **Prevention:** Add `pending_hosts: set[str]` to provisioner, checked by merge logic and returning 409 on duplicates.
+1. **ForceOff on an already-off server returns HTTP 400** -- Always query PowerState before issuing reset actions. Handle 400 by re-checking state: if desired state is reached, treat as success. This is the most common Redfish integration bug across MAAS, Ironic, and StarlingX.
 
-2. **Stale cache -> provisioning wrong host** -- QUADS says available, but host was just assigned to another team. **Prevention:** Re-validate availability with a fresh QUADS API call at setup time, not from cache. Display cache age in UI.
+2. **BMC credentials leak into logs and error responses** -- Use Pydantic `SecretStr` for the password field. Never include RedfishSettings in structlog context binds. Sanitize error messages before writing to etcd. Never embed credentials in URLs.
 
-3. **Hostname identity mismatch** -- QUADS returns FQDNs, etcd has short names. Merge fails silently, showing duplicates. **Prevention:** Canonical hostname normalization function applied in QUADS client, provisioner, and merge logic. Must be solved before merge logic.
+3. **SSH preflight starts before OS boots after power-on** -- Redfish power-on returns immediately (accepted, not done). Must poll PowerState until On, then poll TCP port 22 with 5-minute timeout before running SSH preflight. Add POWERING_ON step to ProvisioningStep enum so dashboard shows boot progress.
 
-4. **QUADS outage degrades dashboard** -- If QUADS is a hard dependency, its outage breaks the node list that worked fine in v1.2. **Prevention:** QUADS data is supplementary. Serve from poller cache. Return etcd nodes even when QUADS is unreachable. Show degradation indicator.
+4. **TLS verify=False leaks to other httpx clients** -- Scope `verify=False` to the Redfish-dedicated httpx.AsyncClient only. Make configurable via `RedfishSettings.verify_ssl`. Do not share client instances across subsystems.
 
-5. **JS state explosion** -- Unified list has 6+ states and conditional buttons. Vanilla JS DOM manipulation becomes unmaintainable. **Prevention:** Data-driven rendering with `STATE_CONFIG` map. Backend sends computed `state` and `available_actions` per node. No framework needed.
+5. **Raw Redfish JSON rendered in dashboard error display** -- Create human-readable error summaries from Redfish error codes. Map common MessageIds to operator-friendly messages. Cap error field at 200 characters. Full context goes to structlog.
 
 ## Implications for Roadmap
 
-### Phase 1: QUADS Client + Models + Configuration
-**Rationale:** Foundation with zero integration risk. Fully testable in isolation with httpx mocking. Hostname normalization must be solved here before any merge logic.
-**Delivers:** `QUADSClient`, `QUADSHost` model, `QUADSSettings`, `canonical_hostname()` function.
-**Addresses:** FEATURES: QUADS API client, configuration. PITFALLS: #4 (hostname mismatch -- normalization), #8 (response format surprises -- Pydantic with `extra="ignore"`), #13 (separate httpx client with own timeouts).
-**Avoids:** Building merge logic on mismatched identities.
+Based on research, suggested phase structure (4 phases, bottom-up from dependency chain):
 
-### Phase 2: Background Poller + Lifespan Wiring
-**Rationale:** Depends on QUADSClient from Phase 1. Adds the caching layer that all downstream features read from. Must be wired into existing shutdown lifecycle.
-**Delivers:** `QUADSPoller` (asyncio.Task), staleness tracking (`last_successful_sync`, `consecutive_failures`), lifespan integration, graceful degradation on QUADS failure.
-**Addresses:** FEATURES: periodic background polling. PITFALLS: #3 (QUADS outage -- serve stale data), #7 (lifecycle -- use existing stop_event), #10 (polling drift -- staleness tracking + exponential backoff).
-**Avoids:** Dashboard depending on live QUADS calls.
+### Phase 1: Redfish Client + Configuration
 
-### Phase 3: Merge Logic + Unified Admin API
-**Rationale:** Pure data transformation. Depends on QUADSHost model (Phase 1) and poller cache (Phase 2). The merge function is the core v1.3 deliverable. Must include the setup deduplication guard.
-**Delivers:** `merge_node_list()` pure function, `UnifiedNodeResponse` model, modified `GET /admin/nodes`, `pending_hosts` guard on `POST /admin/nodes/setup` (409 on duplicate), fresh QUADS availability check at setup time.
-**Addresses:** FEATURES: unified node list, availability status, GPU indicator. PITFALLS: #1 (setup race -- pending_hosts set), #2 (stale cache -- fresh check at setup), #6 (merge in backend, not frontend).
-**Avoids:** Duplicate setups, stale-data provisioning, frontend merge race conditions.
+**Rationale:** Foundation for all other v1.5 work. Zero dependencies on other phases. Must get credential handling, TLS scoping, and idempotency right from the start -- 4 of 5 critical pitfalls live here.
+**Delivers:** `RedfishClient` class, `RedfishSettings` sub-model, dependency injection wiring, tests with pytest-httpx mocking.
+**Addresses:** Power status query, power on/off/restart actions (table stakes features).
+**Avoids:** Credential leaks (Pitfall 2), TLS verify leak (Pitfall 4), session exhaustion (Pitfall 6, by using Basic auth), timeout issues (Pitfall 10), vendor URI issues (Pitfall 8).
 
-### Phase 4: Dashboard UI Update
-**Rationale:** Depends on the unified API from Phase 3. Must ship together with Phase 3 (schema change breaks old JS). Retain manual hostname input as fallback.
-**Delivers:** Unified table rendering, state-based inline action buttons, QUADS status indicator (connected/stale/unavailable), cache age display, manual hostname input retained as collapsed control.
-**Addresses:** FEATURES: inline Setup/Teardown, remove setup form (partially -- keep manual fallback), state-based buttons. PITFALLS: #5 (form removal regression -- keep manual input), #9 (JS state explosion -- data-driven STATE_CONFIG), #11 (table flicker -- DocumentFragment swap).
-**Avoids:** Locking operators out when QUADS is unreachable.
+**Scope:**
+- `inference_proxy/redfish/__init__.py`, `inference_proxy/redfish/client.py` (new)
+- `inference_proxy/config/settings.py` (add RedfishSettings)
+- `inference_proxy/config/dependencies.py` (add get_redfish_client)
+- `inference_proxy/main.py` (create client in lifespan)
+- `tests/redfish/test_client.py` (new)
+
+### Phase 2: Admin Power Endpoints + Dashboard Buttons
+
+**Rationale:** Depends on RedfishClient from Phase 1. Independent of provisioning changes. Delivers immediate operator value -- power management from the dashboard without SSH.
+**Delivers:** `GET/POST /admin/nodes/{id}/power` endpoints, power action buttons in dashboard, power status display.
+**Addresses:** Power action buttons (differentiator), admin API power endpoints (table stakes).
+**Avoids:** ForceOff on off server (Pitfall 1, check-before-act in endpoint handler), raw error JSON in dashboard (Pitfall 5).
+
+**Scope:**
+- `inference_proxy/models/admin.py` (add PowerActionRequest, PowerStatusResponse, PowerActionResponse)
+- `inference_proxy/api/admin.py` (add power routes)
+- `inference_proxy/services/unified_nodes.py` (add power actions to _STATE_ACTIONS)
+- `inference_proxy/static/js/dashboard.js` (add power actions to ACTION_CONFIG)
+- `tests/api/test_admin.py` (power endpoint tests)
+
+### Phase 3: Auto-Power-On in Provisioner
+
+**Rationale:** Depends on RedfishClient (Phase 1). Modifies the provisioning state machine. This is the core workflow improvement -- setup button works even when servers are off.
+**Delivers:** POWERING_ON provisioning step, automatic power-on before SSH preflight, boot wait polling.
+**Addresses:** Auto-power-on before provisioning (table stakes).
+**Avoids:** SSH before boot (Pitfall 3), enum not extended (Pitfall 9), retry reboots server (Pitfall 13, via idempotent power check), async transitions treated as synchronous (Pitfall 7).
+
+**Scope:**
+- `inference_proxy/provisioning/state.py` (add POWERING_ON to ProvisioningStep)
+- `inference_proxy/provisioning/provisioner.py` (add _power_on_if_needed, optional redfish_client param)
+- `inference_proxy/main.py` (pass redfish_client to provisioner)
+- `tests/provisioning/test_provisioner.py` (power-on flow tests)
+
+### Phase 4: Provisioning Error Diagnostics
+
+**Rationale:** Independent of Redfish (could be built in parallel with Phases 2-3), but benefits from POWERING_ON step existing (tests can verify error display for power failures). Completes the v1.5 milestone's "step-level error capture" requirement.
+**Delivers:** Precise `failed_step` values, stderr context in error messages, inline error display on dashboard fleet table.
+**Addresses:** Step-level error capture, dashboard error display (table stakes).
+**Avoids:** Error field too terse (Pitfall 12), raw error messages (Pitfall 5).
+
+**Scope:**
+- `inference_proxy/provisioning/provisioner.py` (fix failed_step to use step name, capture stderr)
+- `inference_proxy/models/admin.py` (add last_error to AdminNodeResponse)
+- `inference_proxy/services/unified_nodes.py` (populate last_error from provisioning tasks)
+- `inference_proxy/static/js/dashboard.js` (render inline error for failed nodes)
+- `inference_proxy/templates/dashboard.html` (error column in fleet table)
+- Tests for error capture and display
 
 ### Phase Ordering Rationale
 
-- **Phase 1 before Phase 2:** The poller calls the client. Client and models must exist first.
-- **Phase 2 before Phase 3:** The merge function reads from the poller cache. Cache must exist first.
-- **Phase 3 and Phase 4 ship together:** The admin API schema changes in Phase 3 break the existing dashboard JS. These phases must land in the same release to avoid a broken dashboard window.
-- **Hostname normalization in Phase 1, not Phase 3:** If normalization is deferred, Phase 3 merge logic silently produces duplicates. Fixing it later requires migrating existing etcd entries.
-- **Each phase is independently testable:** Phase 1-2 can be tested without UI. Phase 3 can be tested with unit tests on the pure merge function. Phase 4 requires manual browser testing.
+- **Bottom-up from dependencies:** RedfishClient is the foundation; admin endpoints and provisioner integration both depend on it; error diagnostics is independent but logically last.
+- **Immediate operator value:** Phase 2 delivers power management from the dashboard before the provisioner is modified -- operators get value while Phase 3 is built.
+- **Pitfall isolation:** Critical pitfalls (credential leaks, TLS scope, idempotency) are contained in Phase 1 where they can be tested in isolation before integration.
+- **Error diagnostics last:** The error capture fix is a code change (not a new subsystem), so it is lowest risk and can absorb learnings from earlier phases.
 
 ### Research Flags
 
 Phases likely needing deeper research during planning:
-- **Phase 1:** Determine the exact QUADS hostname format in the target environment (FQDN vs short name) and the `host_type`/processor metadata available for GPU filtering. A few manual `curl` calls against the live QUADS instance before coding.
-- **Phase 3:** The `pending_hosts` deduplication guard touches the existing provisioner. Needs careful review of `NodeProvisioner._background_tasks` and the setup endpoint to avoid regressions.
+- **Phase 1:** Redfish client needs vendor-specific testing (Dell iDRAC vs Supermicro vs HPE iLO system IDs and error responses). The specification is clear but implementations vary.
+- **Phase 3:** Boot wait timing varies significantly by hardware. The 5-minute timeout is a starting estimate; real fleet data needed during implementation.
 
-Phases with standard patterns (skip research):
-- **Phase 2:** Background asyncio.Task with periodic polling is a textbook pattern. The codebase already has two background services (watcher, health checker) to follow.
-- **Phase 4:** Vanilla JS table rendering with state-driven buttons. The existing dashboard.js is the template. No new patterns.
+Phases with standard patterns (skip research-phase):
+- **Phase 2:** Standard CRUD admin endpoints following existing patterns. Well-documented in codebase.
+- **Phase 4:** Error message formatting and dashboard rendering. Existing patterns in provisioner.py and dashboard.js cover this.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Zero new dependencies. All existing deps verified against current versions. QUADS API endpoints verified against source code. |
-| Features | HIGH | Feature set derived from QUADS API source (swagger.yaml, blueprints, models.py) and existing codebase. Concrete, not speculative. |
-| Architecture | HIGH | Follows established codebase patterns (DI, lifespan, background tasks, Pydantic models). Component boundaries clear and validated against SOLID. |
-| Pitfalls | HIGH | Pitfalls verified against existing codebase (admin.py line 78-85 has no dedup, provisioner.py line 196-206 has registration gap). Race conditions traced through actual code paths. |
+| Stack | HIGH | Zero new deps. httpx covers everything. All three alternative libraries were evaluated with version numbers, dependency trees, and concrete rejection reasons. |
+| Features | HIGH | Clear table stakes vs differentiators. Anti-features are well-reasoned. Feature dependency chain is explicit. |
+| Architecture | HIGH | Follows established codebase patterns (QUADSClient, opt-in via None settings). Build order derived from dependency analysis. |
+| Pitfalls | HIGH | Verified against MAAS, OpenShift Ironic, StarlingX bug reports. DMTF specification confirms non-idempotent behavior. 13 pitfalls with concrete prevention strategies. |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Live QUADS instance exploration:** Research was against QUADS source code, not the actual deployed instance. The hostname format, available host_type values, and processor metadata fields should be verified with `curl` against the live API before coding Phase 1.
-- **QUADS API version:** Research covers v3. If the target environment runs QUADS v2 (MongoDB backend), the response format differs significantly (`$oid`, `$date` fields). Pin to v3 and document the requirement.
-- **Backward compatibility of `/admin/nodes`:** The response schema changes from `AdminNodeResponse` to `UnifiedNodeResponse`. Since the only consumer is the dashboard JS (internal network, no external clients), this is not a breaking change. But confirm no scripts or monitoring tools hit this endpoint.
-- **Existing etcd entries:** If nodes were registered with short hostnames in v1.2, the merge logic needs to handle matching against QUADS FQDNs. A one-time migration or dual-lookup strategy may be needed.
+- **Multi-vendor BMC testing:** Research confirms vendor variation in system IDs and error responses, but actual fleet composition determines whether `system_id = "1"` default is sufficient or discovery is needed. Validate during Phase 1 implementation against real lab hardware.
+- **Boot wait timing:** The 300s timeout for SSH readiness after power-on is an estimate. Actual POST + boot times vary by server model (2-5 minutes). Instrument during Phase 3 to calibrate.
+- **BMC hostname convention:** Research assumes `mgmt-{hostname}` pattern. Confirm against actual QUADS lab DNS naming before finalizing the default template.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- QUADS GitHub: https://github.com/redhat-performance/quads -- blueprints, models, swagger.yaml
-- QUADS hosts blueprint: `src/quads/server/blueprints/hosts.py` -- GET endpoints unauthenticated
-- QUADS available blueprint: `src/quads/server/blueprints/available.py` -- returns list of hostname strings
-- QUADS host model: `src/quads/server/models.py` -- Host, Processor, Schedule, Assignment, Cloud
-- QUADS swagger: `src/quads/server/swagger.yaml` -- OpenAPI 3.0.0 spec
-- QUADS Python client: `src/quads/quads_api.py` -- reference endpoint patterns
-- Existing codebase: `inference_proxy/` -- admin.py, provisioner.py, main.py, dashboard.js, settings.py
+- DMTF Redfish Specification (DSP0266) -- PowerState, ComputerSystem.Reset, ResetType values
+- DMTF Redfish Resource and Schema Guide (DSP2046) -- error response format, AllowableValues
+- MAAS Redfish power driver (Canonical) -- vendor quirks, session management, state polling
+- OpenBMC docs -- system ID conventions, state management, TLS configuration
+- Existing codebase (`inference_proxy/`) -- QUADSClient pattern, ProvisioningState model, provisioner state machine
 
 ### Secondary (MEDIUM confidence)
-- QUADS API documentation: https://github.com/redhat-performance/quads/blob/master/docs/quads-api.md
-- QUADS 2.2 release notes: https://github.com/redhat-performance/quads/releases/tag/v2.2.4 -- GPU awareness
+- HPE Redfish authentication docs -- session limits (16 max), Basic auth support
+- Dell iDRAC Redfish scripting -- system ID `System.Embedded.1`, reset action patterns
+- Supermicro Redfish user guide -- session timeout configuration
+- DMTF Python Redfish library -- evaluated for rejection, confirms sync/requests architecture
+
+### Tertiary (LOW confidence)
+- Boot wait timing estimates -- based on general server POST times, not lab-specific measurements
+- BMC hostname convention `mgmt-{hostname}` -- assumed from common lab patterns, needs validation
 
 ---
-*Research completed: 2026-07-15*
+*Research completed: 2026-07-21*
 *Ready for roadmap: yes*
