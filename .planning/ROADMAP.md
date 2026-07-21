@@ -97,7 +97,10 @@ Plans:
   2. Chat page follows the same dark/light mode toggle as the existing dashboard
   3. System prompt persists across messages within the same session
 
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 20-01-PLAN.md — System prompt UI, persistence, message injection, and theme verification
+
 **UI hint**: yes
 
 ## Progress
@@ -123,4 +126,4 @@ Plans:
 | 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete | 2026-07-16 |
 | 18. Dashboard UI Update | v1.3 | 2/2 | Complete | 2026-07-17 |
 | 19. Chat Page and Streaming | v1.4 | 2/2 | Complete    | 2026-07-21 |
-| 20. Chat Configuration | v1.4 | 0/? | Not started | - |
+| 20. Chat Configuration | v1.4 | 0/1 | Planning | - |
