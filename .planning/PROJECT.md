@@ -54,11 +54,14 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - ✓ Model selector showing available healthy models — v1.4 (Phase 19)
 - ✓ Conversation history (in-session, not persisted) — v1.4 (Phase 19)
 
+### Validated in v1.4
+
+- ✓ System prompt configuration — v1.4 (Phase 20)
+- ✓ Dark/light mode consistency on chat page — v1.4 (Phase 20)
+
 ### Active
 
-**v1.4 Chatbot Playground (remaining):**
-- [ ] System prompt configuration
-- [ ] Dark/light mode consistency on chat page
+No active requirements — v1.4 milestone complete.
 
 ### Out of Scope
 
@@ -83,7 +86,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ## Context
 
-Shipped v1.3 across 18 phases. Phase 19 complete — chat page with SSE streaming, model selector, and conversation history (444 tests). QUADS integration complete — gateway discovers available GPU hosts, polls for freshness, merges with etcd nodes in a unified view, and renders inline action controls on the dashboard.
+Shipped v1.4 across 20 phases. Phase 20 complete — system prompt configuration with localStorage persistence and theme consistency (451 tests). Chatbot playground milestone complete — chat page with SSE streaming, model selector, conversation history, system prompt, dark/light mode. QUADS integration complete — gateway discovers available GPU hosts, polls for freshness, merges with etcd nodes in a unified view, and renders inline action controls on the dashboard.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
@@ -149,4 +152,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-20 after v1.4 milestone start*
+*Last updated: 2026-07-21 after Phase 20 completion (v1.4 milestone complete)*
