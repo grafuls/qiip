@@ -48,12 +48,17 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - ✓ QUADS connection status indicator (connected/stale/unavailable) — v1.3
 - ✓ GPU hardware info (vendor, model) visible per host — v1.3
 
+### Validated in v1.4
+
+- ✓ Chat UI page with message input and SSE streaming response display — v1.4 (Phase 19)
+- ✓ Model selector showing available healthy models — v1.4 (Phase 19)
+- ✓ Conversation history (in-session, not persisted) — v1.4 (Phase 19)
+
 ### Active
 
-**v1.4 Chatbot Playground:**
-- [ ] Chat UI page with message input and streaming response display
-- [ ] Model selector showing available healthy models
-- [ ] Conversation history (in-session, not persisted)
+**v1.4 Chatbot Playground (remaining):**
+- [ ] System prompt configuration
+- [ ] Dark/light mode consistency on chat page
 
 ### Out of Scope
 
@@ -78,7 +83,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ## Context
 
-Shipped v1.3 across 18 phases and 412 tests. QUADS integration complete — gateway discovers available GPU hosts, polls for freshness, merges with etcd nodes in a unified view, and renders inline action controls on the dashboard.
+Shipped v1.3 across 18 phases. Phase 19 complete — chat page with SSE streaming, model selector, and conversation history (444 tests). QUADS integration complete — gateway discovers available GPU hosts, polls for freshness, merges with etcd nodes in a unified view, and renders inline action controls on the dashboard.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
