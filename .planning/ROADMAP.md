@@ -126,4 +126,4 @@ Plans:
 | 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete | 2026-07-16 |
 | 18. Dashboard UI Update | v1.3 | 2/2 | Complete | 2026-07-17 |
 | 19. Chat Page and Streaming | v1.4 | 2/2 | Complete    | 2026-07-21 |
-| 20. Chat Configuration | v1.4 | 1/1 | Complete   | 2026-07-21 |
+| 20. Chat Configuration | v1.4 | 1/1 | Complete    | 2026-07-21 |
