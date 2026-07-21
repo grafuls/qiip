@@ -75,18 +75,7 @@ No active requirements — v1.4 milestone complete.
 
 ## Context
 
-## Current Milestone: v1.4 Chatbot Playground
-
-**Goal:** Add a chat page to the dashboard where users can converse with any healthy inference endpoint through the existing proxy.
-
-**Target features:**
-- Chat UI page with message input and streaming response display
-- Model selector showing available healthy models
-- Conversation history (in-session, not persisted)
-
-## Context
-
-Shipped v1.4 across 20 phases. Phase 20 complete — system prompt configuration with localStorage persistence and theme consistency (451 tests). Chatbot playground milestone complete — chat page with SSE streaming, model selector, conversation history, system prompt, dark/light mode. QUADS integration complete — gateway discovers available GPU hosts, polls for freshness, merges with etcd nodes in a unified view, and renders inline action controls on the dashboard.
+Shipped v1.4 across 20 phases (451 tests). All milestones complete: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground. The gateway proxies OpenAI-compatible requests to vLLM nodes with service discovery, load balancing, circuit breakers, SSH provisioning, QUADS host discovery, operations dashboard, and chatbot playground with system prompt configuration.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
@@ -133,6 +122,11 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 | Unified node list merging QUADS + etcd | Single source of truth for operators; hostname-based merge | ✓ Validated v1.3 |
 | Data-driven ACTION_CONFIG in dashboard.js | Single dispatch map replaces per-action functions; O/C compliant | ✓ Validated v1.3 |
 | Zero new dependencies for v1.3 | httpx, Pydantic, structlog, pydantic-settings cover everything | ✓ Validated v1.3 |
+| SSE via fetch+ReadableStream for chat | Unidirectional streaming; no WebSocket overhead needed | ✓ Validated v1.4 |
+| In-session conversation only | No persistent storage; cleared on page refresh — simplest viable | ✓ Validated v1.4 |
+| System prompt via messages.slice()+unshift | Never mutates conversation array; takes effect on next send | ✓ Validated v1.4 |
+| localStorage for system prompt persistence | Same pattern as theme preference; single-user internal tool | ✓ Validated v1.4 |
+| CSS custom properties for theming | All new UI uses var(--*) tokens only — zero hardcoded colors | ✓ Validated v1.4 |
 
 ## Evolution
 
@@ -152,4 +146,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-21 after Phase 20 completion (v1.4 milestone complete)*
+*Last updated: 2026-07-21 after v1.4 Chatbot Playground milestone*
