@@ -81,7 +81,10 @@
   2. RedfishClient can issue power actions (On, ForceOff, GracefulRestart, ForceRestart) to a BMC
   3. Redfish error responses are translated to human-readable messages (not raw JSON)
   4. BMC credentials are never exposed in logs, error messages, or API responses
-**Plans**: TBD
+**Plans:** 2 plans
+Plans:
+- [ ] 21-01-PLAN.md — Redfish client module (settings, errors, client, tests)
+- [ ] 21-02-PLAN.md — Lifespan wiring (DI, main.py, conftest)
 
 ### Phase 22: Power Management Endpoints
 **Goal**: Operators can manage server power from the admin API
@@ -145,7 +148,7 @@ Phases execute in numeric order: 21 → 22 → 23 → 24
 | 18. Dashboard UI Update | v1.3 | 2/2 | Complete | 2026-07-17 |
 | 19. Chat Page and Streaming | v1.4 | 2/2 | Complete | 2026-07-21 |
 | 20. Chat Configuration | v1.4 | 1/1 | Complete | 2026-07-21 |
-| 21. Redfish Client & Configuration | v1.5 | 0/0 | Not started | - |
+| 21. Redfish Client & Configuration | v1.5 | 0/2 | In progress | - |
 | 22. Power Management Endpoints | v1.5 | 0/0 | Not started | - |
 | 23. Auto-Power-On in Provisioner | v1.5 | 0/0 | Not started | - |
 | 24. Provisioning Error Diagnostics | v1.5 | 0/0 | Not started | - |
