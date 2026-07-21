@@ -32,11 +32,11 @@
 
 | Requirement | Phase | Plan | Status |
 |-------------|-------|------|--------|
-| PWR-01 | — | — | Pending |
-| PWR-02 | — | — | Pending |
-| PWR-03 | — | — | Pending |
-| PWR-04 | — | — | Pending |
-| PWR-05 | — | — | Pending |
-| DIAG-01 | — | — | Pending |
-| DIAG-02 | — | — | Pending |
-| DIAG-03 | — | — | Pending |
+| PWR-01 | 22 | — | Pending |
+| PWR-02 | 22 | — | Pending |
+| PWR-03 | 22 | — | Pending |
+| PWR-04 | 22 | — | Pending |
+| PWR-05 | 23 | — | Pending |
+| DIAG-01 | 24 | — | Pending |
+| DIAG-02 | 24 | — | Pending |
+| DIAG-03 | 21 | — | Pending |

@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Node Setup Enhancements
 status: planning
-last_updated: "2026-07-21T16:41:00.616Z"
+last_updated: "2026-07-21"
 last_activity: 2026-07-21
 progress:
-  total_phases: 0
+  total_phases: 4
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,17 +17,19 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-20)
+See: .planning/PROJECT.md (updated 2026-07-21)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Milestone complete
+**Current focus:** Phase 21 — Redfish Client & Configuration
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 21 (1 of 4 in v1.5) — Redfish Client & Configuration
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-21 — Milestone v1.5 started
+Status: Ready to plan
+Last activity: 2026-07-21 — Roadmap created for v1.5
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -63,11 +65,10 @@ Last activity: 2026-07-21 — Milestone v1.5 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Jinja2 + vanilla JS for Web UI (no build step, stays in Python ecosystem)
-- Polling for auto-refresh (simple JS interval, sufficient for ops dashboard)
-- Data-driven ACTION_CONFIG in dashboard.js (single dispatch map)
-- Zero new dependencies for v1.3 (httpx, Pydantic, structlog, pydantic-settings cover everything)
-- System prompt prepended via messages.slice() + unshift at send time -- never mutates conversation array
+- Zero new dependencies for v1.5 (httpx covers Redfish REST, pydantic-settings for config)
+- RedfishClient mirrors QUADSClient pattern (constructor-injected httpx.AsyncClient, typed errors)
+- Basic auth over Redfish sessions (simpler, sufficient for infrequent internal ops)
+- etcd3gw HTTP gateway (sync calls wrapped with asyncio.to_thread)
 
 ### Pending Todos
 
@@ -75,7 +76,9 @@ None yet.
 
 ### Blockers/Concerns
 
-None.
+- Multi-vendor BMC testing: system ID defaults may vary (Dell iDRAC vs Supermicro vs HPE iLO)
+- BMC hostname convention (`mgmt-{hostname}`) needs validation against actual lab DNS
+- Boot wait timing (300s estimate) needs calibration against real hardware
 
 ## Deferred Items
 
@@ -90,10 +93,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-07-21T14:33:45.237Z
-Stopped at: Completed 20-01-PLAN.md
+Last session: 2026-07-21
+Stopped at: Roadmap created for v1.5 Node Setup Enhancements
 Resume file: None
-
-## Operator Next Steps
-
-- Start the next milestone with /gsd-new-milestone
