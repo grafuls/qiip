@@ -8,8 +8,8 @@
 
 ## Configuration
 
-- [ ] **CFG-01**: User can set a system prompt that is sent with every request
-- [ ] **CFG-02**: Chat page supports dark/light mode consistent with existing dashboard
+- [x] **CFG-01**: User can set a system prompt that is sent with every request
+- [x] **CFG-02**: Chat page supports dark/light mode consistent with existing dashboard
 
 ## Future Requirements
 

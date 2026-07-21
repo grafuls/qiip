@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.4
 milestone_name: Chatbot Playground
-status: executing
+status: verifying
 stopped_at: Phase 20 context gathered
-last_updated: "2026-07-21T14:19:05.900Z"
-last_activity: 2026-07-21 -- Phase 20 planning complete
+last_updated: "2026-07-21T14:33:45.244Z"
+last_activity: 2026-07-21
 progress:
   total_phases: 2
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 3
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 100
 ---
 
 # Project State
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-20)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Phase 20 — chat configuration
+**Current focus:** Phase 20 — chat-configuration
 
 ## Current Position
 
-Phase: 20
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-07-21 -- Phase 20 planning complete
+Phase: 20 (chat-configuration) — EXECUTING
+Plan: 1 of 1
+Status: Phase complete — ready for verification
+Last activity: 2026-07-21
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Progress: [░░░░░░░░░░] 0%
 | 17 | 1 | - | - |
 | 18 | 2 | - | - |
 | 19 | 2 | - | - |
+| 20 | 1 | 191s | 191s |
 
 **Recent Trend:**
 
@@ -69,6 +70,7 @@ Recent decisions affecting current work:
 - Polling for auto-refresh (simple JS interval, sufficient for ops dashboard)
 - Data-driven ACTION_CONFIG in dashboard.js (single dispatch map)
 - Zero new dependencies for v1.3 (httpx, Pydantic, structlog, pydantic-settings cover everything)
+- System prompt prepended via messages.slice() + unshift at send time -- never mutates conversation array
 
 ### Pending Todos
 
@@ -87,9 +89,9 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-07-21T13:14:05.309Z
-Stopped at: Phase 20 context gathered
-Resume file: .planning/phases/20-chat-configuration/20-CONTEXT.md
+Last session: 2026-07-21T14:33:45.237Z
+Stopped at: Completed 20-01-PLAN.md
+Resume file: None
 
 ## Operator Next Steps
 

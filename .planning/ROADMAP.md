@@ -57,7 +57,7 @@
 **Milestone Goal:** Add a chat page where users can converse with any healthy inference endpoint through the existing proxy.
 
 - [x] **Phase 19: Chat Page and Streaming** - Core chat UI with message input, SSE streaming responses, and model selection (completed 2026-07-21)
-- [ ] **Phase 20: Chat Configuration** - System prompt setting and dark/light mode consistency
+- [x] **Phase 20: Chat Configuration** - System prompt setting and dark/light mode consistency (completed 2026-07-21)
 
 ## Phase Details
 
@@ -99,7 +99,7 @@ Plans:
 
 **Plans**: 1 plan
 Plans:
-- [ ] 20-01-PLAN.md — System prompt UI, persistence, message injection, and theme verification
+- [x] 20-01-PLAN.md — System prompt UI, persistence, message injection, and theme verification
 
 **UI hint**: yes
 
@@ -126,4 +126,4 @@ Plans:
 | 17. Unified Node List and Admin API | v1.3 | 1/1 | Complete | 2026-07-16 |
 | 18. Dashboard UI Update | v1.3 | 2/2 | Complete | 2026-07-17 |
 | 19. Chat Page and Streaming | v1.4 | 2/2 | Complete    | 2026-07-21 |
-| 20. Chat Configuration | v1.4 | 0/1 | Planning | - |
+| 20. Chat Configuration | v1.4 | 1/1 | Complete   | 2026-07-21 |
