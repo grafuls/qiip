@@ -2,9 +2,9 @@
 
 ## Chat Core
 
-- [ ] **CHAT-01**: User can type a message and send it to a healthy inference endpoint
-- [ ] **CHAT-02**: User can see streamed tokens appear in real time as the model responds
-- [ ] **CHAT-03**: User can select which model to chat with from available healthy models
+- [x] **CHAT-01**: User can type a message and send it to a healthy inference endpoint
+- [x] **CHAT-02**: User can see streamed tokens appear in real time as the model responds
+- [x] **CHAT-03**: User can select which model to chat with from available healthy models
 
 ## Configuration
 
