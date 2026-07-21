@@ -84,7 +84,7 @@ All colors use existing CSS custom properties. No new color tokens.
 | Background | transparent | Matches .theme-toggle |
 | Border | 1px solid var(--border-strong) | Matches .theme-toggle |
 | Border radius | var(--radius) (0.5rem) | Existing token |
-| Padding | 6px 8px (0.375rem 0.5rem) | Matches .theme-toggle |
+| Padding | 8px (0.5rem) | Matches standard spacing scale |
 | Chevron | CSS border triangle, 5px, rotates 180deg when expanded | Claude's discretion |
 | Chevron gap | 4px from label text | xs spacing |
 | Chevron transition | transform 0.2s ease | Matches existing transition timing |
@@ -126,6 +126,12 @@ All colors use existing CSS custom properties. No new color tokens.
 ### Existing: Theme Toggle (verification only)
 
 No changes. Verify that the new system prompt panel renders correctly in both light and dark modes using existing `[data-theme="dark"]` selectors and CSS custom properties. No new theme-specific overrides expected.
+
+---
+
+## Visual Hierarchy
+
+Message area is the primary focal point. System prompt toggle is a secondary control in the model selector bar — discoverable but not attention-competing.
 
 ---
 
