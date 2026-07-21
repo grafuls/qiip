@@ -73,50 +73,67 @@
 ## Phase Details
 
 ### Phase 21: Redfish Client & Configuration
+
 **Goal**: The gateway can communicate with server BMCs via Redfish API with secure credential handling and human-readable errors
 **Depends on**: Nothing (foundation for v1.5)
 **Requirements**: DIAG-03
 **Success Criteria** (what must be TRUE):
+
   1. RedfishClient can query power state from a BMC and return On/Off/PoweringOn/PoweringOff
   2. RedfishClient can issue power actions (On, ForceOff, GracefulRestart, ForceRestart) to a BMC
   3. Redfish error responses are translated to human-readable messages (not raw JSON)
   4. BMC credentials are never exposed in logs, error messages, or API responses
+
 **Plans:** 2 plans
 Plans:
+**Wave 1**
+
 - [ ] 21-01-PLAN.md — Redfish client module (settings, errors, client, tests)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 21-02-PLAN.md — Lifespan wiring (DI, main.py, conftest)
 
 ### Phase 22: Power Management Endpoints
+
 **Goal**: Operators can manage server power from the admin API
 **Depends on**: Phase 21
 **Requirements**: PWR-01, PWR-02, PWR-03, PWR-04
 **Success Criteria** (what must be TRUE):
+
   1. Admin can power on a node via POST to the admin power endpoint
   2. Admin can power off a node via POST to the admin power endpoint
   3. Admin can restart a node via POST to the admin power endpoint
   4. Admin can query current power state of a node via GET from the admin API
   5. Power endpoints return 503 when Redfish is not configured
+
 **Plans**: TBD
 
 ### Phase 23: Auto-Power-On in Provisioner
+
 **Goal**: Provisioning works even when target servers are powered off
 **Depends on**: Phase 21
 **Requirements**: PWR-05
 **Success Criteria** (what must be TRUE):
+
   1. Setup operation automatically powers on a node that is off before starting SSH provisioning
   2. Dashboard shows POWERING_ON step while the server boots
   3. Provisioning waits for SSH availability after power-on before proceeding to preflight
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 24: Provisioning Error Diagnostics
+
 **Goal**: Operators can see why provisioning failed without checking logs
 **Depends on**: Nothing (independent of Redfish phases)
 **Requirements**: DIAG-01, DIAG-02
 **Success Criteria** (what must be TRUE):
+
   1. Failed provisioning captures the specific step name where failure occurred
   2. Failed provisioning captures error details (stderr/exception message)
   3. Dashboard displays failure details inline for failed nodes instead of just a status badge
+
 **Plans**: TBD
 **UI hint**: yes
 
