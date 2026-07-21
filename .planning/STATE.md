@@ -3,8 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Node Setup Enhancements
 status: planning
-last_updated: "2026-07-21"
-last_activity: 2026-07-21
+stopped_at: Phase 21 context gathered
+last_updated: "2026-07-21T17:49:55.108Z"
+last_activity: 2026-07-21 — Roadmap created for v1.5
 progress:
   total_phases: 4
   completed_phases: 0
@@ -93,6 +94,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-21
-Stopped at: Roadmap created for v1.5 Node Setup Enhancements
-Resume file: None
+Last session: 2026-07-21T17:49:55.102Z
+Stopped at: Phase 21 context gathered
+Resume file: .planning/phases/21-redfish-client-configuration/21-CONTEXT.md
