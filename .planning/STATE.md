@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Node Setup Enhancements
-status: ready_to_plan
-stopped_at: Phase 21 complete (2/2) — ready to discuss Phase 22
-last_updated: 2026-07-22T05:47:16.150Z
-last_activity: 2026-07-22 -- Phase 21 execution started
+status: planning
+stopped_at: Phase 22 context gathered
+last_updated: "2026-07-22T06:04:18.603Z"
+last_activity: 2026-07-22
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
   completed_plans: 2
-  percent: 0
+  percent: 25
 ---
 
 # Project State
@@ -95,6 +95,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-21T17:49:55.102Z
-Stopped at: Phase 21 context gathered
-Resume file: .planning/phases/21-redfish-client-configuration/21-CONTEXT.md
+Last session: 2026-07-22T06:04:18.596Z
+Stopped at: Phase 22 context gathered
+Resume file: .planning/phases/22-power-management-endpoints/22-CONTEXT.md
