@@ -146,6 +146,7 @@ async def teardown_node(
     provisioner: NodeProvisioner = Depends(get_provisioner),
 ) -> TeardownResponse:
     """Trigger teardown of a node (runs in background)."""
+    node_id = canonical_hostname(node_id)
     if registry.get(node_id) is None:
         raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
     provisioner.fire_background(provisioner.teardown(node_id, force=force))
