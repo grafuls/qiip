@@ -2,10 +2,10 @@
 
 ## Power Management
 
-- [ ] **PWR-01**: User can power on a node via Redfish API from the admin endpoint
-- [ ] **PWR-02**: User can power off a node via Redfish API from the admin endpoint
-- [ ] **PWR-03**: User can restart a node via Redfish API from the admin endpoint
-- [ ] **PWR-04**: User can query the current power state of a node (On/Off/PoweringOn/PoweringOff)
+- [x] **PWR-01**: User can power on a node via Redfish API from the admin endpoint
+- [x] **PWR-02**: User can power off a node via Redfish API from the admin endpoint
+- [x] **PWR-03**: User can restart a node via Redfish API from the admin endpoint
+- [x] **PWR-04**: User can query the current power state of a node (On/Off/PoweringOn/PoweringOff)
 - [ ] **PWR-05**: Provisioning automatically powers on a node before SSH setup if the node is off
 
 ## Diagnostics

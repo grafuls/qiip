@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Node Setup Enhancements
-status: executing
-stopped_at: Phase 22 context gathered
-last_updated: "2026-07-22T06:30:55.765Z"
+status: ready_to_plan
+stopped_at: Phase 22 complete (1/1) — ready to discuss Phase 23
+last_updated: 2026-07-22T07:14:18.679Z
 last_activity: 2026-07-22 -- Phase 22 execution started
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 3
-  completed_plans: 2
+  completed_plans: 3
   percent: 25
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-21)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Phase 22 — power-management-endpoints
+**Current focus:** Phase 23 — auto power on in provisioner
 
 ## Current Position
 
-Phase: 22 (power-management-endpoints) — EXECUTING
-Plan: 1 of 1
-Status: Executing Phase 22
-Last activity: 2026-07-22 -- Phase 22 execution started
+Phase: 23
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-07-22
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -36,7 +36,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 34
+- Total plans completed: 35
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -52,6 +52,7 @@ Progress: [░░░░░░░░░░] 0%
 | 19 | 2 | - | - |
 | 20 | 1 | - | - |
 | 21 | 2 | - | - |
+| 22 | 1 | - | - |
 
 **Recent Trend:**
 
