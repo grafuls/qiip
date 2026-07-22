@@ -12,6 +12,7 @@ from inference_proxy.config.settings import (
     GatewaySettings,
     ProvisioningSettings,
     QUADSSettings,
+    RedfishSettings,
     RoutingSettings,
     SSHSettings,
     Settings,
@@ -189,6 +190,95 @@ class TestQUADSSettingsIsNotBaseSettings:
     def test_quads_settings_is_base_model_not_base_settings(self) -> None:
         assert not issubclass(QUADSSettings, BaseSettings)
         assert issubclass(QUADSSettings, BaseModel)
+
+
+class TestDefaultRedfishSettings:
+    def test_bmc_username_is_none(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.redfish.bmc_username is None
+
+    def test_bmc_password_is_none(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.redfish.bmc_password is None
+
+    def test_bmc_host_template(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.redfish.bmc_host_template == "mgmt-{hostname}"
+
+    def test_system_id(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.redfish.system_id == "1"
+
+    def test_connect_timeout(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.redfish.connect_timeout == 10.0
+
+    def test_read_timeout(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.redfish.read_timeout == 60.0
+
+    def test_power_poll_timeout(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.redfish.power_poll_timeout == 60.0
+
+    def test_power_poll_interval(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.redfish.power_poll_interval == 5.0
+
+    def test_verify_ssl_is_false(self) -> None:
+        settings = Settings(_env_file=None)
+        assert settings.redfish.verify_ssl is False
+
+
+class TestEnvVarOverrideRedfishBmcUsername:
+    def test_env_var_override_redfish_bmc_username(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_REDFISH__BMC_USERNAME", "admin")
+        settings = Settings(_env_file=None)
+        assert settings.redfish.bmc_username == "admin"
+
+
+class TestEnvVarOverrideRedfishBmcPassword:
+    def test_env_var_override_redfish_bmc_password(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_REDFISH__BMC_PASSWORD", "secret123")
+        settings = Settings(_env_file=None)
+        assert settings.redfish.bmc_password is not None
+        assert settings.redfish.bmc_password.get_secret_value() == "secret123"
+
+
+class TestEnvVarOverrideRedfishBmcHostTemplate:
+    def test_env_var_override_redfish_bmc_host_template(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "INFERENCE_PROXY_REDFISH__BMC_HOST_TEMPLATE", "bmc-{hostname}.mgmt"
+        )
+        settings = Settings(_env_file=None)
+        assert settings.redfish.bmc_host_template == "bmc-{hostname}.mgmt"
+
+
+class TestRedfishSettingsSecretStr:
+    def test_repr_does_not_contain_password(self) -> None:
+        from pydantic import SecretStr
+
+        rs = RedfishSettings(bmc_password=SecretStr("hunter2"))
+        assert "hunter2" not in repr(rs)
+
+    def test_model_dump_masks_password(self) -> None:
+        from pydantic import SecretStr
+
+        rs = RedfishSettings(bmc_password=SecretStr("hunter2"))
+        dumped = rs.model_dump()
+        assert dumped["bmc_password"] != "hunter2"
+
+
+class TestRedfishSettingsIsNotBaseSettings:
+    def test_redfish_settings_is_base_model_not_base_settings(self) -> None:
+        assert not issubclass(RedfishSettings, BaseSettings)
+        assert issubclass(RedfishSettings, BaseModel)
 
 
 class TestSettingsIsBaseSettings:
