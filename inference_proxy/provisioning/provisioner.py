@@ -263,22 +263,41 @@ class NodeProvisioner:
         except Exception:
             logger.warning("provisioning_registration_failed", hostname=hostname)
 
+        current_step = "uploading_scripts"
         try:
+            current_step = "uploading_scripts"
             await self._update_state(hostname, ProvisioningStep.UPLOADING_SCRIPTS)
             await self._upload_scripts(hostname)
             await self._run_setup(hostname)
+            current_step = "starting_vllm"
             await self._update_state(hostname, ProvisioningStep.STARTING_VLLM)
             model = await self._run_start_vllm(hostname)
+            current_step = "health_poll"
             await self._update_state(hostname, ProvisioningStep.HEALTH_POLL)
             await self._poll_health(hostname)
+            current_step = "registering"
             await self._update_state(hostname, ProvisioningStep.REGISTERING)
             await self._register_node(hostname, model, managed=managed)
             await self._update_state(hostname, ProvisioningStep.COMPLETE)
         except (RemoteCommandError, SSHConnectionError, ProvisioningError) as exc:
             await self._update_state(
                 hostname, ProvisioningStep.FAILED,
-                failed_step=type(exc).__name__, error=str(exc),
+                failed_step=current_step, error=str(exc),
             )
+            # Update node entry to FAILED so it doesn't stay stuck as PROVISIONING
+            failed_node = Node(
+                node_id=hostname,
+                endpoint=f"{hostname}:{self._settings.vllm_port}",
+                status=NodeStatus.FAILED,
+                model="",
+                last_heartbeat=datetime.now(timezone.utc),
+                managed=managed,
+            )
+            f_key, f_value = node_to_etcd(failed_node, self._etcd_client.prefix)
+            try:
+                await asyncio.to_thread(self._etcd_client.put, f_key, f_value)
+            except Exception:
+                logger.warning("failed_node_update_failed", hostname=hostname)
             raise ProvisioningError(str(exc)) from exc
 
         logger.info("provisioning_complete", hostname=hostname)

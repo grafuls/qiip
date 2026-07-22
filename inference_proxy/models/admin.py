@@ -37,6 +37,8 @@ class AdminNodeResponse(BaseModel):
     gpu_model: str | None = None
     gpu_count: int | None = None
     managed: bool = True
+    failed_step: str | None = None
+    error: str | None = None
 
 
 class AdminMetricsResponse(BaseModel):
