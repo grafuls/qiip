@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Node Setup Enhancements
-status: ready_to_plan
-stopped_at: Phase 22 complete (1/1) — ready to discuss Phase 23
-last_updated: 2026-07-22T07:14:18.679Z
-last_activity: 2026-07-22 -- Phase 22 execution started
+status: planning
+stopped_at: Phase 23 context gathered
+last_updated: "2026-07-22T07:50:19.661Z"
+last_activity: 2026-07-22
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 3
   completed_plans: 3
-  percent: 25
+  percent: 50
 ---
 
 # Project State
@@ -96,6 +96,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-22T06:04:18.596Z
-Stopped at: Phase 22 context gathered
-Resume file: .planning/phases/22-power-management-endpoints/22-CONTEXT.md
+Last session: 2026-07-22T07:50:19.641Z
+Stopped at: Phase 23 context gathered
+Resume file: .planning/phases/23-auto-power-on-in-provisioner/23-CONTEXT.md
