@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import json
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import ValidationError
 
 from inference_proxy.config.dependencies import (
     get_provisioner,
@@ -44,6 +46,8 @@ from inference_proxy.redfish.client import RedfishClient
 from inference_proxy.redfish.errors import RedfishError
 from inference_proxy.routing.request_metrics import RequestMetrics
 from inference_proxy.services.unified_nodes import UnifiedNodeService
+
+logger = structlog.get_logger()
 
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -133,8 +137,11 @@ async def list_provisioning_tasks(
     results = await provisioner.list_tasks_raw()
     tasks: list[TaskStatusResponse] = []
     for value_bytes, _metadata in results:
-        data = json.loads(value_bytes)
-        tasks.append(TaskStatusResponse(**data))
+        try:
+            data = json.loads(value_bytes)
+            tasks.append(TaskStatusResponse(**data))
+        except (json.JSONDecodeError, ValidationError) as exc:
+            logger.warning("task_parse_failed", raw=value_bytes[:200], error=str(exc))
     return tasks
 
 
