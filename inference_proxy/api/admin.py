@@ -52,6 +52,7 @@ logger = structlog.get_logger()
 admin_router = APIRouter(prefix="/admin", tags=["admin"])
 
 # D-08: module-level set to prevent duplicate setup requests
+# ponytail: single-worker-only dedup guard; move to etcd CAS if workers > 1
 pending_hosts: set[str] = set()
 
 
