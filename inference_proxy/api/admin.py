@@ -71,9 +71,19 @@ def _validated_hostname(hostname: str) -> str:
 @admin_router.get("/nodes")
 async def list_nodes(
     service: UnifiedNodeService = Depends(get_unified_node_service),
+    provisioner: NodeProvisioner = Depends(get_provisioner),
 ) -> list[AdminNodeResponse]:
     """Return unified node list merging QUADS hosts with etcd nodes."""
-    return service.get_unified_nodes()
+    results = await provisioner.list_tasks_raw()
+    task_map: dict[str, TaskStatusResponse] = {}
+    for value_bytes, _metadata in results:
+        try:
+            data = json.loads(value_bytes)
+            task = TaskStatusResponse(**data)
+            task_map[task.hostname] = task
+        except (json.JSONDecodeError, ValidationError):
+            pass  # ponytail: silently skip malformed entries
+    return service.get_unified_nodes(task_map=task_map)
 
 
 @admin_router.get("/metrics")
