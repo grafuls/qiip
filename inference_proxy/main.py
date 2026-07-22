@@ -161,12 +161,42 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.request_metrics = request_metrics
 
         ssh_client = SSHClient(resolved_settings.ssh)
+
+        if resolved_settings.redfish.bmc_username is not None:
+            redfish_http = httpx.AsyncClient(
+                auth=httpx.BasicAuth(
+                    username=resolved_settings.redfish.bmc_username,
+                    password=resolved_settings.redfish.bmc_password.get_secret_value(),  # type: ignore[union-attr]
+                ),
+                verify=resolved_settings.redfish.verify_ssl,
+                timeout=httpx.Timeout(
+                    connect=resolved_settings.redfish.connect_timeout,
+                    read=resolved_settings.redfish.read_timeout,
+                    write=10.0,
+                    pool=10.0,
+                ),
+            )
+            redfish_client = RedfishClient(
+                redfish_http,
+                bmc_host_template=resolved_settings.redfish.bmc_host_template,
+                system_id=resolved_settings.redfish.system_id,
+                poll_timeout=resolved_settings.redfish.power_poll_timeout,
+                poll_interval=resolved_settings.redfish.power_poll_interval,
+            )
+            app.state.redfish_client = redfish_client
+            logger.info("redfish client initialized")
+        else:
+            app.state.redfish_client = None
+            redfish_http = None
+            logger.info("redfish disabled (no bmc_username configured)")
+
         provisioner = NodeProvisioner(
             ssh_client=ssh_client,
             etcd_client=etcd_client,
             settings=resolved_settings.provisioning,
             registry=registry,
             connection_tracker=connection_tracker,
+            redfish_client=app.state.redfish_client,
         )
         app.state.provisioner = provisioner
 
@@ -199,34 +229,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.quads_poller = None
             app.state.schedule_enforcer = None
             quads_http = None
-
-        if resolved_settings.redfish.bmc_username is not None:
-            redfish_http = httpx.AsyncClient(
-                auth=httpx.BasicAuth(
-                    username=resolved_settings.redfish.bmc_username,
-                    password=resolved_settings.redfish.bmc_password.get_secret_value(),  # type: ignore[union-attr]
-                ),
-                verify=resolved_settings.redfish.verify_ssl,
-                timeout=httpx.Timeout(
-                    connect=resolved_settings.redfish.connect_timeout,
-                    read=resolved_settings.redfish.read_timeout,
-                    write=10.0,
-                    pool=10.0,
-                ),
-            )
-            redfish_client = RedfishClient(
-                redfish_http,
-                bmc_host_template=resolved_settings.redfish.bmc_host_template,
-                system_id=resolved_settings.redfish.system_id,
-                poll_timeout=resolved_settings.redfish.power_poll_timeout,
-                poll_interval=resolved_settings.redfish.power_poll_interval,
-            )
-            app.state.redfish_client = redfish_client
-            logger.info("redfish client initialized")
-        else:
-            app.state.redfish_client = None
-            redfish_http = None
-            logger.info("redfish disabled (no bmc_username configured)")
 
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(
