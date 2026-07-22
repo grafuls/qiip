@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Node Setup Enhancements
-status: executing
-stopped_at: Phase 21 context gathered
-last_updated: "2026-07-22T04:49:04.485Z"
+status: ready_to_plan
+stopped_at: Phase 21 complete (2/2) — ready to discuss Phase 22
+last_updated: 2026-07-22T05:47:16.150Z
 last_activity: 2026-07-22 -- Phase 21 execution started
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 2
-  completed_plans: 0
+  completed_plans: 2
   percent: 0
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-21)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Phase 21 — redfish-client-configuration
+**Current focus:** Phase 22 — power management endpoints
 
 ## Current Position
 
-Phase: 21 (redfish-client-configuration) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 21
-Last activity: 2026-07-22 -- Phase 21 execution started
+Phase: 22
+Plan: Not started
+Status: Ready to plan
+Last activity: 2026-07-22
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -36,7 +36,7 @@ Progress: [░░░░░░░░░░] 0%
 
 **Velocity:**
 
-- Total plans completed: 32
+- Total plans completed: 34
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -51,6 +51,7 @@ Progress: [░░░░░░░░░░] 0%
 | 18 | 2 | - | - |
 | 19 | 2 | - | - |
 | 20 | 1 | - | - |
+| 21 | 2 | - | - |
 
 **Recent Trend:**
 
