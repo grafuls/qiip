@@ -162,4 +162,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-22 after Phase 22 (Power Management Endpoints) complete*
+*Last updated: 2026-07-22 after Phase 23 (Auto-Power-On in Provisioner) complete*
