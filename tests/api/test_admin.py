@@ -23,12 +23,14 @@ from fastapi.testclient import TestClient
 from inference_proxy.config.dependencies import (
     get_quads_client,
     get_quads_poller,
+    get_redfish_client,
     get_unified_node_service,
 )
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.models.node import Node, NodeStatus
 from inference_proxy.models.quads import QUADSHost
 from inference_proxy.quads.client import QUADSConnectionError
+from inference_proxy.redfish.errors import RedfishError
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.connection_tracker import ConnectionTracker
 from inference_proxy.routing.request_metrics import RequestMetrics
@@ -601,3 +603,136 @@ class TestQuadsStatus:
 
         data = client.get("/admin/quads/status").json()
         assert data["status"] == "unavailable"
+
+
+# -- Power management endpoint tests (PWR-01/02/03/04, D-02/D-05/D-07) --
+
+
+class TestGetPowerState:
+    """GET /admin/nodes/{hostname}/power returns BMC power state."""
+
+    def test_returns_current_state(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        mock_redfish = AsyncMock()
+        mock_redfish.get_power_state.return_value = "On"
+        app.dependency_overrides[get_redfish_client] = lambda: mock_redfish
+
+        response = client.get("/admin/nodes/gpu01/power")
+        assert response.status_code == 200
+        assert response.json() == {"hostname": "gpu01", "power_state": "On"}
+
+    def test_returns_503_when_not_configured(
+        self, client: TestClient
+    ) -> None:
+        response = client.get("/admin/nodes/gpu01/power")
+        assert response.status_code == 503
+
+    def test_normalizes_hostname(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        mock_redfish = AsyncMock()
+        mock_redfish.get_power_state.return_value = "Off"
+        app.dependency_overrides[get_redfish_client] = lambda: mock_redfish
+
+        response = client.get("/admin/nodes/GPU01/power")
+        assert response.json()["hostname"] == "gpu01"
+
+    def test_returns_502_on_redfish_error(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        mock_redfish = AsyncMock()
+        mock_redfish.get_power_state.side_effect = RedfishError("BMC unreachable")
+        app.dependency_overrides[get_redfish_client] = lambda: mock_redfish
+
+        response = client.get("/admin/nodes/gpu01/power")
+        assert response.status_code == 502
+        assert "BMC unreachable" in response.json()["detail"]
+
+
+class TestExecutePowerAction:
+    """POST /admin/nodes/{hostname}/power executes power actions."""
+
+    def test_power_on(self, app: FastAPI, client: TestClient) -> None:
+        mock_redfish = AsyncMock()
+        mock_redfish.power_action.return_value = "On"
+        app.dependency_overrides[get_redfish_client] = lambda: mock_redfish
+
+        response = client.post(
+            "/admin/nodes/gpu01/power", json={"action": "On"}
+        )
+        assert response.status_code == 200
+        assert response.json() == {"hostname": "gpu01", "power_state": "On"}
+        mock_redfish.power_action.assert_called_once_with("gpu01", "On")
+
+    def test_force_off(self, app: FastAPI, client: TestClient) -> None:
+        mock_redfish = AsyncMock()
+        mock_redfish.power_action.return_value = "Off"
+        app.dependency_overrides[get_redfish_client] = lambda: mock_redfish
+
+        response = client.post(
+            "/admin/nodes/gpu01/power", json={"action": "ForceOff"}
+        )
+        assert response.status_code == 200
+        assert response.json()["power_state"] == "Off"
+
+    def test_graceful_restart(self, app: FastAPI, client: TestClient) -> None:
+        mock_redfish = AsyncMock()
+        mock_redfish.power_action.return_value = "On"
+        app.dependency_overrides[get_redfish_client] = lambda: mock_redfish
+
+        response = client.post(
+            "/admin/nodes/gpu01/power", json={"action": "GracefulRestart"}
+        )
+        assert response.status_code == 200
+        assert response.json()["power_state"] == "On"
+
+    def test_force_restart(self, app: FastAPI, client: TestClient) -> None:
+        mock_redfish = AsyncMock()
+        mock_redfish.power_action.return_value = "On"
+        app.dependency_overrides[get_redfish_client] = lambda: mock_redfish
+
+        response = client.post(
+            "/admin/nodes/gpu01/power", json={"action": "ForceRestart"}
+        )
+        assert response.status_code == 200
+        assert response.json()["power_state"] == "On"
+
+    def test_returns_503_when_not_configured(
+        self, client: TestClient
+    ) -> None:
+        response = client.post(
+            "/admin/nodes/gpu01/power", json={"action": "On"}
+        )
+        assert response.status_code == 503
+
+    def test_returns_422_for_invalid_action(
+        self, client: TestClient
+    ) -> None:
+        response = client.post(
+            "/admin/nodes/gpu01/power", json={"action": "Shutdown"}
+        )
+        assert response.status_code == 422
+
+    def test_normalizes_hostname(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        mock_redfish = AsyncMock()
+        mock_redfish.power_action.return_value = "On"
+        app.dependency_overrides[get_redfish_client] = lambda: mock_redfish
+
+        client.post("/admin/nodes/GPU01/power", json={"action": "On"})
+        mock_redfish.power_action.assert_called_once_with("gpu01", "On")
+
+    def test_returns_502_on_redfish_error(
+        self, app: FastAPI, client: TestClient
+    ) -> None:
+        mock_redfish = AsyncMock()
+        mock_redfish.power_action.side_effect = RedfishError("Poll timeout")
+        app.dependency_overrides[get_redfish_client] = lambda: mock_redfish
+
+        response = client.post(
+            "/admin/nodes/gpu01/power", json={"action": "On"}
+        )
+        assert response.status_code == 502
+        assert "Poll timeout" in response.json()["detail"]
