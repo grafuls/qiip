@@ -122,8 +122,9 @@ Plans:
   2. Dashboard shows POWERING_ON step while the server boots
   3. Provisioning waits for SSH availability after power-on before proceeding to preflight
 
-**Plans**: TBD
-**UI hint**: yes
+**Plans:** 1 plan
+Plans:
+- [ ] 23-01-PLAN.md — Power-on integration, SSH wait loop, settings, and tests
 
 ### Phase 24: Provisioning Error Diagnostics
 
@@ -169,5 +170,5 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 20. Chat Configuration | v1.4 | 1/1 | Complete | 2026-07-21 |
 | 21. Redfish Client & Configuration | v1.5 | 2/2 | Complete    | 2026-07-22 |
 | 22. Power Management Endpoints | v1.5 | 1/1 | Complete    | 2026-07-22 |
-| 23. Auto-Power-On in Provisioner | v1.5 | 0/0 | Not started | - |
+| 23. Auto-Power-On in Provisioner | v1.5 | 0/1 | Planning    | - |
 | 24. Provisioning Error Diagnostics | v1.5 | 0/0 | Not started | - |
