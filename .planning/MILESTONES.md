@@ -1,5 +1,16 @@
 # Milestones
 
+## v1.5 Node Setup Enhancements (Shipped: 2026-07-22)
+
+**Phases completed:** 4 phases, 6 plans, 5 tasks
+
+**Key accomplishments:**
+
+- 1. [Rule 1 - Bug] Fixed TestResolveBmcHost using deprecated asyncio.get_event_loop()
+- 1. [Rule 3 - Blocking] Reordered main.py lifespan initialization
+
+---
+
 ## v1.4 Chatbot Playground (Shipped: 2026-07-21)
 
 **Phases completed:** 2 phases, 3 plans, 2 tasks

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Node Setup Enhancements
-status: milestone_complete
-stopped_at: Milestone complete (Phase 24 was final phase)
-last_updated: 2026-07-22T11:58:47.406Z
-last_activity: 2026-07-22 -- Phase 24 execution started
+status: Awaiting next milestone
+stopped_at: Phase 24 context gathered
+last_updated: "2026-07-22T12:08:47.285Z"
+last_activity: 2026-07-22 — Milestone v1.5 completed and archived
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 6
   completed_plans: 6
-  percent: 75
+  percent: 100
 ---
 
 # Project State
@@ -25,12 +25,10 @@ See: .planning/PROJECT.md (updated 2026-07-21)
 
 ## Current Position
 
-Phase: 24
-Plan: Not started
-Status: Milestone complete
-Last activity: 2026-07-22
-
-Progress: [░░░░░░░░░░] 0%
+Phase: Milestone v1.5 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-22 — Milestone v1.5 completed and archived
 
 ## Performance Metrics
 
@@ -101,3 +99,7 @@ None yet.
 Last session: 2026-07-22T09:36:13.154Z
 Stopped at: Phase 24 context gathered
 Resume file: .planning/phases/24-provisioning-error-diagnostics/24-CONTEXT.md
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

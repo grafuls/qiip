@@ -59,14 +59,18 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - ✓ System prompt configuration — v1.4 (Phase 20)
 - ✓ Dark/light mode consistency on chat page — v1.4 (Phase 20)
 
+### Validated in v1.5
+
+- ✓ Redfish BMC client with power state query and power actions (On, ForceOff, GracefulRestart, ForceRestart) — v1.5 (Phase 21)
+- ✓ Admin API power management endpoints (GET/POST) — v1.5 (Phase 22)
+- ✓ Auto-power-on before SSH provisioning for offline servers — v1.5 (Phase 23)
+- ✓ Step-level error capture for failed provisioning (actual step name, not exception class) — v1.5 (Phase 24)
+- ✓ Dashboard expandable error sub-row for failed nodes — v1.5 (Phase 24)
+- ✓ Human-readable Redfish error mapping — v1.5 (Phase 21)
+
 ### Active
 
-**v1.5 Node Setup Enhancements:**
-- [ ] Redfish power on/off/restart
-- [ ] Redfish power status query
-- [ ] Auto-power-on before SSH provisioning
-- [ ] Step-level error capture for failed provisioning steps
-- [ ] Dashboard error display for provisioning failures
+(No active requirements — start next milestone with `/gsd:new-milestone`)
 
 ### Out of Scope
 
@@ -162,4 +166,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-22 after Phase 24 (Provisioning Error Diagnostics) complete*
+*Last updated: 2026-07-22 after v1.5 (Node Setup Enhancements) milestone*
