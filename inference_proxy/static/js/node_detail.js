@@ -62,6 +62,7 @@ async function handleAction(action, nodeId) {
     var resp = await fetch(config.url(nodeId), options);
     if (resp.ok) {
       showToast(config.successMsg(nodeId), "success");
+      if (action === "setup" || action === "retry") { logStreamDone = false; }
     } else {
       var data = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
       showToast(data.detail || "HTTP " + resp.status, "error");
@@ -149,6 +150,7 @@ async function refreshDetail() {
 
     // ponytail: filter tasks by hostname — matching against node_id (which is the hostname)
     var tasks = allTasks.filter(function (t) { return t.hostname === NODE_ID; });
+    if (tasks.length > 0) connectLogStream();
     if (tasks.length === 0) {
       tasksBody.innerHTML = '<tr><td colspan="5">No provisioning tasks for this node</td></tr>';
     } else {
@@ -189,27 +191,30 @@ async function refreshDetail() {
   }
 }
 
-// ponytail: SSE live log viewer — connect once, auto-scroll, reconnect on error
+// ponytail: SSE live log viewer — poll loop triggers connection when tasks exist
 var logSource = null;
+var logStreamDone = false;
 
 function connectLogStream() {
+  if (logSource || logStreamDone) return;
+
   var panel = document.getElementById("logs-panel");
   var output = document.getElementById("logs-output");
   var status = document.getElementById("logs-status");
 
-  if (logSource) { logSource.close(); logSource = null; }
+  output.textContent = "";
+  panel.style.display = "";
+  status.textContent = "connecting";
+  status.className = "badge badge-in-progress";
 
   var es = new EventSource("/admin/provisioning/" + encodeURIComponent(NODE_ID) + "/logs");
   logSource = es;
 
   es.addEventListener("open", function () {
-    panel.style.display = "";
     status.textContent = "streaming";
-    status.className = "badge badge-in-progress";
   });
 
   es.addEventListener("message", function (ev) {
-    panel.style.display = "";
     try {
       var entry = JSON.parse(ev.data);
       var line = document.createElement("div");
@@ -228,7 +233,6 @@ function connectLogStream() {
       line.appendChild(msg);
 
       output.appendChild(line);
-      // auto-scroll if near bottom
       var nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 60;
       if (nearBottom) output.scrollTop = output.scrollHeight;
     } catch (_) {}
@@ -237,6 +241,7 @@ function connectLogStream() {
   es.addEventListener("error", function () {
     es.close();
     logSource = null;
+    logStreamDone = true;
     status.textContent = "ended";
     status.className = "badge badge-complete";
   });
@@ -245,5 +250,4 @@ function connectLogStream() {
 document.addEventListener("DOMContentLoaded", function () {
   refreshDetail();
   setInterval(refreshDetail, POLL_INTERVAL_MS);
-  connectLogStream();
 });
