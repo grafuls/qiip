@@ -44,6 +44,7 @@ from inference_proxy.provisioning.ssh_client import SSHClient
 from inference_proxy.quads.client import QUADSClient
 from inference_proxy.quads.poller import QUADSPoller
 from inference_proxy.quads.schedule_enforcer import ScheduleEnforcer
+from inference_proxy.redfish.client import RedfishClient
 from inference_proxy.resilience.health_checker import run_health_checker
 from inference_proxy.resilience.shutdown import ShutdownMiddleware
 from inference_proxy.routing.connection_tracker import ConnectionTracker
@@ -199,6 +200,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             app.state.schedule_enforcer = None
             quads_http = None
 
+        if resolved_settings.redfish.bmc_username is not None:
+            redfish_http = httpx.AsyncClient(
+                auth=httpx.BasicAuth(
+                    username=resolved_settings.redfish.bmc_username,
+                    password=resolved_settings.redfish.bmc_password.get_secret_value(),  # type: ignore[union-attr]
+                ),
+                verify=resolved_settings.redfish.verify_ssl,
+                timeout=httpx.Timeout(
+                    connect=resolved_settings.redfish.connect_timeout,
+                    read=resolved_settings.redfish.read_timeout,
+                    write=10.0,
+                    pool=10.0,
+                ),
+            )
+            redfish_client = RedfishClient(
+                redfish_http,
+                bmc_host_template=resolved_settings.redfish.bmc_host_template,
+                system_id=resolved_settings.redfish.system_id,
+                poll_timeout=resolved_settings.redfish.power_poll_timeout,
+                poll_interval=resolved_settings.redfish.power_poll_interval,
+            )
+            app.state.redfish_client = redfish_client
+            logger.info("redfish client initialized")
+        else:
+            app.state.redfish_client = None
+            redfish_http = None
+            logger.info("redfish disabled (no bmc_username configured)")
+
         http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(
                 connect=resolved_settings.proxy.connect_timeout,
@@ -233,6 +262,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await app.state.quads_poller.stop()
         if quads_http is not None:
             await quads_http.aclose()
+        if redfish_http is not None:
+            await redfish_http.aclose()
         stop_event.set()
         watch_thread.join(timeout=10)
         health_thread.join(timeout=10)

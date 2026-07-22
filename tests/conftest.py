@@ -18,6 +18,7 @@ from inference_proxy.config.dependencies import (
     get_proxy_client,
     get_quads_client,
     get_quads_poller,
+    get_redfish_client,
     get_request_metrics,
     get_settings,
     get_unified_node_service,
@@ -114,10 +115,12 @@ def app(
     application.state.request_metrics = request_metrics
     application.state.quads_poller = None
     application.state.quads_client = None
+    application.state.redfish_client = None
     application.state.shutting_down = False
     application.dependency_overrides[get_proxy_client] = lambda: proxy_client
     application.dependency_overrides[get_quads_client] = lambda: None
     application.dependency_overrides[get_quads_poller] = lambda: None
+    application.dependency_overrides[get_redfish_client] = lambda: None
     application.dependency_overrides[get_node_selector] = lambda: node_selector
     application.dependency_overrides[get_circuit_breaker_registry] = (
         lambda: circuit_breaker_registry
