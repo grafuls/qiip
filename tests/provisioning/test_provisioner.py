@@ -926,7 +926,7 @@ class TestPowerOnIfNeeded:
         etcd = MagicMock()
         etcd.put = MagicMock()
         provisioner = _make_provisioner(etcd_client=etcd)
-        provisioner._provision_started_at = datetime.now(timezone.utc)
+
 
         with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_tt:
             mock_tt.return_value = True
@@ -944,7 +944,7 @@ class TestPowerOnIfNeeded:
         redfish.power_action = AsyncMock(return_value="On")
 
         provisioner = _make_provisioner(etcd_client=etcd, redfish_client=redfish)
-        provisioner._provision_started_at = datetime.now(timezone.utc)
+
 
         state_steps: list[str] = []
 
@@ -968,7 +968,7 @@ class TestPowerOnIfNeeded:
         redfish.power_action = AsyncMock(side_effect=RedfishError("BMC unreachable"))
 
         provisioner = _make_provisioner(redfish_client=redfish)
-        provisioner._provision_started_at = datetime.now(timezone.utc)
+
 
         with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock):
             with patch.object(provisioner, "_wait_for_ssh", new_callable=AsyncMock) as mock_wait:
@@ -993,7 +993,7 @@ class TestPowerOnIfNeeded:
         redfish.power_action = tracking_power_action
 
         provisioner = _make_provisioner(etcd_client=etcd, redfish_client=redfish)
-        provisioner._provision_started_at = datetime.now(timezone.utc)
+
 
         async def tracking_to_thread(fn, *args):
             if fn == etcd.put and len(args) >= 2 and "/provisioning/" in str(args[0]):

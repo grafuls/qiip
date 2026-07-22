@@ -18,7 +18,7 @@ const ACTION_CONFIG = {
   setup: {
     method: "POST",
     url: () => "/admin/nodes/setup",
-    body: (nodeId) => ({ hostname: nodeId }),
+    body: (nodeId, node) => ({ hostname: nodeId, managed: node ? node.managed !== false : true }),
     confirm: false,
     confirmMsg: null,
     label: "Setup Node",
@@ -39,7 +39,7 @@ const ACTION_CONFIG = {
   retry: {
     method: "POST",
     url: () => "/admin/nodes/setup",
-    body: (nodeId) => ({ hostname: nodeId }),
+    body: (nodeId, node) => ({ hostname: nodeId, managed: node ? node.managed !== false : true }),
     confirm: false,
     confirmMsg: null,
     label: "Retry",
@@ -69,14 +69,14 @@ const ACTION_CONFIG = {
   },
 };
 
-async function handleAction(action, nodeId) {
+async function handleAction(action, nodeId, node) {
   const config = ACTION_CONFIG[action];
   if (!config) return;
   if (config.confirm && !window.confirm(config.confirmMsg(nodeId))) return;
   const options = { method: config.method };
   if (config.body) {
     options.headers = { "Content-Type": "application/json" };
-    options.body = JSON.stringify(config.body(nodeId));
+    options.body = JSON.stringify(config.body(nodeId, node));
   }
   try {
     const resp = await fetch(config.url(nodeId), options);
@@ -117,7 +117,7 @@ function renderQuadsStatus(data) {
   el.appendChild(badge);
 }
 
-function createActionButton(action, nodeId) {
+function createActionButton(action, nodeId, node) {
   const config = ACTION_CONFIG[action];
   const btn = document.createElement("button");
   btn.type = "button";
@@ -126,7 +126,7 @@ function createActionButton(action, nodeId) {
   btn.addEventListener("click", async function () {
     btn.disabled = true;
     try {
-      await handleAction(action, nodeId);
+      await handleAction(action, nodeId, node);
     } finally {
       btn.disabled = false;
     }
@@ -216,11 +216,11 @@ async function refreshDashboard() {
         const tdActions = document.createElement("td");
         const actions = node.actions || [];
         if (actions.length === 1) {
-          tdActions.appendChild(createActionButton(actions[0], node.node_id));
+          tdActions.appendChild(createActionButton(actions[0], node.node_id, node));
         } else if (actions.length > 1) {
           const group = document.createElement("div");
           group.className = "action-group";
-          group.appendChild(createActionButton(actions[0], node.node_id));
+          group.appendChild(createActionButton(actions[0], node.node_id, node));
 
           const caret = document.createElement("button");
           caret.type = "button";
@@ -229,7 +229,7 @@ async function refreshDashboard() {
           const menu = document.createElement("div");
           menu.className = "action-menu";
           for (let i = 1; i < actions.length; i++) {
-            const menuBtn = createActionButton(actions[i], node.node_id);
+            const menuBtn = createActionButton(actions[i], node.node_id, node);
             menu.appendChild(menuBtn);
           }
           caret.addEventListener("click", function (e) {

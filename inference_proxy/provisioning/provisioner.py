@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import shlex
 from collections.abc import Coroutine
 from datetime import datetime, timezone
 
@@ -83,7 +84,6 @@ class NodeProvisioner:
         self._registry = registry
         self._tracker = connection_tracker
         self._redfish_client = redfish_client
-        self._provision_started_at: datetime | None = None
         self._background_tasks: set[asyncio.Task[None]] = set()
 
     async def list_tasks_raw(self) -> list[tuple[bytes, object]]:
@@ -99,13 +99,14 @@ class NodeProvisioner:
         *,
         failed_step: str | None = None,
         error: str | None = None,
+        started_at: datetime | None = None,
     ) -> None:
         """Write provisioning state to etcd (D-05). Best-effort (Pitfall 3)."""
         now = datetime.now(timezone.utc)
         state = ProvisioningState(
             hostname=hostname,
             current_step=step,
-            started_at=self._provision_started_at or now,
+            started_at=started_at or now,
             updated_at=now,
             failed_step=failed_step,
             error=error,
@@ -231,12 +232,12 @@ class NodeProvisioner:
         start-vllm.sh -> health poll -> register HEALTHY.
         Tracks state in etcd at each step (D-05 through D-11).
         """
-        self._provision_started_at = datetime.now(timezone.utc)
+        provision_started_at = datetime.now(timezone.utc)
         logger.info("provisioning_start", hostname=hostname)
 
-        await self._update_state(hostname, ProvisioningStep.PENDING)
+        await self._update_state(hostname, ProvisioningStep.PENDING, started_at=provision_started_at)
         await self._power_on_if_needed(hostname)
-        await self._update_state(hostname, ProvisioningStep.PREFLIGHT)
+        await self._update_state(hostname, ProvisioningStep.PREFLIGHT, started_at=provision_started_at)
 
         # D-04: preflight before any setup work
         try:
@@ -245,6 +246,7 @@ class NodeProvisioner:
             await self._update_state(
                 hostname, ProvisioningStep.FAILED,
                 failed_step="preflight", error="pre-flight validation failed",
+                started_at=provision_started_at,
             )
             raise
 
@@ -265,24 +267,24 @@ class NodeProvisioner:
 
         current_step = "uploading_scripts"
         try:
-            current_step = "uploading_scripts"
-            await self._update_state(hostname, ProvisioningStep.UPLOADING_SCRIPTS)
+            await self._update_state(hostname, ProvisioningStep.UPLOADING_SCRIPTS, started_at=provision_started_at)
             await self._upload_scripts(hostname)
             await self._run_setup(hostname)
             current_step = "starting_vllm"
-            await self._update_state(hostname, ProvisioningStep.STARTING_VLLM)
+            await self._update_state(hostname, ProvisioningStep.STARTING_VLLM, started_at=provision_started_at)
             model = await self._run_start_vllm(hostname)
             current_step = "health_poll"
-            await self._update_state(hostname, ProvisioningStep.HEALTH_POLL)
+            await self._update_state(hostname, ProvisioningStep.HEALTH_POLL, started_at=provision_started_at)
             await self._poll_health(hostname)
             current_step = "registering"
-            await self._update_state(hostname, ProvisioningStep.REGISTERING)
+            await self._update_state(hostname, ProvisioningStep.REGISTERING, started_at=provision_started_at)
             await self._register_node(hostname, model, managed=managed)
-            await self._update_state(hostname, ProvisioningStep.COMPLETE)
+            await self._update_state(hostname, ProvisioningStep.COMPLETE, started_at=provision_started_at)
         except (RemoteCommandError, SSHConnectionError, ProvisioningError) as exc:
             await self._update_state(
                 hostname, ProvisioningStep.FAILED,
                 failed_step=current_step, error=str(exc),
+                started_at=provision_started_at,
             )
             # Update node entry to FAILED so it doesn't stay stuck as PROVISIONING
             failed_node = Node(
@@ -412,7 +414,7 @@ class NodeProvisioner:
         Graceful: drain -> stop -> rm -> deregister.
         Force: rm --force -> deregister.
         """
-        self._provision_started_at = datetime.now(timezone.utc)
+        teardown_started_at = datetime.now(timezone.utc)
         logger.info("teardown_start", hostname=hostname, force=force)
 
         # Derive container name from registry model, fallback to hostname
@@ -426,29 +428,32 @@ class NodeProvisioner:
 
         try:
             if not force:
-                await self._update_state(hostname, ProvisioningStep.DRAINING)
+                await self._update_state(hostname, ProvisioningStep.DRAINING, started_at=teardown_started_at)
                 if self._registry is not None:
                     self._registry.drain(hostname)
                 await self._drain_wait(hostname)
 
-            await self._update_state(hostname, ProvisioningStep.STOPPING_CONTAINER)
+            await self._update_state(hostname, ProvisioningStep.STOPPING_CONTAINER, started_at=teardown_started_at)
             if force:
-                await self._ssh_run_command(hostname, f"podman rm --force {container_name}")
+                safe_name = shlex.quote(container_name)
+                await self._ssh_run_command(hostname, f"podman rm --force {safe_name}")
             else:
+                safe_name = shlex.quote(container_name)
                 await self._ssh_run_command(
-                    hostname, f"podman stop {container_name} && podman rm {container_name}"
+                    hostname, f"podman stop {safe_name} && podman rm {safe_name}"
                 )
 
-            await self._update_state(hostname, ProvisioningStep.DEREGISTERING)
+            await self._update_state(hostname, ProvisioningStep.DEREGISTERING, started_at=teardown_started_at)
             await asyncio.to_thread(
                 self._etcd_client.delete, f"{self._etcd_client.prefix}{hostname}"
             )
 
-            await self._update_state(hostname, ProvisioningStep.TEARDOWN_COMPLETE)
+            await self._update_state(hostname, ProvisioningStep.TEARDOWN_COMPLETE, started_at=teardown_started_at)
         except (RemoteCommandError, SSHConnectionError) as exc:
             await self._update_state(
                 hostname, ProvisioningStep.FAILED,
                 failed_step="teardown", error=str(exc),
+                started_at=teardown_started_at,
             )
             raise ProvisioningError(str(exc)) from exc
 
