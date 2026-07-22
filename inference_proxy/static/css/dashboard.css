@@ -460,6 +460,28 @@ td button:focus-visible {
 .toast-warning { background: var(--warning); }
 .toast-info { background: var(--primary); }
 
+/* --- Log viewer --- */
+.log-viewer {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  max-height: 28rem;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.log-line { display: flex; gap: 0.75rem; }
+.log-ts { color: var(--text-light); flex-shrink: 0; }
+.log-msg { flex: 1; }
+.log-line[data-level="error"] .log-msg { color: var(--danger); }
+.log-line[data-level="warning"] .log-msg { color: var(--warning); }
+.log-line[data-stream="stderr"] .log-msg { color: var(--danger); }
+
 /* --- Misc --- */
 .error-text { color: var(--danger); font-size: 0.8125rem; }
 

@@ -189,7 +189,61 @@ async function refreshDetail() {
   }
 }
 
+// ponytail: SSE live log viewer — connect once, auto-scroll, reconnect on error
+var logSource = null;
+
+function connectLogStream() {
+  var panel = document.getElementById("logs-panel");
+  var output = document.getElementById("logs-output");
+  var status = document.getElementById("logs-status");
+
+  if (logSource) { logSource.close(); logSource = null; }
+
+  var es = new EventSource("/admin/provisioning/" + encodeURIComponent(NODE_ID) + "/logs");
+  logSource = es;
+
+  es.addEventListener("open", function () {
+    panel.style.display = "";
+    status.textContent = "streaming";
+    status.className = "badge badge-in-progress";
+  });
+
+  es.addEventListener("message", function (ev) {
+    panel.style.display = "";
+    try {
+      var entry = JSON.parse(ev.data);
+      var line = document.createElement("div");
+      line.className = "log-line";
+      if (entry.level) line.dataset.level = entry.level;
+      if (entry.stream) line.dataset.stream = entry.stream;
+
+      var ts = document.createElement("span");
+      ts.className = "log-ts";
+      ts.textContent = new Date(entry.ts).toLocaleTimeString();
+      line.appendChild(ts);
+
+      var msg = document.createElement("span");
+      msg.className = "log-msg";
+      msg.textContent = entry.msg;
+      line.appendChild(msg);
+
+      output.appendChild(line);
+      // auto-scroll if near bottom
+      var nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 60;
+      if (nearBottom) output.scrollTop = output.scrollHeight;
+    } catch (_) {}
+  });
+
+  es.addEventListener("error", function () {
+    es.close();
+    logSource = null;
+    status.textContent = "ended";
+    status.className = "badge badge-complete";
+  });
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   refreshDetail();
   setInterval(refreshDetail, POLL_INTERVAL_MS);
+  connectLogStream();
 });
