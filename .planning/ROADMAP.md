@@ -178,4 +178,4 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 21. Redfish Client & Configuration | v1.5 | 2/2 | Complete    | 2026-07-22 |
 | 22. Power Management Endpoints | v1.5 | 1/1 | Complete    | 2026-07-22 |
 | 23. Auto-Power-On in Provisioner | v1.5 | 1/1 | Complete    | 2026-07-22 |
-| 24. Provisioning Error Diagnostics | v1.5 | 2/2 | Complete   | 2026-07-22 |
+| 24. Provisioning Error Diagnostics | v1.5 | 2/2 | Complete    | 2026-07-22 |

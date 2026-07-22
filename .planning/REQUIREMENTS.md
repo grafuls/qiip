@@ -10,8 +10,8 @@
 
 ## Diagnostics
 
-- [ ] **DIAG-01**: Failed provisioning step name and error details are captured and stored
-- [ ] **DIAG-02**: Dashboard displays failure details inline for failed nodes instead of just a state badge
+- [x] **DIAG-01**: Failed provisioning step name and error details are captured and stored
+- [x] **DIAG-02**: Dashboard displays failure details inline for failed nodes instead of just a state badge
 - [x] **DIAG-03**: Redfish error responses are mapped to human-readable messages
 
 ## Future Requirements
