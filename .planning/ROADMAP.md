@@ -84,11 +84,11 @@
   3. Redfish error responses are translated to human-readable messages (not raw JSON)
   4. BMC credentials are never exposed in logs, error messages, or API responses
 
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 Plans:
 **Wave 1**
 
-- [ ] 21-01-PLAN.md — Redfish client module (settings, errors, client, tests)
+- [x] 21-01-PLAN.md — Redfish client module (settings, errors, client, tests)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -165,7 +165,7 @@ Phases execute in numeric order: 21 → 22 → 23 → 24
 | 18. Dashboard UI Update | v1.3 | 2/2 | Complete | 2026-07-17 |
 | 19. Chat Page and Streaming | v1.4 | 2/2 | Complete | 2026-07-21 |
 | 20. Chat Configuration | v1.4 | 1/1 | Complete | 2026-07-21 |
-| 21. Redfish Client & Configuration | v1.5 | 0/2 | In progress | - |
+| 21. Redfish Client & Configuration | v1.5 | 1/2 | In Progress|  |
 | 22. Power Management Endpoints | v1.5 | 0/0 | Not started | - |
 | 23. Auto-Power-On in Provisioner | v1.5 | 0/0 | Not started | - |
 | 24. Provisioning Error Diagnostics | v1.5 | 0/0 | Not started | - |
