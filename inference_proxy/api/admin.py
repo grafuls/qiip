@@ -9,6 +9,7 @@ and circuit breaker state for the operations dashboard.
 from __future__ import annotations
 
 import json
+import re
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
@@ -54,6 +55,17 @@ admin_router = APIRouter(prefix="/admin", tags=["admin"])
 # D-08: module-level set to prevent duplicate setup requests
 # ponytail: single-worker-only dedup guard; move to etcd CAS if workers > 1
 pending_hosts: set[str] = set()
+
+# Regex from SetupRequest.validate_hostname — reused for path-parameter validation
+_HOSTNAME_RE = re.compile(r"[a-zA-Z0-9]([a-zA-Z0-9\-\.]*[a-zA-Z0-9])?")
+
+
+def _validated_hostname(hostname: str) -> str:
+    """Normalize and validate a hostname path parameter."""
+    hostname = canonical_hostname(hostname)
+    if not hostname or len(hostname) > 253 or not _HOSTNAME_RE.fullmatch(hostname):
+        raise HTTPException(status_code=400, detail="Invalid hostname")
+    return hostname
 
 
 @admin_router.get("/nodes")
@@ -191,7 +203,7 @@ async def get_power_state(
     """Query current power state of a node's BMC (PWR-04)."""
     if redfish is None:
         raise HTTPException(status_code=503, detail="Redfish not configured")
-    hostname = canonical_hostname(hostname)
+    hostname = _validated_hostname(hostname)
     try:
         state = await redfish.get_power_state(hostname)
     except RedfishError as exc:
@@ -208,7 +220,7 @@ async def execute_power_action(
     """Execute a power action on a node's BMC (PWR-01/02/03, D-05)."""
     if redfish is None:
         raise HTTPException(status_code=503, detail="Redfish not configured")
-    hostname = canonical_hostname(hostname)
+    hostname = _validated_hostname(hostname)
     try:
         final_state = await redfish.power_action(hostname, body.action.value)
     except RedfishError as exc:
