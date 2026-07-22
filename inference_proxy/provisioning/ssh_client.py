@@ -32,13 +32,25 @@ class SSHConnectionError(Exception):
 class RemoteCommandError(Exception):
     """Raised when a remote command exits with non-zero status."""
 
-    def __init__(self, host: str, command: str, exit_status: int) -> None:
+    def __init__(
+        self, host: str, command: str, exit_status: int, stderr: str = ""
+    ) -> None:
         self.host = host
         self.command = command
         self.exit_status = exit_status
-        super().__init__(
-            f"Command '{command}' on {host} exited with status {exit_status}"
-        )
+        self.stderr = stderr
+        tail = _stderr_tail(stderr) if stderr else ""
+        msg = f"Command '{command}' on {host} exited with status {exit_status}"
+        if tail:
+            msg += f"\n--- stderr (last 50 lines) ---\n{tail}"
+        super().__init__(msg)
+
+
+def _stderr_tail(stderr: str, max_lines: int = 50) -> str:
+    lines = stderr.splitlines()
+    if len(lines) > max_lines:
+        return "\n".join(lines[-max_lines:])
+    return stderr
 
 
 class SSHClient:
@@ -89,7 +101,8 @@ class SSHClient:
 
                     if process.exit_status is not None and process.exit_status != 0:
                         raise RemoteCommandError(
-                            host, command, process.exit_status
+                            host, command, process.exit_status,
+                            stderr=stderr_output or "",
                         )
         except asyncssh.PermissionDenied as exc:
             raise SSHConnectionError(

@@ -23,6 +23,7 @@ from inference_proxy.discovery.etcd_client import EtcdClient
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.discovery.serializer import node_to_etcd
 from inference_proxy.models.node import Node, NodeStatus
+from inference_proxy.provisioning.log_buffer import ProvisioningLogBuffer
 from inference_proxy.provisioning.ssh_client import (
     RemoteCommandError,
     SSHClient,
@@ -77,6 +78,7 @@ class NodeProvisioner:
         registry: NodeRegistry | None = None,
         connection_tracker: ConnectionTracker | None = None,
         redfish_client: RedfishClient | None = None,
+        log_buffer: ProvisioningLogBuffer | None = None,
     ) -> None:
         self._ssh_client = ssh_client
         self._etcd_client = etcd_client
@@ -84,7 +86,22 @@ class NodeProvisioner:
         self._registry = registry
         self._tracker = connection_tracker
         self._redfish_client = redfish_client
+        self._log_buffer = log_buffer or ProvisioningLogBuffer()
         self._background_tasks: set[asyncio.Task[None]] = set()
+
+    @property
+    def log_buffer(self) -> ProvisioningLogBuffer:
+        return self._log_buffer
+
+    def _log(
+        self,
+        hostname: str,
+        level: str,
+        msg: str,
+        *,
+        stream: str | None = None,
+    ) -> None:
+        self._log_buffer.append(hostname, level, msg, stream=stream)
 
     async def list_tasks_raw(self) -> list[tuple[bytes, object]]:
         """Return raw provisioning task entries from etcd."""
@@ -234,20 +251,25 @@ class NodeProvisioner:
         """
         provision_started_at = datetime.now(timezone.utc)
         logger.info("provisioning_start", hostname=hostname)
+        self._log_buffer.create(hostname)
+        self._log(hostname, "info", "Provisioning started")
 
         await self._update_state(hostname, ProvisioningStep.PENDING, started_at=provision_started_at)
         await self._power_on_if_needed(hostname)
         await self._update_state(hostname, ProvisioningStep.PREFLIGHT, started_at=provision_started_at)
+        self._log(hostname, "info", "Running pre-flight checks")
 
         # D-04: preflight before any setup work
         try:
             await self.preflight(hostname)
-        except PreflightError:
+        except PreflightError as exc:
+            self._log(hostname, "error", f"Pre-flight failed: {exc}")
             await self._update_state(
                 hostname, ProvisioningStep.FAILED,
-                failed_step="preflight", error="pre-flight validation failed",
+                failed_step="preflight", error=str(exc),
                 started_at=provision_started_at,
             )
+            self._log_buffer.mark_complete(hostname)
             raise
 
         # D-09: Register node as PROVISIONING before setup
@@ -268,19 +290,26 @@ class NodeProvisioner:
         current_step = "uploading_scripts"
         try:
             await self._update_state(hostname, ProvisioningStep.UPLOADING_SCRIPTS, started_at=provision_started_at)
+            self._log(hostname, "info", "Uploading provisioning scripts")
             await self._upload_scripts(hostname)
+            self._log(hostname, "info", "Running setup.sh")
             await self._run_setup(hostname)
             current_step = "starting_vllm"
             await self._update_state(hostname, ProvisioningStep.STARTING_VLLM, started_at=provision_started_at)
+            self._log(hostname, "info", "Running start-vllm.sh")
             model = await self._run_start_vllm(hostname)
             current_step = "health_poll"
             await self._update_state(hostname, ProvisioningStep.HEALTH_POLL, started_at=provision_started_at)
+            self._log(hostname, "info", "Waiting for vLLM health endpoint")
             await self._poll_health(hostname)
             current_step = "registering"
             await self._update_state(hostname, ProvisioningStep.REGISTERING, started_at=provision_started_at)
+            self._log(hostname, "info", f"Registering node (model={model})")
             await self._register_node(hostname, model, managed=managed)
             await self._update_state(hostname, ProvisioningStep.COMPLETE, started_at=provision_started_at)
+            self._log(hostname, "info", "Provisioning complete")
         except (RemoteCommandError, SSHConnectionError, ProvisioningError) as exc:
+            self._log(hostname, "error", f"Failed at step '{current_step}': {exc}")
             await self._update_state(
                 hostname, ProvisioningStep.FAILED,
                 failed_step=current_step, error=str(exc),
@@ -301,6 +330,8 @@ class NodeProvisioner:
             except Exception:
                 logger.warning("failed_node_update_failed", hostname=hostname)
             raise ProvisioningError(str(exc)) from exc
+        finally:
+            self._log_buffer.mark_complete(hostname)
 
         logger.info("provisioning_complete", hostname=hostname)
 
@@ -318,19 +349,22 @@ class NodeProvisioner:
                 if match:
                     step_name, status = match.group(1), match.group(2)
                     if status == "START":
-                        # D-06: step_name matches ProvisioningStep member names
                         try:
                             await self._update_state(hostname, ProvisioningStep(step_name))
                         except ValueError:
-                            pass  # Unknown step name, skip state update
+                            pass
                     if status == "FAIL":
                         logger.error("step_failed", step=step_name, hostname=hostname)
+                        self._log(hostname, "error", f"[STEP:{step_name}:FAIL]")
                     else:
                         logger.info("step_marker", step=step_name, status=status, hostname=hostname)
+                        self._log(hostname, "info", f"[STEP:{step_name}:{status}]")
                 else:
                     logger.debug("setup_stdout", line=line, hostname=hostname)
-            else:  # stderr
+                    self._log(hostname, "debug", line, stream="stdout")
+            else:
                 logger.warning("setup_stderr", line=line, hostname=hostname)
+                self._log(hostname, "warning", line, stream="stderr")
 
     async def _run_start_vllm(self, hostname: str) -> str:
         """Run start-vllm.sh and extract model name from stdout."""
@@ -339,10 +373,12 @@ class NodeProvisioner:
             hostname, "bash auto-vllm-container/start-vllm.sh"
         ):
             logger.debug("start_vllm_output", stream=stream, line=line, hostname=hostname)
+            self._log(hostname, "debug", line, stream=stream)
             if stream == "stdout":
                 match = MODEL_PATTERN.search(line)
                 if match:
                     model = match.group(1).strip()
+                    self._log(hostname, "info", f"Detected model: {model}")
 
         if model is None:
             raise ProvisioningError(

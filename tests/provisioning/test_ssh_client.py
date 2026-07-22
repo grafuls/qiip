@@ -124,6 +124,21 @@ class TestSSHClientNonZeroExit:
         assert exc_info.value.command == "fail"
         assert exc_info.value.exit_status == 1
 
+    @pytest.mark.asyncio
+    @patch("inference_proxy.provisioning.ssh_client.asyncssh")
+    async def test_error_includes_stderr(self, mock_asyncssh: MagicMock) -> None:
+        _setup_mock_asyncssh(
+            mock_asyncssh, exit_status=1, stderr_text="error: package not found\n"
+        )
+        client = SSHClient(_make_settings())
+
+        with pytest.raises(RemoteCommandError) as exc_info:
+            async for _ in client.run_streaming("host1", "fail"):
+                pass
+
+        assert exc_info.value.stderr == "error: package not found\n"
+        assert "package not found" in str(exc_info.value)
+
 
 class TestSSHClientConnectionError:
     """SSHConnectionError wraps asyncssh auth/disconnect/OS errors."""

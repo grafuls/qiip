@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import AsyncIterator
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from inference_proxy.config.dependencies import (
@@ -166,6 +168,33 @@ async def list_provisioning_tasks(
         except (json.JSONDecodeError, ValidationError) as exc:
             logger.warning("task_parse_failed", raw=value_bytes[:200], error=str(exc))
     return tasks
+
+
+@admin_router.get("/provisioning/{hostname}/logs")
+async def stream_provisioning_logs(
+    hostname: str,
+    provisioner: NodeProvisioner = Depends(get_provisioner),
+) -> StreamingResponse:
+    """Stream provisioning log entries as SSE events.
+
+    If provisioning is in progress, keeps the connection open and
+    streams live.  If complete/failed, dumps all entries and closes.
+    Returns 404 if no log exists for the hostname.
+    """
+    hostname = _validated_hostname(hostname)
+    buf = provisioner.log_buffer
+    if not buf.has(hostname):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No provisioning log for '{hostname}'",
+        )
+
+    async def _generate() -> AsyncIterator[str]:
+        async for _pos, entry in buf.iter_from(hostname):
+            data = json.dumps(entry)
+            yield f"data: {data}\n\n"
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
 
 
 @admin_router.delete("/nodes/{node_id}", status_code=202)

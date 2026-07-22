@@ -39,6 +39,7 @@ from inference_proxy.discovery.serializer import node_from_etcd
 from inference_proxy.discovery.watcher import run_watcher
 from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
+from inference_proxy.provisioning.log_buffer import ProvisioningLogBuffer
 from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.provisioning.ssh_client import SSHClient
 from inference_proxy.quads.client import QUADSClient
@@ -190,6 +191,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             redfish_http = None
             logger.info("redfish disabled (no bmc_username configured)")
 
+        log_buffer = ProvisioningLogBuffer()
+
         provisioner = NodeProvisioner(
             ssh_client=ssh_client,
             etcd_client=etcd_client,
@@ -197,6 +200,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             registry=registry,
             connection_tracker=connection_tracker,
             redfish_client=app.state.redfish_client,
+            log_buffer=log_buffer,
         )
         app.state.provisioner = provisioner
 
