@@ -162,4 +162,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-21 after v1.5 Node Setup Enhancements milestone start*
+*Last updated: 2026-07-22 after Phase 22 (Power Management Endpoints) complete*
