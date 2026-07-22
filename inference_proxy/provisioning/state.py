@@ -20,6 +20,7 @@ class ProvisioningStep(StrEnum):
     """Steps in the node provisioning sequence (D-06)."""
 
     PENDING = "pending"
+    POWERING_ON = "powering_on"
     PREFLIGHT = "preflight"
     UPLOADING_SCRIPTS = "uploading_scripts"
     NVIDIA_REPO = "nvidia_repo"

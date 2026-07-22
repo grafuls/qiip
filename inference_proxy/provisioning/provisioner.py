@@ -28,6 +28,8 @@ from inference_proxy.provisioning.ssh_client import (
     SSHConnectionError,
 )
 from inference_proxy.provisioning.state import ProvisioningState, ProvisioningStep
+from inference_proxy.redfish.client import RedfishClient
+from inference_proxy.redfish.errors import RedfishError
 from inference_proxy.routing.connection_tracker import ConnectionTracker
 
 logger = structlog.get_logger()
@@ -73,12 +75,14 @@ class NodeProvisioner:
         settings: ProvisioningSettings,
         registry: NodeRegistry | None = None,
         connection_tracker: ConnectionTracker | None = None,
+        redfish_client: RedfishClient | None = None,
     ) -> None:
         self._ssh_client = ssh_client
         self._etcd_client = etcd_client
         self._settings = settings
         self._registry = registry
         self._tracker = connection_tracker
+        self._redfish_client = redfish_client
         self._provision_started_at: datetime | None = None
         self._background_tasks: set[asyncio.Task[None]] = set()
 
@@ -120,6 +124,51 @@ class NodeProvisioner:
             if stream == "stdout":
                 lines.append(line)
         return "\n".join(lines)
+
+    async def _power_on_if_needed(self, hostname: str) -> None:
+        """Power on the host via Redfish if configured (D-01, D-06, D-07).
+
+        Best-effort: RedfishError is caught and logged so provisioning
+        can continue even if the BMC is unreachable (server may already be on).
+        """
+        if self._redfish_client is None:
+            logger.info("redfish_not_configured", msg="skipping power check")
+            return
+
+        await self._update_state(hostname, ProvisioningStep.POWERING_ON)
+        try:
+            state = await self._redfish_client.power_action(hostname, "On")
+            logger.info("power_on_result", hostname=hostname, state=state)
+        except RedfishError as exc:
+            logger.warning("power_on_failed", hostname=hostname, error=str(exc))
+
+        await self._wait_for_ssh(hostname)
+
+    async def _wait_for_ssh(self, hostname: str) -> None:
+        """Wait for SSH port 22 to become reachable (D-03, D-05).
+
+        Deadline-based retry loop mirroring _poll_health(). On timeout,
+        logs a warning and returns -- preflight will fail naturally if
+        SSH is truly unreachable.
+        """
+        deadline = asyncio.get_running_loop().time() + self._settings.boot_wait_timeout
+        while asyncio.get_running_loop().time() < deadline:
+            try:
+                _reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(hostname, 22), timeout=10
+                )
+                writer.close()
+                await writer.wait_closed()
+                logger.info("ssh_ready", hostname=hostname)
+                return
+            except (OSError, TimeoutError, asyncio.TimeoutError):
+                pass
+            await asyncio.sleep(self._settings.boot_wait_interval)
+        logger.warning(
+            "ssh_wait_timeout",
+            hostname=hostname,
+            timeout=self._settings.boot_wait_timeout,
+        )
 
     async def preflight(self, hostname: str) -> None:
         """Pre-flight validation: TCP probe + SSH diagnostics (D-01, D-04).
@@ -186,6 +235,7 @@ class NodeProvisioner:
         logger.info("provisioning_start", hostname=hostname)
 
         await self._update_state(hostname, ProvisioningStep.PENDING)
+        await self._power_on_if_needed(hostname)
         await self._update_state(hostname, ProvisioningStep.PREFLIGHT)
 
         # D-04: preflight before any setup work

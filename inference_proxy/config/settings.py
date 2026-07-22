@@ -115,6 +115,8 @@ class ProvisioningSettings(BaseModel):
     min_disk_gb: int = 20  # D-02: minimum free disk for provisioning
     drain_timeout: int = 30  # D-10: seconds to wait for connections to drain
     scripts_dir: Path = Path("auto-vllm-container")
+    boot_wait_timeout: int = 300  # D-05: 5 minutes for cold boot
+    boot_wait_interval: int = 10
 
 
 class QUADSSettings(BaseModel):
