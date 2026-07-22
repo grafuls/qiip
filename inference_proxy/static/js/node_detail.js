@@ -62,7 +62,7 @@ async function handleAction(action, nodeId) {
     var resp = await fetch(config.url(nodeId), options);
     if (resp.ok) {
       showToast(config.successMsg(nodeId), "success");
-      if (action === "setup" || action === "retry") { logStreamDone = false; }
+      if (action === "setup" || action === "retry") { logReceivedAny = false; }
     } else {
       var data = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
       showToast(data.detail || "HTTP " + resp.status, "error");
@@ -195,16 +195,16 @@ async function refreshDetail() {
 
 // ponytail: SSE live log viewer — poll loop triggers connection when tasks exist
 var logSource = null;
-var logStreamDone = false;
+var logReceivedAny = false;
 
 function connectLogStream() {
-  if (logSource || logStreamDone) return;
+  if (logSource) return;
 
   var panel = document.getElementById("logs-panel");
   var output = document.getElementById("logs-output");
   var status = document.getElementById("logs-status");
 
-  output.textContent = "";
+  if (!logReceivedAny) output.textContent = "";
   panel.style.display = "";
   status.textContent = "connecting";
   status.className = "badge badge-in-progress";
@@ -217,6 +217,7 @@ function connectLogStream() {
   });
 
   es.addEventListener("message", function (ev) {
+    logReceivedAny = true;
     try {
       var entry = JSON.parse(ev.data);
       var line = document.createElement("div");
@@ -243,9 +244,13 @@ function connectLogStream() {
   es.addEventListener("error", function () {
     es.close();
     logSource = null;
-    logStreamDone = true;
-    status.textContent = "ended";
-    status.className = "badge badge-complete";
+    if (logReceivedAny) {
+      status.textContent = "ended";
+      status.className = "badge badge-complete";
+    } else {
+      // ponytail: 404 or premature close — hide panel, retry on next poll
+      panel.style.display = "none";
+    }
   });
 }
 
