@@ -93,7 +93,7 @@ class TestAdminNodesPopulated:
             "node_id", "endpoint", "model", "status",
             "active_connections", "circuit_breaker_state",
             "state", "actions", "gpu_vendor", "gpu_model", "gpu_count",
-            "managed",
+            "managed", "failed_step", "error",
         }
         assert set(node.keys()) == expected
         assert "last_heartbeat" not in node
