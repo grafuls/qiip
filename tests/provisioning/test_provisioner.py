@@ -27,6 +27,7 @@ from inference_proxy.provisioning.ssh_client import (
     SSHConnectionError,
 )
 from inference_proxy.provisioning.state import ProvisioningStep
+from inference_proxy.redfish.errors import RedfishError
 
 
 def _make_provisioner(
@@ -36,6 +37,7 @@ def _make_provisioner(
     settings: ProvisioningSettings | None = None,
     registry: MagicMock | None = None,
     connection_tracker: MagicMock | None = None,
+    redfish_client: MagicMock | None = None,
 ) -> NodeProvisioner:
     """Build a NodeProvisioner with mock dependencies."""
     return NodeProvisioner(
@@ -44,6 +46,7 @@ def _make_provisioner(
         settings=settings or ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0),
         registry=registry,
         connection_tracker=connection_tracker,
+        redfish_client=redfish_client,
     )
 
 
@@ -910,3 +913,162 @@ class TestTeardownSSHFailure:
                 await provisioner.teardown("host1", force=True)
 
         assert "failed" in state_steps
+
+
+class TestPowerOnIfNeeded:
+    """D-01, D-04, D-06, D-07: Power-on logic before SSH provisioning."""
+
+    @pytest.mark.asyncio
+    async def test_skips_when_redfish_none(self) -> None:
+        """D-01: No POWERING_ON state write or power_action when redfish_client is None."""
+        etcd = MagicMock()
+        etcd.put = MagicMock()
+        provisioner = _make_provisioner(etcd_client=etcd)
+        provisioner._provision_started_at = datetime.now(timezone.utc)
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_tt:
+            mock_tt.return_value = True
+            await provisioner._power_on_if_needed("host1")
+
+        # No etcd writes should happen (no POWERING_ON state)
+        mock_tt.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_calls_power_action_on(self) -> None:
+        """D-04: Calls power_action("On") and writes POWERING_ON state."""
+        etcd = MagicMock()
+        etcd.put = MagicMock()
+        redfish = MagicMock()
+        redfish.power_action = AsyncMock(return_value="On")
+
+        provisioner = _make_provisioner(etcd_client=etcd, redfish_client=redfish)
+        provisioner._provision_started_at = datetime.now(timezone.utc)
+
+        state_steps: list[str] = []
+
+        async def capture_to_thread(fn, *args):
+            if fn == etcd.put and len(args) >= 2 and "/provisioning/" in str(args[0]):
+                data = json.loads(args[1])
+                state_steps.append(data["current_step"])
+            return True
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
+            with patch.object(provisioner, "_wait_for_ssh", new_callable=AsyncMock):
+                await provisioner._power_on_if_needed("host1")
+
+        redfish.power_action.assert_awaited_once_with("host1", "On")
+        assert "powering_on" in state_steps
+
+    @pytest.mark.asyncio
+    async def test_catches_redfish_error(self) -> None:
+        """D-06: RedfishError caught, logged, continues to _wait_for_ssh."""
+        redfish = MagicMock()
+        redfish.power_action = AsyncMock(side_effect=RedfishError("BMC unreachable"))
+
+        provisioner = _make_provisioner(redfish_client=redfish)
+        provisioner._provision_started_at = datetime.now(timezone.utc)
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock):
+            with patch.object(provisioner, "_wait_for_ssh", new_callable=AsyncMock) as mock_wait:
+                await provisioner._power_on_if_needed("host1")
+
+        # _wait_for_ssh should still be called despite RedfishError
+        mock_wait.assert_awaited_once_with("host1")
+
+    @pytest.mark.asyncio
+    async def test_powering_on_state_written_before_action(self) -> None:
+        """D-07: POWERING_ON state is written before power_action is called."""
+        etcd = MagicMock()
+        etcd.put = MagicMock()
+        redfish = MagicMock()
+
+        call_order: list[str] = []
+
+        async def tracking_power_action(hostname, action):
+            call_order.append("power_action")
+            return "On"
+
+        redfish.power_action = tracking_power_action
+
+        provisioner = _make_provisioner(etcd_client=etcd, redfish_client=redfish)
+        provisioner._provision_started_at = datetime.now(timezone.utc)
+
+        async def tracking_to_thread(fn, *args):
+            if fn == etcd.put and len(args) >= 2 and "/provisioning/" in str(args[0]):
+                data = json.loads(args[1])
+                if data["current_step"] == "powering_on":
+                    call_order.append("state_write")
+            return True
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=tracking_to_thread):
+            with patch.object(provisioner, "_wait_for_ssh", new_callable=AsyncMock):
+                await provisioner._power_on_if_needed("host1")
+
+        assert call_order.index("state_write") < call_order.index("power_action")
+
+
+class TestWaitForSsh:
+    """D-03, D-05: SSH wait loop with TCP probe retries."""
+
+    @pytest.mark.asyncio
+    async def test_returns_on_first_success(self) -> None:
+        """When open_connection succeeds immediately, returns without sleeping."""
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        settings = ProvisioningSettings(
+            health_poll_timeout=2, health_poll_interval=0,
+            boot_wait_timeout=10, boot_wait_interval=0,
+        )
+        provisioner = _make_provisioner(settings=settings)
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection",
+                   return_value=(MagicMock(), mock_writer)) as mock_conn:
+            with patch("inference_proxy.provisioning.provisioner.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+                await provisioner._wait_for_ssh("host1")
+
+        mock_conn.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_retries_until_success(self) -> None:
+        """Fails twice then succeeds on third attempt."""
+        mock_writer = MagicMock()
+        mock_writer.close = MagicMock()
+        mock_writer.wait_closed = AsyncMock()
+
+        attempt = 0
+
+        async def flaky_open(host, port):
+            nonlocal attempt
+            attempt += 1
+            if attempt < 3:
+                raise OSError("Connection refused")
+            return (MagicMock(), mock_writer)
+
+        settings = ProvisioningSettings(
+            health_poll_timeout=2, health_poll_interval=0,
+            boot_wait_timeout=60, boot_wait_interval=0,
+        )
+        provisioner = _make_provisioner(settings=settings)
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", side_effect=flaky_open):
+            with patch("inference_proxy.provisioning.provisioner.asyncio.sleep", new_callable=AsyncMock):
+                await provisioner._wait_for_ssh("host1")
+
+        assert attempt == 3
+
+    @pytest.mark.asyncio
+    async def test_timeout_logs_warning(self) -> None:
+        """When open_connection never succeeds, returns after timeout without raising."""
+        settings = ProvisioningSettings(
+            health_poll_timeout=2, health_poll_interval=0,
+            boot_wait_timeout=0, boot_wait_interval=0,
+        )
+        provisioner = _make_provisioner(settings=settings)
+
+        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection",
+                   side_effect=OSError("refused")):
+            # Should not raise -- just returns after timeout
+            await provisioner._wait_for_ssh("host1")
