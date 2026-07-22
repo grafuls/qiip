@@ -16,6 +16,7 @@ from inference_proxy.config.dependencies import (
     get_provisioner,
     get_quads_client,
     get_quads_poller,
+    get_redfish_client,
     get_registry,
     get_request_metrics,
     get_unified_node_service,
@@ -24,6 +25,8 @@ from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.models.admin import (
     AdminMetricsResponse,
     AdminNodeResponse,
+    PowerActionRequest,
+    PowerStateResponse,
     QUADSStatusResponse,
     SetupRequest,
     SetupResponse,
@@ -37,6 +40,8 @@ from inference_proxy.quads.client import (
     canonical_hostname,
 )
 from inference_proxy.quads.poller import QUADSPoller
+from inference_proxy.redfish.client import RedfishClient
+from inference_proxy.redfish.errors import RedfishError
 from inference_proxy.routing.request_metrics import RequestMetrics
 from inference_proxy.services.unified_nodes import UnifiedNodeService
 
@@ -167,3 +172,36 @@ async def get_quads_status(
         last_sync=poller.last_sync,
         consecutive_failures=poller.consecutive_failures,
     )
+
+
+@admin_router.get("/nodes/{hostname}/power")
+async def get_power_state(
+    hostname: str,
+    redfish: RedfishClient | None = Depends(get_redfish_client),
+) -> PowerStateResponse:
+    """Query current power state of a node's BMC (PWR-04)."""
+    if redfish is None:
+        raise HTTPException(status_code=503, detail="Redfish not configured")
+    hostname = canonical_hostname(hostname)
+    try:
+        state = await redfish.get_power_state(hostname)
+    except RedfishError as exc:
+        raise HTTPException(status_code=502, detail=exc.human_message) from exc
+    return PowerStateResponse(hostname=hostname, power_state=state)
+
+
+@admin_router.post("/nodes/{hostname}/power")
+async def execute_power_action(
+    hostname: str,
+    body: PowerActionRequest,
+    redfish: RedfishClient | None = Depends(get_redfish_client),
+) -> PowerStateResponse:
+    """Execute a power action on a node's BMC (PWR-01/02/03, D-05)."""
+    if redfish is None:
+        raise HTTPException(status_code=503, detail="Redfish not configured")
+    hostname = canonical_hostname(hostname)
+    try:
+        final_state = await redfish.power_action(hostname, body.action.value)
+    except RedfishError as exc:
+        raise HTTPException(status_code=502, detail=exc.human_message) from exc
+    return PowerStateResponse(hostname=hostname, power_state=final_state)
