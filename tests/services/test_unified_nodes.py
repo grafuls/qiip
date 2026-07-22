@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 from inference_proxy.discovery.registry import NodeRegistry
+from inference_proxy.models.admin import TaskStatusResponse
 from inference_proxy.models.node import Node, NodeStatus
 from inference_proxy.models.quads import QUADSHost
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
@@ -230,3 +232,49 @@ class TestSorting:
         nodes = svc.get_unified_nodes()
         ids = [n.node_id for n in nodes]
         assert ids == ["gpu01", "gpu02", "gpu03"]
+
+
+class TestFailedState:
+    """D-02: Failed nodes get setup + teardown actions and error fields from task_map."""
+
+    def test_failed_state_and_actions(self) -> None:
+        registry = NodeRegistry()
+        registry.add(_node("gpu01", status=NodeStatus.FAILED))
+        poller = _poller(hosts=[_host("gpu01")], available=["gpu01"])
+        svc = _service(registry=registry, poller=poller)
+
+        n = svc.get_unified_nodes()[0]
+        assert n.state == "failed"
+        assert n.actions == ["setup", "teardown"]
+
+    def test_failed_node_error_fields_from_task_map(self) -> None:
+        registry = NodeRegistry()
+        registry.add(_node("gpu01", status=NodeStatus.FAILED))
+        poller = _poller(hosts=[_host("gpu01")], available=["gpu01"])
+        svc = _service(registry=registry, poller=poller)
+
+        now = datetime.now(timezone.utc)
+        task_map = {
+            "gpu01": TaskStatusResponse(
+                hostname="gpu01",
+                current_step="failed",
+                started_at=now,
+                updated_at=now,
+                failed_step="uploading_scripts",
+                error="connection refused",
+            )
+        }
+        nodes = svc.get_unified_nodes(task_map=task_map)
+        n = nodes[0]
+        assert n.failed_step == "uploading_scripts"
+        assert n.error == "connection refused"
+
+    def test_no_task_map_error_fields_none(self) -> None:
+        registry = NodeRegistry()
+        registry.add(_node("gpu01", status=NodeStatus.FAILED))
+        poller = _poller(hosts=[_host("gpu01")], available=["gpu01"])
+        svc = _service(registry=registry, poller=poller)
+
+        n = svc.get_unified_nodes()[0]
+        assert n.failed_step is None
+        assert n.error is None

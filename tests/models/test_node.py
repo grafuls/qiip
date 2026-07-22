@@ -17,7 +17,8 @@ class TestNodeStatusEnumValues:
         assert NodeStatus.DRAINING == "draining"
         assert NodeStatus.UNKNOWN == "unknown"
         assert NodeStatus.PROVISIONING == "provisioning"
-        assert len(NodeStatus) == 5
+        assert NodeStatus.FAILED == "failed"
+        assert len(NodeStatus) == 6
 
 
 class TestNodeStatusIsStrEnum:

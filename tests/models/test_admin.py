@@ -35,6 +35,32 @@ class TestAdminNodeResponse:
         assert response.active_connections == 2
         assert response.circuit_breaker_state == "closed"
 
+    def test_admin_node_response_error_fields(self) -> None:
+        """AdminNodeResponse accepts and defaults failed_step and error fields."""
+        with_errors = AdminNodeResponse(
+            node_id="node-1",
+            endpoint="10.0.1.100:8000",
+            model="llama-3",
+            status="failed",
+            active_connections=0,
+            circuit_breaker_state="closed",
+            failed_step="uploading_scripts",
+            error="connection refused",
+        )
+        assert with_errors.failed_step == "uploading_scripts"
+        assert with_errors.error == "connection refused"
+
+        without_errors = AdminNodeResponse(
+            node_id="node-1",
+            endpoint="10.0.1.100:8000",
+            model="llama-3",
+            status="healthy",
+            active_connections=0,
+            circuit_breaker_state="closed",
+        )
+        assert without_errors.failed_step is None
+        assert without_errors.error is None
+
     def test_frozen_rejects_mutation(self) -> None:
         """AdminNodeResponse is immutable -- assigning to a field raises ValidationError."""
         response = AdminNodeResponse(

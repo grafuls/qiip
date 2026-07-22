@@ -9,7 +9,7 @@ Nodes in etcd but absent from QUADS are excluded (D-03).
 from __future__ import annotations
 
 from inference_proxy.discovery.registry import NodeRegistry
-from inference_proxy.models.admin import AdminNodeResponse
+from inference_proxy.models.admin import AdminNodeResponse, TaskStatusResponse
 from inference_proxy.models.node import Node
 from inference_proxy.models.quads import QUADSHost
 from inference_proxy.quads.client import canonical_hostname
@@ -23,6 +23,7 @@ _STATE_ACTIONS: dict[str, list[str]] = {
     "healthy": ["teardown"],
     "unhealthy": ["teardown", "retry"],
     "provisioning": ["cancel"],
+    "failed": ["setup", "teardown"],
     "draining": ["force_teardown"],
 }
 
@@ -42,14 +43,17 @@ class UnifiedNodeService:
         self._cb_registry = cb_registry
         self._tracker = tracker
 
-    def get_unified_nodes(self) -> list[AdminNodeResponse]:
+    def get_unified_nodes(
+        self,
+        task_map: dict[str, TaskStatusResponse] | None = None,
+    ) -> list[AdminNodeResponse]:
         """Return merged QUADS + etcd node list sorted by node_id."""
         etcd_map = {canonical_hostname(n.node_id): n for n in self._registry.get_all()}
 
         # Graceful degradation: no QUADS -> etcd-only
         if self._poller is None:
             return sorted(
-                (self._from_etcd(n) for n in etcd_map.values()),
+                (self._from_etcd(n, task_map=task_map) for n in etcd_map.values()),
                 key=lambda r: r.node_id,
             )
 
@@ -61,7 +65,7 @@ class UnifiedNodeService:
             etcd_node = etcd_map.pop(hostname, None)
             if etcd_node is not None:
                 # D-05: etcd status wins
-                result.append(self._from_etcd(etcd_node, host))
+                result.append(self._from_etcd(etcd_node, host, task_map=task_map))
             elif hostname in available_set:
                 result.append(self._from_available(host))
             # else: not available and not in etcd -> skip
@@ -69,7 +73,7 @@ class UnifiedNodeService:
         # Unmanaged nodes live in etcd but not in QUADS
         for node in etcd_map.values():
             if not node.managed:
-                result.append(self._from_etcd(node))
+                result.append(self._from_etcd(node, task_map=task_map))
 
         return sorted(result, key=lambda r: r.node_id)
 
@@ -77,9 +81,12 @@ class UnifiedNodeService:
         self,
         node: Node,
         host: QUADSHost | None = None,
+        *,
+        task_map: dict[str, TaskStatusResponse] | None = None,
     ) -> AdminNodeResponse:
         state = node.status.value
         breaker = self._cb_registry.get(node.node_id)
+        task = task_map.get(node.node_id) if task_map else None
         return AdminNodeResponse(
             node_id=node.node_id,
             endpoint=node.endpoint,
@@ -93,6 +100,8 @@ class UnifiedNodeService:
             gpu_model=host.gpu_model if host else None,
             gpu_count=host.gpu_count if host else None,
             managed=node.managed,
+            failed_step=task.failed_step if task else None,
+            error=task.error if task else None,
         )
 
     @staticmethod

@@ -532,7 +532,9 @@ class TestStateTracking:
         assert len(state_writes) > 0
         last_state = state_writes[-1]
         assert last_state["current_step"] == "failed"
-        assert last_state["failed_step"] is not None
+        # D-03: failed_step must be the actual step name, not the exception class name
+        assert last_state["failed_step"] == "uploading_scripts"
+        assert last_state["failed_step"] != "RemoteCommandError"
         assert last_state["error"] is not None
 
     @pytest.mark.asyncio

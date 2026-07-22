@@ -24,6 +24,7 @@ class NodeStatus(StrEnum):
     UNHEALTHY = "unhealthy"
     DRAINING = "draining"
     PROVISIONING = "provisioning"
+    FAILED = "failed"
     UNKNOWN = "unknown"
 
 
