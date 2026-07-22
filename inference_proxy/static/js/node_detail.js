@@ -140,7 +140,9 @@ async function refreshDetail() {
       var tdAc = document.createElement("td");
       var actions = node.actions || [];
       for (var i = 0; i < actions.length; i++) {
-        tdAc.appendChild(createActionButton(actions[i], node.node_id));
+        var btn = createActionButton(actions[i], node.node_id);
+        if (actions[i] === "setup" && node.state === "provisioning") btn.disabled = true;
+        tdAc.appendChild(btn);
         if (i < actions.length - 1) tdAc.appendChild(document.createTextNode(" "));
       }
       tr.appendChild(tdAc);
