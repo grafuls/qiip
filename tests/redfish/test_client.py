@@ -116,14 +116,12 @@ class TestPowerAction:
 
 
 class TestPowerActionTimeout:
+    @pytest.mark.httpx_mock(can_send_already_matched_responses=True)
     async def test_raises_on_poll_timeout(self, httpx_mock: HTTPXMock) -> None:
         # GET: current state is On (want Off via ForceOff)
         httpx_mock.add_response(url=SYSTEMS_URL, json={"PowerState": "On"})
         # POST: reset accepted
         httpx_mock.add_response(url=RESET_URL, status_code=200)
-        # All poll GETs: still On (never transitions)
-        for _ in range(20):
-            httpx_mock.add_response(url=SYSTEMS_URL, json={"PowerState": "On"})
 
         async with httpx.AsyncClient() as client:
             rc = RedfishClient(
@@ -134,15 +132,10 @@ class TestPowerActionTimeout:
 
 
 class TestResolveBmcHost:
-    def test_template_substitution(self) -> None:
-        async def _check() -> None:
-            async with httpx.AsyncClient() as client:
-                rc = RedfishClient(client, "bmc-{hostname}.lab", SYSTEM_ID)
-                assert rc._resolve_bmc_host("node42") == "bmc-node42.lab"
-
-        import asyncio
-
-        asyncio.get_event_loop().run_until_complete(_check())
+    async def test_template_substitution(self) -> None:
+        async with httpx.AsyncClient() as client:
+            rc = RedfishClient(client, "bmc-{hostname}.lab", SYSTEM_ID)
+            assert rc._resolve_bmc_host("node42") == "bmc-node42.lab"
 
 
 class TestErrorMapping:
