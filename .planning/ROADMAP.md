@@ -61,7 +61,7 @@
 
 </details>
 
-### 🚧 v1.5 Node Setup Enhancements (In Progress)
+### v1.5 Node Setup Enhancements (In Progress)
 
 **Milestone Goal:** Add Redfish-based power management and improve provisioning failure diagnostics
 
@@ -107,7 +107,9 @@ Plans:
   4. Admin can query current power state of a node via GET from the admin API
   5. Power endpoints return 503 when Redfish is not configured
 
-**Plans**: TBD
+**Plans:** 1 plan
+Plans:
+- [ ] 22-01-PLAN.md — Power models, route handlers, and tests
 
 ### Phase 23: Auto-Power-On in Provisioner
 
@@ -140,7 +142,7 @@ Plans:
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 21 → 22 → 23 → 24
+Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 (Phase 24 is independent of 21-23 but ordered last per research rationale)
 
 | Phase | Milestone | Plans Complete | Status | Completed |
@@ -166,6 +168,6 @@ Phases execute in numeric order: 21 → 22 → 23 → 24
 | 19. Chat Page and Streaming | v1.4 | 2/2 | Complete | 2026-07-21 |
 | 20. Chat Configuration | v1.4 | 1/1 | Complete | 2026-07-21 |
 | 21. Redfish Client & Configuration | v1.5 | 2/2 | Complete    | 2026-07-22 |
-| 22. Power Management Endpoints | v1.5 | 0/0 | Not started | - |
+| 22. Power Management Endpoints | v1.5 | 0/1 | In progress | - |
 | 23. Auto-Power-On in Provisioner | v1.5 | 0/0 | Not started | - |
 | 24. Provisioning Error Diagnostics | v1.5 | 0/0 | Not started | - |
