@@ -21,6 +21,7 @@ from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.quads.client import QUADSClient
 from inference_proxy.quads.poller import QUADSPoller
+from inference_proxy.redfish.client import RedfishClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.node_selector import NodeSelector
 from inference_proxy.routing.request_metrics import RequestMetrics
@@ -95,6 +96,11 @@ def get_provisioner(request: Request) -> NodeProvisioner:
 def get_quads_client(request: Request) -> QUADSClient | None:
     """Return the QUADS client, or None when QUADS is not configured (D-10)."""
     return request.app.state.quads_client  # type: ignore[no-any-return]
+
+
+def get_redfish_client(request: Request) -> RedfishClient | None:
+    """Return the Redfish client, or None when Redfish is not configured."""
+    return request.app.state.redfish_client  # type: ignore[no-any-return]
 
 
 def get_quads_poller(request: Request) -> QUADSPoller | None:
