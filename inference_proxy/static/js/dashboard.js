@@ -243,6 +243,57 @@ async function refreshDashboard() {
         tr.appendChild(tdActions);
 
         tbody.appendChild(tr);
+
+        // ponytail: expandable error sub-row for failed nodes (D-05 through D-08)
+        if (node.state === "failed" && (node.failed_step || node.error)) {
+          const subRow = document.createElement("tr");
+          subRow.className = "error-subrow";
+          subRow.style.display = "none";
+
+          const subTd = document.createElement("td");
+          subTd.colSpan = 7;
+
+          const detail = document.createElement("div");
+          detail.className = "error-detail";
+
+          if (node.failed_step) {
+            const stepBadge = document.createElement("span");
+            stepBadge.className = "badge badge-failed";
+            stepBadge.textContent = "failed at " + node.failed_step;
+            detail.appendChild(stepBadge);
+          }
+
+          if (node.error) {
+            const errPre = document.createElement("pre");
+            errPre.className = "error-message";
+            errPre.textContent = node.error;
+            detail.appendChild(errPre);
+          }
+
+          subTd.appendChild(detail);
+          subRow.appendChild(subTd);
+          tbody.appendChild(subRow);
+
+          // Make the state badge clickable to toggle the sub-row
+          stateBadge.style.cursor = "pointer";
+          stateBadge.setAttribute("role", "button");
+          stateBadge.setAttribute("tabindex", "0");
+          stateBadge.setAttribute("aria-expanded", "false");
+
+          function toggleSubRow() {
+            const visible = subRow.style.display !== "none";
+            subRow.style.display = visible ? "none" : "table-row";
+            stateBadge.setAttribute("aria-expanded", String(!visible));
+          }
+
+          stateBadge.addEventListener("click", toggleSubRow);
+          stateBadge.addEventListener("keydown", function (e) {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              toggleSubRow();
+            }
+          });
+        }
       }
     }
 

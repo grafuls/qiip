@@ -463,6 +463,18 @@ td button:focus-visible {
 /* --- Misc --- */
 .error-text { color: var(--danger); font-size: 0.8125rem; }
 
+.error-subrow { background: inherit !important; }
+.error-subrow td { padding: 0 0.75rem 0.75rem 0.75rem; border-bottom: 1px solid var(--border); }
+.error-detail { background: var(--danger-bg); border-radius: var(--radius); padding: 0.75rem 1rem; }
+.error-message {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 0.8125rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0.5rem 0 0 0;
+}
+
 footer {
   text-align: center;
   padding: 1.5rem 1rem;
