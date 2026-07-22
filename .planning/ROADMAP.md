@@ -67,7 +67,7 @@
 
 - [x] **Phase 21: Redfish Client & Configuration** - BMC communication foundation with credential safety and human-readable error mapping (completed 2026-07-22)
 - [x] **Phase 22: Power Management Endpoints** - Admin API for manual power on/off/restart/status operations (completed 2026-07-22)
-- [ ] **Phase 23: Auto-Power-On in Provisioner** - Automatic power-on before SSH provisioning for offline servers
+- [x] **Phase 23: Auto-Power-On in Provisioner** - Automatic power-on before SSH provisioning for offline servers (completed 2026-07-22)
 - [ ] **Phase 24: Provisioning Error Diagnostics** - Step-level error capture with inline dashboard display
 
 ## Phase Details
@@ -122,9 +122,9 @@ Plans:
   2. Dashboard shows POWERING_ON step while the server boots
   3. Provisioning waits for SSH availability after power-on before proceeding to preflight
 
-**Plans:** 1 plan
+**Plans:** 1/1 plans complete
 Plans:
-- [ ] 23-01-PLAN.md — Power-on integration, SSH wait loop, settings, and tests
+- [x] 23-01-PLAN.md — Power-on integration, SSH wait loop, settings, and tests
 
 ### Phase 24: Provisioning Error Diagnostics
 
@@ -170,5 +170,5 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 20. Chat Configuration | v1.4 | 1/1 | Complete | 2026-07-21 |
 | 21. Redfish Client & Configuration | v1.5 | 2/2 | Complete    | 2026-07-22 |
 | 22. Power Management Endpoints | v1.5 | 1/1 | Complete    | 2026-07-22 |
-| 23. Auto-Power-On in Provisioner | v1.5 | 0/1 | Planning    | - |
+| 23. Auto-Power-On in Provisioner | v1.5 | 1/1 | Complete   | 2026-07-22 |
 | 24. Provisioning Error Diagnostics | v1.5 | 0/0 | Not started | - |
