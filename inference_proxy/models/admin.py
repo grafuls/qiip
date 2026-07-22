@@ -7,6 +7,7 @@ connections, and circuit breaker state for the operations dashboard.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 
 import re
 
@@ -108,3 +109,29 @@ class QUADSStatusResponse(BaseModel):
     status: str
     last_sync: datetime | None
     consecutive_failures: int
+
+
+class PowerAction(str, Enum):
+    """Redfish power actions matching _ACTION_TARGET_STATE keys in redfish/client.py."""
+
+    On = "On"
+    ForceOff = "ForceOff"
+    GracefulRestart = "GracefulRestart"
+    ForceRestart = "ForceRestart"
+
+
+class PowerActionRequest(BaseModel):
+    """Request body for POST /admin/nodes/{hostname}/power."""
+
+    model_config = ConfigDict(frozen=True)
+
+    action: PowerAction
+
+
+class PowerStateResponse(BaseModel):
+    """Response body for power state endpoints (D-05)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hostname: str
+    power_state: str
