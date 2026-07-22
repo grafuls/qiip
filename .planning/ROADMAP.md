@@ -65,7 +65,7 @@
 
 **Milestone Goal:** Add Redfish-based power management and improve provisioning failure diagnostics
 
-- [ ] **Phase 21: Redfish Client & Configuration** - BMC communication foundation with credential safety and human-readable error mapping
+- [x] **Phase 21: Redfish Client & Configuration** - BMC communication foundation with credential safety and human-readable error mapping (completed 2026-07-22)
 - [ ] **Phase 22: Power Management Endpoints** - Admin API for manual power on/off/restart/status operations
 - [ ] **Phase 23: Auto-Power-On in Provisioner** - Automatic power-on before SSH provisioning for offline servers
 - [ ] **Phase 24: Provisioning Error Diagnostics** - Step-level error capture with inline dashboard display
@@ -84,7 +84,7 @@
   3. Redfish error responses are translated to human-readable messages (not raw JSON)
   4. BMC credentials are never exposed in logs, error messages, or API responses
 
-**Plans:** 1/2 plans executed
+**Plans:** 2/2 plans complete
 Plans:
 **Wave 1**
 
@@ -92,7 +92,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 21-02-PLAN.md — Lifespan wiring (DI, main.py, conftest)
+- [x] 21-02-PLAN.md — Lifespan wiring (DI, main.py, conftest)
 
 ### Phase 22: Power Management Endpoints
 
@@ -165,7 +165,7 @@ Phases execute in numeric order: 21 → 22 → 23 → 24
 | 18. Dashboard UI Update | v1.3 | 2/2 | Complete | 2026-07-17 |
 | 19. Chat Page and Streaming | v1.4 | 2/2 | Complete | 2026-07-21 |
 | 20. Chat Configuration | v1.4 | 1/1 | Complete | 2026-07-21 |
-| 21. Redfish Client & Configuration | v1.5 | 1/2 | In Progress|  |
+| 21. Redfish Client & Configuration | v1.5 | 2/2 | Complete   | 2026-07-22 |
 | 22. Power Management Endpoints | v1.5 | 0/0 | Not started | - |
 | 23. Auto-Power-On in Provisioner | v1.5 | 0/0 | Not started | - |
 | 24. Provisioning Error Diagnostics | v1.5 | 0/0 | Not started | - |
