@@ -137,8 +137,15 @@ Plans:
   2. Failed provisioning captures error details (stderr/exception message)
   3. Dashboard displays failure details inline for failed nodes instead of just a status badge
 
-**Plans**: TBD
-**UI hint**: yes
+**Plans:** 2 plans
+
+**Wave 1**
+
+- [ ] 24-01-PLAN.md — Backend error capture and API surface (models, provisioner fix, service wiring, tests)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 24-02-PLAN.md — Dashboard error display (expandable sub-row, CSS styling, human verify)
 
 ## Progress
 
@@ -171,4 +178,4 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 21. Redfish Client & Configuration | v1.5 | 2/2 | Complete    | 2026-07-22 |
 | 22. Power Management Endpoints | v1.5 | 1/1 | Complete    | 2026-07-22 |
 | 23. Auto-Power-On in Provisioner | v1.5 | 1/1 | Complete    | 2026-07-22 |
-| 24. Provisioning Error Diagnostics | v1.5 | 0/0 | Not started | - |
+| 24. Provisioning Error Diagnostics | v1.5 | 0/2 | Not started | - |
