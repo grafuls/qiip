@@ -7,7 +7,7 @@ Only the root Settings class inherits from BaseSettings.
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -133,6 +133,25 @@ class QUADSSettings(BaseModel):
     schedule_lookahead_hours: int = 24
 
 
+class RedfishSettings(BaseModel):
+    """Redfish BMC configuration.
+
+    When ``bmc_username`` is ``None`` (the default), Redfish features
+    are disabled.  Setting it via ``INFERENCE_PROXY_REDFISH__BMC_USERNAME``
+    activates the Redfish integration.
+    """
+
+    bmc_username: str | None = None
+    bmc_password: SecretStr | None = None
+    bmc_host_template: str = "mgmt-{hostname}"  # D-01, D-02
+    system_id: str = "1"
+    connect_timeout: float = 10.0
+    read_timeout: float = 60.0
+    power_poll_timeout: float = 60.0
+    power_poll_interval: float = 5.0
+    verify_ssl: bool = False  # D-05: always False for self-signed BMC certs
+
+
 class Settings(BaseSettings):
     """Root application settings.
 
@@ -159,3 +178,4 @@ class Settings(BaseSettings):
     ssh: SSHSettings = SSHSettings()
     provisioning: ProvisioningSettings = ProvisioningSettings()
     quads: QUADSSettings = QUADSSettings()
+    redfish: RedfishSettings = RedfishSettings()
