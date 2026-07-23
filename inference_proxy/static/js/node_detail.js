@@ -62,7 +62,7 @@ async function handleAction(action, nodeId) {
     var resp = await fetch(config.url(nodeId), options);
     if (resp.ok) {
       showToast(config.successMsg(nodeId), "success");
-      if (action === "setup" || action === "retry") { logReceivedAny = false; }
+      if (action === "setup" || action === "retry") { logReceivedAny = false; logStreamDone = false; }
     } else {
       var data = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
       showToast(data.detail || "HTTP " + resp.status, "error");
@@ -196,9 +196,10 @@ async function refreshDetail() {
 // ponytail: SSE live log viewer — poll loop triggers connection when tasks exist
 var logSource = null;
 var logReceivedAny = false;
+var logStreamDone = false;
 
 function connectLogStream() {
-  if (logSource) return;
+  if (logSource || logStreamDone) return;
 
   var panel = document.getElementById("logs-panel");
   var output = document.getElementById("logs-output");
@@ -244,6 +245,7 @@ function connectLogStream() {
     es.close();
     logSource = null;
     if (logReceivedAny) {
+      logStreamDone = true;
       status.textContent = "ended";
       status.className = "badge badge-complete";
     } else {
