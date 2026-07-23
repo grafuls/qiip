@@ -205,7 +205,6 @@ function connectLogStream() {
   var status = document.getElementById("logs-status");
 
   if (!logReceivedAny) output.textContent = "";
-  panel.style.display = "";
   status.textContent = "connecting";
   status.className = "badge badge-in-progress";
 
@@ -248,8 +247,10 @@ function connectLogStream() {
       status.textContent = "ended";
       status.className = "badge badge-complete";
     } else {
-      // ponytail: 404 or premature close — hide panel, retry on next poll
-      panel.style.display = "none";
+      // ponytail: 404 or premature close — show placeholder, retry on next poll
+      status.textContent = "waiting";
+      status.className = "badge";
+      output.innerHTML = '<span class="log-placeholder">Logs will appear here when provisioning starts.</span>';
     }
   });
 }
