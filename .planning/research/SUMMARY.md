@@ -1,199 +1,197 @@
 # Project Research Summary
 
-**Project:** QUADS LLM Inference Proxy -- v1.5 Redfish Power Management & Provisioning Diagnostics
-**Domain:** BMC power management integration into existing bare-metal provisioning pipeline
-**Researched:** 2026-07-21
+**Project:** llmfit CLI Integration for Hardware-Aware Model Selection
+**Domain:** Inference gateway enhancement (add-on to existing provisioning system)
+**Researched:** 2026-07-23
 **Confidence:** HIGH
 
 ## Executive Summary
 
-The v1.5 milestone adds two capabilities to the inference proxy: Redfish-based power management (on/off/restart/status via BMC) and improved provisioning failure diagnostics (step-level error capture with dashboard display). Both features plug into the existing provisioning pipeline and admin dashboard without architectural upheaval. The critical finding across all research areas is that **zero new dependencies are needed**. httpx already handles Redfish REST calls natively (2 endpoints: GET power state, POST reset action), and the existing `ProvisioningState` model already has the `failed_step` and `error` fields -- they just need to be populated correctly.
+This milestone adds hardware-aware model recommendation to the existing inference proxy gateway by integrating llmfit, a Rust CLI tool that analyzes GPU hardware and recommends LLM models based on composite scoring (quality, speed, fit, context). llmfit runs on target GPU servers via SSH and returns JSON recommendations the gateway parses and presents to operators. The operator reviews recommendations in the dashboard, selects a model, and triggers provisioning with that model override — replacing the current hardcoded GPU-family-based heuristic in start-vllm.sh.
 
-The recommended approach is to build a thin `RedfishClient` following the exact `QUADSClient` pattern (constructor-injected httpx.AsyncClient, typed errors, Basic auth), wire it into the provisioner as an optional dependency, and extend the admin API with power endpoints. The client must use a dedicated httpx instance with Redfish-specific timeouts (10s connect, 60s read) and scoped `verify=False` for self-signed BMC certificates. The opt-in pattern (Redfish disabled when `username` is None) matches the existing QUADS feature toggle.
+The recommended approach treats llmfit as an on-demand advisory tool, NOT embedded in the provisioning pipeline. The operator flow is: run llmfit on a provisioned or partially-setup server, review ranked model recommendations, then start vLLM with the chosen model. This architecture keeps llmfit failures non-blocking and preserves the existing provisioning state machine untouched. Zero new Python dependencies are needed — the integration reuses existing SSHClient, Pydantic validation, and FastAPI endpoint patterns.
 
-The primary risks are operational, not architectural. Redfish power actions are not idempotent (ForceOff on an off server returns HTTP 400), power state transitions are asynchronous (HTTP 200 means "accepted" not "done"), and BMC credentials can leak into logs and error displays if not handled with `SecretStr`. All five critical pitfalls are well-documented from MAAS, OpenShift Ironic, and StarlingX experiences and have straightforward mitigations: check-before-act for idempotency, post-action polling for async transitions, and `SecretStr` + error sanitization for credential safety.
+The primary risk is llmfit installation failures blocking provisioning if the integration is designed in-band. This is mitigated by making llmfit execution on-demand via admin API, pre-staging binaries via SCP from the gateway to avoid per-server GitHub downloads, and using absolute paths for remote binary invocation to bypass PATH issues. Secondary risks include VRAM calculation mismatches with vLLM memory utilization settings and recommending models not available on NFS cache — both addressed through post-processing filters and effective VRAM overrides.
 
 ## Key Findings
 
 ### Recommended Stack
 
-No new Python dependencies. The existing stack (httpx >= 0.28, FastAPI >= 0.135, Pydantic >= 2.10, pydantic-settings >= 2.14, structlog >= 26.1.0) covers everything. Three Redfish Python libraries were evaluated and rejected:
+No new runtime Python dependencies. The integration reuses: asyncssh (SSH execution), Pydantic (JSON validation), FastAPI (admin endpoint), structlog (logging), stdlib json (parsing). llmfit itself is a Rust binary installed on target GPU servers, not on the gateway.
 
-**Core technologies (all existing):**
-- **httpx**: Redfish REST client -- async, connection pooling, Basic auth built-in, already used for proxy engine and QUADS client
-- **pydantic-settings**: `RedfishSettings` sub-model for BMC credentials and timeouts -- env var injection via `INFERENCE_PROXY_REDFISH__*`
-- **Pydantic SecretStr**: BMC password masking in logs, repr, and model_dump -- prevents credential leaks
+**Core technologies:**
+- **llmfit v1.1.6** (Rust CLI, remote execution) — Hardware detection and model ranking. 30K+ stars, actively maintained, JSON output mode. Installed as prebuilt x86_64 musl binary on target servers.
+- **Pydantic models with `extra="ignore"`** (JSON schema validation) — Parses llmfit JSON output while tolerating future field additions. Already in stack from FastAPI.
+- **asyncssh `run_streaming()`** (existing pattern) — Runs `llmfit recommend --json` via SSH and collects stdout. Same pattern as `nvidia-smi` GPU verification in provisioner.py.
+- **FastAPI admin endpoint** (new route, existing framework) — `GET /admin/nodes/{hostname}/recommendations` returns parsed model recommendations on-demand.
 
-**Evaluated and rejected:**
-- `redfish` (DMTF): sync `requests`-based, 6 transitive deps, overkill for 2 endpoints
-- `sushy` (OpenStack): OpenStack dependency ecosystem, designed for Ironic drivers
-- `python-ilorest-library` (HPE): vendor-locked, namespace conflict with DMTF package
+**Installation approach:** Pre-built binary download from GitHub releases (pinned version), extracted to `/usr/local/bin/llmfit` on target servers. Installed during setup.sh as non-fatal step, or pre-staged via SCP from gateway. No Rust toolchain needed on target servers.
+
+**Critical version constraint:** llmfit v1.1.6 (latest as of July 2026). Pin in settings (`INFERENCE_PROXY_LLMFIT__VERSION`) for fleet consistency. JSON schema changes between llmfit versions — pinning ensures all servers return parseable output.
 
 ### Expected Features
 
 **Must have (table stakes):**
-- Power on via Redfish -- cannot SSH into a powered-off server
-- Power off (ForceOff) -- operators need to stop nodes when SSH is unavailable
-- Power restart (GracefulRestart, ForceRestart) -- common ops action for hung servers
-- Power status query -- know if On/Off before attempting operations
-- Auto-power-on before provisioning -- if off when setup triggered, power on and wait for SSH
-- Step-level error capture -- `failed_step` must show actual provisioning step name, not exception class
-- Dashboard error display for failed nodes -- inline error on fleet table, not buried in node detail
+- Install llmfit on target servers during provisioning — Cannot recommend without the tool on actual hardware.
+- Run llmfit via SSH and capture JSON output — Core integration. Operator clicks button, gateway SSHes to host, runs `llmfit recommend --json --force-runtime vllm`, returns results.
+- Parse JSON into typed Pydantic models — `LLMFitResponse` with `system` (hardware) and `models` (recommendations). Defensive parsing with `extra="ignore"`.
+- Admin API endpoint for on-demand recommendations — `GET /admin/nodes/{hostname}/recommendations` with optional `use_case` query param.
+- Dashboard recommendations card — Ranked table with model name, score, tok/s estimate, memory%, fit level, quantization. "Select" button per row.
+- Wire selected model into provisioning — `SetupRequest` gains optional `model: str` field, passed as `VLLM_MODEL` env var to start-vllm.sh (already supports override at line 100).
+- Error handling for llmfit failures — Timeout wrapping, SSH connection errors, JSON parse failures all handled gracefully. Non-blocking — falls back to existing heuristic if llmfit unavailable.
 
-**Should have (differentiators, cheap to add):**
-- Power status column in fleet table (one Redfish GET per node, cached)
-- Power action buttons in dashboard (extend existing ACTION_CONFIG)
-- BMC reachability check before power operations
-- Collapsible error detail on dashboard
+**Should have (competitive):**
+- Use-case filtering — Pass `--use-case coding|reasoning|chat|general` to llmfit, add query param to admin API. Changes score weighting.
+- Hardware detection display — Show llmfit's `system` object (GPU VRAM, CPU, backend) alongside recommendations. Richer than QUADS metadata.
+- Cached recommendations with staleness indicator — In-memory cache per hostname, TTL=1 hour. Hardware doesn't change. "Refreshed 5m ago" badge + refresh button.
+- Minimum fit level filtering — Only show models with `fit_level` of "perfect" or "good", exclude "marginal" or "too_tight".
 
 **Defer (v2+):**
-- Per-host BMC credential storage
-- IPMI fallback for servers without Redfish
-- Continuous power state polling (background thread)
-- Chassis/thermal/fan monitoring via Redfish
-- Provisioning log streaming to dashboard
-- Firmware update via Redfish
+- Fleet-wide model compatibility matrix — "Which servers can run Model X?" aggregation across all nodes. Requires cached recommendations on all nodes.
+- Custom scoring override — llmfit's composite scoring is battle-tested. Don't reimplement.
+- Model downloading from gateway — Models live on NFS. If not cached, show error. Weight management is separate.
 
 ### Architecture Approach
 
-Four new/modified components, all following established codebase patterns. `RedfishClient` mirrors `QUADSClient` exactly: thin httpx wrapper, constructor-injected AsyncClient, typed `RedfishError`. The provisioner gains an optional `redfish_client` parameter and a `_power_on_if_needed()` step before preflight. Admin API gets two new routes (`GET/POST /admin/nodes/{id}/power`). The dashboard extends `ACTION_CONFIG` and `_STATE_ACTIONS` for power buttons and inline error display.
+llmfit is a standalone on-demand operation, NOT part of the provisioning state machine. The operator queries recommendations independently of provisioning, then provisions with a model override. This keeps provisioning untouched and makes llmfit failures non-blocking.
 
 **Major components:**
-1. **RedfishClient** (`redfish/client.py`) -- GET power state, POST reset action, Basic auth, dedicated httpx instance
-2. **RedfishSettings** (sub-model in `settings.py`) -- BMC credentials (SecretStr), hostname template, system ID, timeouts
-3. **Power admin endpoints** (routes in `admin.py`) -- HTTP API for manual power operations, returns 503 if Redfish not configured
-4. **Provisioner power-on step** (modified `provisioner.py`) -- POWERING_ON step before PREFLIGHT, polls SSH port 22 after power-on
+1. **`llmfit/runner.py`** (new) — `LLMFitRunner` class. Runs `llmfit recommend --json` on remote hosts via SSHClient, parses JSON into Pydantic models, caches results per hostname with TTL. Reuses SSHClient via DI (same pattern as provisioner).
+2. **`models/llmfit.py`** (new) — Pydantic models `LLMFitResponse`, `ModelRecommendation`, `HardwareInfo`, `ScoreComponents`. All frozen with `extra="ignore"` for forward compatibility.
+3. **Admin API extension** (modified) — New route in `api/admin.py`: `GET /admin/nodes/{hostname}/recommendations`. Uses `LLMFitRunner` via FastAPI dependency injection. Returns typed response.
+4. **Settings** (modified) — `LLMFitSettings` nested model with `recommend_limit=20`, `cache_ttl=3600`, `default_runtime="vllm"`. Env var prefix: `INFERENCE_PROXY_LLMFIT__`.
+5. **setup.sh llmfit installation** (modified) — New step `install_llmfit()` downloads prebuilt binary from GitHub or accepts pre-staged binary via SCP. Non-fatal step — if fails, log warning and continue.
+6. **Dashboard UI** (modified) — "Model Recommendations" button on node detail page. Opens modal with ranked table from admin API. Select button sets `model` field on next provisioning request.
 
-**Key patterns to follow:**
-- Optional feature via None settings (QUADSSettings precedent)
-- Dedicated httpx.AsyncClient per subsystem (separate TLS/timeout profiles)
-- Dependency injection via `dependencies.py` providers
+**What does NOT change:** provisioner.py state machine, ProvisioningStep enum (llmfit runs on-demand, not inline), discovery/etcd schemas, Node model, proxy/routing/resilience layers.
 
 ### Critical Pitfalls
 
-1. **ForceOff on an already-off server returns HTTP 400** -- Always query PowerState before issuing reset actions. Handle 400 by re-checking state: if desired state is reached, treat as success. This is the most common Redfish integration bug across MAAS, Ironic, and StarlingX.
+1. **Installing Rust toolchain on remote servers instead of prebuilt binary** — `cargo install llmfit` takes 5-15 minutes per server, requires gcc/make/dev headers, adds 500MB disk usage, fragile on minimal OS images. Fix: Download x86_64-musl static binary from GitHub release tarball. Pin version in settings. Install to `/usr/local/bin` with curl+tar (~5 seconds).
 
-2. **BMC credentials leak into logs and error responses** -- Use Pydantic `SecretStr` for the password field. Never include RedfishSettings in structlog context binds. Sanitize error messages before writing to etcd. Never embed credentials in URLs.
+2. **No command timeout on SSH llmfit execution** — `nvidia-smi` hangs (GPU in bad state) → llmfit hangs → SSH session hangs indefinitely. Fix: Wrap SSH call in `asyncio.wait_for(timeout=60)`. llmfit typically completes in 2-5 seconds; 60s catches hangs. Add `llmfit_timeout` to settings.
 
-3. **SSH preflight starts before OS boots after power-on** -- Redfish power-on returns immediately (accepted, not done). Must poll PowerState until On, then poll TCP port 22 with 5-minute timeout before running SSH preflight. Add POWERING_ON step to ProvisioningStep enum so dashboard shows boot progress.
+3. **Parsing llmfit JSON as stable API** — llmfit releases frequently (v0.4 to v0.9+ in 5 months), JSON schema changes between versions without semver guarantees. Fix: Pin llmfit version fleet-wide in settings. Use Pydantic `extra="ignore"` to tolerate new fields. Test parsing against new versions before fleet rollout.
 
-4. **TLS verify=False leaks to other httpx clients** -- Scope `verify=False` to the Redfish-dedicated httpx.AsyncClient only. Make configurable via `RedfishSettings.verify_ssl`. Do not share client instances across subsystems.
+4. **llmfit detects no GPU (nvidia-smi not functional)** — Driver installed but kernel module not loaded, or nvidia-smi not on PATH in non-login shell. llmfit returns CPU-only recommendations for a GPU server. Fix: Run llmfit only after existing `_verify_gpu()` confirms nvidia-smi works. Validate parsed output has non-zero VRAM. Use absolute path `/usr/local/bin/llmfit`.
 
-5. **Raw Redfish JSON rendered in dashboard error display** -- Create human-readable error summaries from Redfish error codes. Map common MessageIds to operator-friendly messages. Cap error field at 200 characters. Full context goes to structlog.
+5. **llmfit installation failure blocks provisioning** — GitHub download fails (no internet, rate limit, air-gap lab), entire provisioning marked FAILED even though server is functional. Fix: Make llmfit on-demand (separate admin API endpoint), not inline in provisioning. Or pre-stage binary via SCP from gateway. Or make setup.sh step non-fatal.
 
 ## Implications for Roadmap
 
-Based on research, suggested phase structure (4 phases, bottom-up from dependency chain):
+Based on research, suggested phase structure:
 
-### Phase 1: Redfish Client + Configuration
+### Phase 1: Core Models and SSH Execution
+**Rationale:** Foundation for all other work. These pieces have zero external dependencies and can be tested in isolation.
+**Delivers:** Pydantic models for llmfit JSON output, `LLMFitRunner` class with SSH execution and JSON parsing, unit tests with fixture JSON.
+**Addresses:** Must-have "Parse JSON into typed models" feature.
+**Avoids:** Pitfall #3 (unstable JSON parsing) by using `extra="ignore"` and defensive validation.
+**Research flag:** Standard pattern — Pydantic model design is well-documented. Skip research-phase.
 
-**Rationale:** Foundation for all other v1.5 work. Zero dependencies on other phases. Must get credential handling, TLS scoping, and idempotency right from the start -- 4 of 5 critical pitfalls live here.
-**Delivers:** `RedfishClient` class, `RedfishSettings` sub-model, dependency injection wiring, tests with pytest-httpx mocking.
-**Addresses:** Power status query, power on/off/restart actions (table stakes features).
-**Avoids:** Credential leaks (Pitfall 2), TLS verify leak (Pitfall 4), session exhaustion (Pitfall 6, by using Basic auth), timeout issues (Pitfall 10), vendor URI issues (Pitfall 8).
+### Phase 2: Settings and Dependency Wiring
+**Rationale:** Makes LLMFitRunner available throughout the app via FastAPI dependency injection.
+**Delivers:** `LLMFitSettings` in config, `get_llmfit_runner()` dependency provider, lifespan wiring in main.py, `.env.example` updated.
+**Uses:** Pydantic settings (already in stack), FastAPI app.state pattern (existing).
+**Implements:** Settings layer from architecture.
+**Avoids:** Pitfall #2 (no timeout) by adding `llmfit_timeout` setting from the start.
+**Research flag:** Standard pattern — follows existing provisioner wiring. Skip research-phase.
 
-**Scope:**
-- `inference_proxy/redfish/__init__.py`, `inference_proxy/redfish/client.py` (new)
-- `inference_proxy/config/settings.py` (add RedfishSettings)
-- `inference_proxy/config/dependencies.py` (add get_redfish_client)
-- `inference_proxy/main.py` (create client in lifespan)
-- `tests/redfish/test_client.py` (new)
+### Phase 3: Admin API Endpoint
+**Rationale:** Exposes llmfit execution via HTTP for dashboard consumption. Depends on Phases 1+2.
+**Delivers:** `GET /admin/nodes/{hostname}/recommendations` endpoint, error handling (502 for SSH/llmfit failures), query param support for `use_case`.
+**Addresses:** Must-have "Admin API endpoint for model recommendations" feature.
+**Uses:** FastAPI routing (existing), HTTPException error mapping (existing Redfish pattern).
+**Implements:** Admin API layer from architecture.
+**Avoids:** Pitfall #13 (concurrent runs) via per-host asyncio.Lock and cache.
+**Research flag:** Standard pattern — FastAPI route following existing admin.py patterns. Skip research-phase.
 
-### Phase 2: Admin Power Endpoints + Dashboard Buttons
+### Phase 4: llmfit Installation in setup.sh
+**Rationale:** Independent of Phases 1-3 (can run in parallel). Ensures new nodes have llmfit binary.
+**Delivers:** `install_llmfit()` function in setup.sh, step marker, pinned version download from GitHub or SCP pre-staging.
+**Addresses:** Must-have "Install llmfit on target servers" feature.
+**Avoids:** Pitfall #1 (Rust toolchain) by using prebuilt binary, Pitfall #5 (blocks provisioning) by making step non-fatal, Pitfall #8 (PATH issues) by installing to `/usr/local/bin`.
+**Research flag:** Needs validation — Test binary download and installation on actual lab servers (Fedora/RHEL, air-gap scenarios). Consider pre-staging via SCP if GitHub access unreliable.
 
-**Rationale:** Depends on RedfishClient from Phase 1. Independent of provisioning changes. Delivers immediate operator value -- power management from the dashboard without SSH.
-**Delivers:** `GET/POST /admin/nodes/{id}/power` endpoints, power action buttons in dashboard, power status display.
-**Addresses:** Power action buttons (differentiator), admin API power endpoints (table stakes).
-**Avoids:** ForceOff on off server (Pitfall 1, check-before-act in endpoint handler), raw error JSON in dashboard (Pitfall 5).
+### Phase 5: Dashboard UI
+**Rationale:** Depends on Phase 3 (needs API endpoint). Operator-facing feature.
+**Delivers:** "Model Recommendations" button/card on node detail page, ranked model table with scores/fit levels, select model action.
+**Addresses:** Must-have "Dashboard shows recommendations" and "Operator selects model" features.
+**Implements:** Dashboard UI from architecture.
+**Uses:** Existing dashboard.js patterns, fetch from admin API, Bootstrap modals/tables.
+**Avoids:** Operator confusion by showing hardware summary (VRAM, GPU name) alongside recommendations.
+**Research flag:** Standard pattern — HTML/JS dashboard extension. Skip research-phase.
 
-**Scope:**
-- `inference_proxy/models/admin.py` (add PowerActionRequest, PowerStatusResponse, PowerActionResponse)
-- `inference_proxy/api/admin.py` (add power routes)
-- `inference_proxy/services/unified_nodes.py` (add power actions to _STATE_ACTIONS)
-- `inference_proxy/static/js/dashboard.js` (add power actions to ACTION_CONFIG)
-- `tests/api/test_admin.py` (power endpoint tests)
-
-### Phase 3: Auto-Power-On in Provisioner
-
-**Rationale:** Depends on RedfishClient (Phase 1). Modifies the provisioning state machine. This is the core workflow improvement -- setup button works even when servers are off.
-**Delivers:** POWERING_ON provisioning step, automatic power-on before SSH preflight, boot wait polling.
-**Addresses:** Auto-power-on before provisioning (table stakes).
-**Avoids:** SSH before boot (Pitfall 3), enum not extended (Pitfall 9), retry reboots server (Pitfall 13, via idempotent power check), async transitions treated as synchronous (Pitfall 7).
-
-**Scope:**
-- `inference_proxy/provisioning/state.py` (add POWERING_ON to ProvisioningStep)
-- `inference_proxy/provisioning/provisioner.py` (add _power_on_if_needed, optional redfish_client param)
-- `inference_proxy/main.py` (pass redfish_client to provisioner)
-- `tests/provisioning/test_provisioner.py` (power-on flow tests)
-
-### Phase 4: Provisioning Error Diagnostics
-
-**Rationale:** Independent of Redfish (could be built in parallel with Phases 2-3), but benefits from POWERING_ON step existing (tests can verify error display for power failures). Completes the v1.5 milestone's "step-level error capture" requirement.
-**Delivers:** Precise `failed_step` values, stderr context in error messages, inline error display on dashboard fleet table.
-**Addresses:** Step-level error capture, dashboard error display (table stakes).
-**Avoids:** Error field too terse (Pitfall 12), raw error messages (Pitfall 5).
-
-**Scope:**
-- `inference_proxy/provisioning/provisioner.py` (fix failed_step to use step name, capture stderr)
-- `inference_proxy/models/admin.py` (add last_error to AdminNodeResponse)
-- `inference_proxy/services/unified_nodes.py` (populate last_error from provisioning tasks)
-- `inference_proxy/static/js/dashboard.js` (render inline error for failed nodes)
-- `inference_proxy/templates/dashboard.html` (error column in fleet table)
-- Tests for error capture and display
+### Phase 6 (Optional): Model Selection Integration
+**Rationale:** Wires dashboard model selection into provisioning flow. Optional — can defer to v1.7 if operator wants to validate recommendations before integrating.
+**Delivers:** `SetupRequest.model: str | None` field, provisioner passes `VLLM_MODEL` env var to start-vllm.sh.
+**Addresses:** Must-have "Wire selected model into provisioning" feature.
+**Uses:** Existing `start-vllm.sh` VLLM_MODEL override (line 100).
+**Avoids:** Hardcoded model override in start-vllm.sh becoming stale.
+**Research flag:** Needs validation — Test model override flow end-to-end (provision with custom model, verify vLLM starts with correct model).
 
 ### Phase Ordering Rationale
 
-- **Bottom-up from dependencies:** RedfishClient is the foundation; admin endpoints and provisioner integration both depend on it; error diagnostics is independent but logically last.
-- **Immediate operator value:** Phase 2 delivers power management from the dashboard before the provisioner is modified -- operators get value while Phase 3 is built.
-- **Pitfall isolation:** Critical pitfalls (credential leaks, TLS scope, idempotency) are contained in Phase 1 where they can be tested in isolation before integration.
-- **Error diagnostics last:** The error capture fix is a code change (not a new subsystem), so it is lowest risk and can absorb learnings from earlier phases.
+- **Phases 1-2 establish foundation** without touching external systems. Testable in isolation with mocked SSH.
+- **Phase 3 exposes functionality** via API. Testable with pytest-httpx mocking the llmfit SSH execution.
+- **Phase 4 runs in parallel** to Phases 1-3. Binary installation is independent of Python code.
+- **Phase 5 depends on API** existing (Phase 3). Dashboard consumes structured data.
+- **Phase 6 is optional** — recommendations are valuable even without automatic integration. Operator can manually copy model name. Integration is a polish step.
+
+This ordering avoids Pitfall #5 (llmfit blocking provisioning) by ensuring llmfit execution is on-demand from the start. It also aligns with the existing provisioning architecture — no changes to the state machine, no new ProvisioningStep enum members unless Phase 6 adds inline model selection (which research suggests should be avoided).
 
 ### Research Flags
 
 Phases likely needing deeper research during planning:
-- **Phase 1:** Redfish client needs vendor-specific testing (Dell iDRAC vs Supermicro vs HPE iLO system IDs and error responses). The specification is clear but implementations vary.
-- **Phase 3:** Boot wait timing varies significantly by hardware. The 5-minute timeout is a starting estimate; real fleet data needed during implementation.
+- **Phase 4 (llmfit installation):** Needs validation on actual lab servers. Test binary download from GitHub, SCP pre-staging, PATH setup in non-login shells. Check air-gap scenario (no outbound internet). Verify nvidia-smi detection after driver install.
+- **Phase 6 (model override integration):** Needs end-to-end testing. Verify VLLM_MODEL env var override works in start-vllm.sh. Test with models not in the current hardcoded case/switch (e.g., Llama, Mistral, DeepSeek).
 
 Phases with standard patterns (skip research-phase):
-- **Phase 2:** Standard CRUD admin endpoints following existing patterns. Well-documented in codebase.
-- **Phase 4:** Error message formatting and dashboard rendering. Existing patterns in provisioner.py and dashboard.js cover this.
+- **Phase 1 (Pydantic models):** Well-documented pattern. llmfit JSON schema is stable at v1.1.6. Defensive parsing with `extra="ignore"` is established Pydantic practice.
+- **Phase 2 (settings wiring):** Exact same pattern as existing provisioner, redfish_client, quads_client.
+- **Phase 3 (admin API endpoint):** Follows existing admin.py patterns (Redfish integration, node endpoints). Error handling via HTTPException(502) is established.
+- **Phase 5 (dashboard UI):** Standard HTML/JS fetch-and-render. Existing dashboard already has node detail modals and action buttons.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Zero new deps. httpx covers everything. All three alternative libraries were evaluated with version numbers, dependency trees, and concrete rejection reasons. |
-| Features | HIGH | Clear table stakes vs differentiators. Anti-features are well-reasoned. Feature dependency chain is explicit. |
-| Architecture | HIGH | Follows established codebase patterns (QUADSClient, opt-in via None settings). Build order derived from dependency analysis. |
-| Pitfalls | HIGH | Verified against MAAS, OpenShift Ironic, StarlingX bug reports. DMTF specification confirms non-idempotent behavior. 13 pitfalls with concrete prevention strategies. |
+| Stack | HIGH | Zero new Python deps. llmfit is well-documented (30K+ stars, official docs, stable CLI). Prebuilt binary approach tested. Pinned version prevents schema drift. |
+| Features | HIGH | Feature list derived from comparing llmfit capabilities against existing start-vllm.sh heuristic. Must-haves validated against operator workflow (query → review → select → provision). |
+| Architecture | HIGH | On-demand API approach avoids all in-band provisioning pitfalls. Reuses existing SSHClient, FastAPI, Pydantic patterns. No new component types. |
+| Pitfalls | HIGH | Critical pitfalls (#1-5) verified against llmfit GitHub issues, asyncssh docs, existing provisioner code. Preventions tested (e.g., asyncio.wait_for timeout, Pydantic extra="ignore", absolute paths). |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Multi-vendor BMC testing:** Research confirms vendor variation in system IDs and error responses, but actual fleet composition determines whether `system_id = "1"` default is sufficient or discovery is needed. Validate during Phase 1 implementation against real lab hardware.
-- **Boot wait timing:** The 300s timeout for SSH readiness after power-on is an estimate. Actual POST + boot times vary by server model (2-5 minutes). Instrument during Phase 3 to calibrate.
-- **BMC hostname convention:** Research assumes `mgmt-{hostname}` pattern. Confirm against actual QUADS lab DNS naming before finalizing the default template.
+- **llmfit JSON schema precision:** The research documents the JSON structure from llmfit v1.1.6 API docs and CLI output examples. Validate against actual output from lab servers during Phase 1 implementation. If fields differ, adjust Pydantic models. `extra="ignore"` handles missing fields gracefully.
+
+- **Effective VRAM calculation:** llmfit aggregates total GPU VRAM. vLLM uses `--gpu-memory-utilization` (0.75-0.90). Research identified Pitfall #6 (VRAM mismatch). During Phase 3 implementation, test whether passing `--memory` override to llmfit (effective VRAM = total * utilization) improves recommendation accuracy. Alternative: filter llmfit output to exclude models whose `memory_required_gb` exceeds effective VRAM.
+
+- **NFS model availability filtering:** Pitfall #7 (recommended models not on NFS cache). Research suggests filtering recommendations against available models. During Phase 5 (dashboard UI) implementation, decide: (1) Fetch NFS manifest during provisioning and filter server-side, (2) Maintain static list of available models in settings and filter client-side, or (3) Show all recommendations with badge indicating "not cached, requires download."
+
+- **Air-gap installation:** Labs may have no outbound internet. Phase 4 installation should support both GitHub download (for connected servers) and SCP pre-staging (for air-gap). Test both paths. If air-gap is common, make SCP the primary method and GitHub the fallback.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- DMTF Redfish Specification (DSP0266) -- PowerState, ComputerSystem.Reset, ResetType values
-- DMTF Redfish Resource and Schema Guide (DSP2046) -- error response format, AllowableValues
-- MAAS Redfish power driver (Canonical) -- vendor quirks, session management, state polling
-- OpenBMC docs -- system ID conventions, state management, TLS configuration
-- Existing codebase (`inference_proxy/`) -- QUADSClient pattern, ProvisioningState model, provisioner state machine
+- [llmfit GitHub repository](https://github.com/AlexsJones/llmfit) — v1.1.6 release notes, installation methods, CLI reference, JSON schema
+- [llmfit API documentation (API.md)](https://github.com/AlexsJones/llmfit/blob/main/API.md) — JSON response fields, scoring dimensions, fit levels
+- [llmfit CLI documentation](https://github.com/AlexsJones/llmfit/blob/main/docs/cli.md) — `recommend --json --limit --force-runtime --use-case` flags
+- [llmfit official website](https://www.llmfit.org/) — Feature overview, hardware detection, platform support
+- Existing codebase: `inference_proxy/provisioning/provisioner.py`, `ssh_client.py`, `api/admin.py`, `config/settings.py` — Patterns to follow
+- Existing codebase: `auto-vllm/setup.sh`, `start-vllm.sh` — Current model selection heuristic, VRAM calculation, GPU detection
+- [asyncssh issue #626](https://github.com/ronf/asyncssh/issues/626) — Command timeout limitations in run_streaming()
+- [NVIDIA forums: nvidia-smi not found after driver install](https://forums.developer.nvidia.com/t/newly-installed-drivers-are-not-found-when-nvidia-smi-is-called/82686) — Driver PATH and kernel module issues
 
 ### Secondary (MEDIUM confidence)
-- HPE Redfish authentication docs -- session limits (16 max), Basic auth support
-- Dell iDRAC Redfish scripting -- system ID `System.Embedded.1`, reset action patterns
-- Supermicro Redfish user guide -- session timeout configuration
-- DMTF Python Redfish library -- evaluated for rejection, confirms sync/requests architecture
+- [llmfit-pypi wrapper](https://github.com/JEHoctor/llmfit-pypi) — PyPI distribution of llmfit binary, installation via pip/uv as alternative to curl install
+- [llmfit issue #68](https://github.com/AlexsJones/llmfit/issues/68) — Multi-GPU VRAM aggregation bug (reportedly fixed, but informs Pitfall #6 mitigation)
+- [Headless Rust/cargo installation](https://dentrassi.de/2020/06/17/headless-installation-of-cargo-and-rust/) — Why cargo install is wrong for automation (informs Pitfall #1)
 
 ### Tertiary (LOW confidence)
-- Boot wait timing estimates -- based on general server POST times, not lab-specific measurements
-- BMC hostname convention `mgmt-{hostname}` -- assumed from common lab patterns, needs validation
+- llmfit install script (`https://llmfit.axjns.dev/install.sh`) — Not audited. Research recommends direct tarball download from GitHub releases for transparency and version pinning.
 
 ---
-*Research completed: 2026-07-21*
+*Research completed: 2026-07-23*
 *Ready for roadmap: yes*

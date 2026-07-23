@@ -1,255 +1,208 @@
 # Feature Landscape
 
-**Domain:** Redfish power management and provisioning failure diagnostics for an LLM inference proxy
-**Researched:** 2026-07-21
+**Domain:** LLM model recommendation integration (llmfit CLI) into GPU server provisioning gateway
+**Researched:** 2026-07-23
 
 ## Existing Infrastructure (Already Built)
 
-The provisioning system has the foundation these features plug into:
+The provisioning system provides the foundation these features plug into:
 
 | Component | What It Does | New Features Build On |
 |-----------|-------------|----------------------|
-| `NodeProvisioner` | 16-step state machine (PENDING through COMPLETE/FAILED) with SSH orchestration | Auto-power-on inserts before PREFLIGHT; error capture enriches FAILED state |
-| `ProvisioningState` | Frozen Pydantic model with `current_step`, `failed_step`, `error` fields stored in etcd | Step-level error capture extends the `error` field with structured detail |
-| `ProvisioningStep` enum | StrEnum covering setup + teardown lifecycle | New `POWER_ON` step added before `PREFLIGHT` |
-| Admin API (`/admin/nodes/setup`) | Triggers background provisioning, dedup guard, QUADS validation | Power actions get new endpoints; setup gains auto-power-on |
-| Node detail page | Shows provisioning tasks table with step badge, status, error column | Error display shows richer failure detail |
-| Dashboard main page | Node fleet table with state badges and action buttons | Inline error indicator for failed nodes; power actions in action buttons |
-| `QUADSClient` | httpx-based async REST client pattern (injected `AsyncClient`, `base_url`) | Redfish client follows identical pattern |
-| `Settings` / pydantic-settings | Nested config with `INFERENCE_PROXY_` env prefix | `RedfishSettings` sub-model for BMC credentials and defaults |
+| `NodeProvisioner` | 16-step state machine with SSH orchestration, step markers, background tasks | llmfit runs as new SSH command; new provisioning step for install |
+| `SSHClient` | asyncssh wrapper with `run_streaming()` and `upload()` | Executes `llmfit recommend --json` on remote hosts |
+| `setup.sh` | Provisioning script with `[STEP:name:START/OK/FAIL]` markers | New `llmfit_install` step added at end |
+| `start-vllm.sh` | GPU detection + hardcoded model selection via case/switch | `VLLM_MODEL` env var override already exists (line 100); llmfit replaces the heuristic |
+| Admin API (`/admin/`) | Operational endpoints with FastAPI dependency injection | New recommendation endpoint follows same pattern |
+| Node detail page | Shows provisioning tasks, live logs, node info table | Gains "Model Recommendations" card |
+| `AdminNodeResponse` | Frozen Pydantic model with GPU info, state, actions | Extended with recommendation data or served separately |
+| `ProvisioningStep` enum | StrEnum covering setup + teardown lifecycle | New `LLMFIT_INSTALL` step |
+| `QUADSHost` model | GPU vendor/model/count from QUADS inventory | llmfit `system` object provides richer hardware detail (VRAM GB, bandwidth, backend) |
 
 ## Table Stakes
 
-Features operators expect from power management on bare metal servers. Missing any of these makes Redfish integration feel incomplete.
+Features operators expect. Missing = the llmfit integration feels incomplete.
 
-| Feature | Why Expected | Complexity | Depends On |
-|---------|-------------|------------|------------|
-| Power on via Redfish | Cannot SSH into a powered-off server; must power on first | Medium | Redfish client, BMC credentials config |
-| Power off via Redfish (ForceOff) | Operators need to shut down nodes cleanly or force-stop when SSH is unavailable | Low | Redfish client |
-| Power restart via Redfish (GracefulRestart, ForceRestart) | Common ops action for hung servers; two modes match operator expectations | Low | Redfish client |
-| Power status query | Know if server is On/Off/PoweringOn/PoweringOff before attempting operations | Low | Redfish client |
-| Auto-power-on before provisioning | If server is off when setup is triggered, power it on automatically and wait for SSH | Medium | Power status query, power on, SSH readiness poll |
-| Step-level error capture | Current `error` field is a single string; operators need to know exactly which step failed and why | Low | Existing `ProvisioningState` model extension |
-| Dashboard error display for failed nodes | Main fleet table shows "failed" badge but no error detail; operators must click through to node detail | Low | `AdminNodeResponse` model extension, dashboard JS |
+| Feature | Why Expected | Complexity | Notes |
+|---------|--------------|------------|-------|
+| Install llmfit on target servers during provisioning | Can't recommend models without the tool on the hardware | Low | `curl -fsSL https://llmfit.axjns.dev/install.sh \| sh` -- single line in setup.sh, new `[STEP:llmfit_install:START/OK/FAIL]` marker. Add `LLMFIT_INSTALL` to `ProvisioningStep` enum. Prebuilt binary, no Rust toolchain needed on targets. |
+| Run llmfit via SSH and capture JSON output | Core value -- hardware-aware model scoring on actual server hardware | Med | `llmfit recommend --json --use-case general -n 10` via `SSHClient.run_streaming()`. Collect stdout lines, join, parse as JSON. The `--json` flag is the default for `recommend` but explicit is safer. Expect 5-15s execution time (hardware detection + scoring). |
+| Parse llmfit JSON into typed Pydantic models | Gateway needs structured data for API responses and dashboard rendering | Med | Two models: `LLMFitSystemInfo` (hardware: `gpu_vram_gb`, `gpu_name`, `cpu_name`, `total_ram_gb`, `backend`, `has_gpu`) and `LLMFitModelRecommendation` (per-model: `name`, `provider`, `score`, `estimated_tps`, `best_quant`, `memory_required_gb`, `utilization_pct`, `fit_level`, `run_mode`, `context_length`, `params_b`, `category`). Schema is stable at v1.1.6. |
+| Admin API endpoint for model recommendations | Operators need to query recommendations without SSH terminal access | Med | `GET /admin/nodes/{hostname}/recommendations` -- runs llmfit via SSH on the target, returns parsed JSON. Response includes both `system` (hardware) and `models` (recommendations). Depends on SSHClient (exists), Pydantic models (new). |
+| Operator selects model before vLLM deployment | The whole point -- informed model choice replaces hardcoded heuristic | Med | `start-vllm.sh` already supports `VLLM_MODEL` env var override. `SetupRequest` gains optional `model: str \| None` field. When set, provisioner passes `VLLM_MODEL={model}` as env var to the remote `start-vllm.sh`. |
+| Dashboard shows recommendations for a node | Operators work from the dashboard -- model selection must live there | Med | Node detail page (`node_detail.html`) gains a "Model Recommendations" card. Fetches from admin API. Shows ranked table: model name, score, tok/s est, memory%, fit level, quantization. Select button per row. |
+| Error handling for llmfit failures | llmfit may fail (no GPU detected, binary install failed, SSH timeout) -- must not block provisioning | Low | Treat llmfit as best-effort. If `recommend` fails, log warning, fall back to existing GPU-based heuristic in start-vllm.sh. Recommendations are advisory, not blocking. The install step in setup.sh should not `exit 1` on failure -- use a non-fatal step wrapper. |
 
 ## Differentiators
 
-Features that add operational polish. Not expected from a v1.5 internal tool, but valuable if cheap.
+Features that add operational polish. Not expected, but valued.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Power status in fleet table | See On/Off/PoweringOn per node without clicking through | Low | New column in dashboard table, one Redfish GET per node (or cached from last poll) |
-| Power action buttons in dashboard | Power on/off/restart from the fleet table directly | Low | Extend `ACTION_CONFIG` and `_STATE_ACTIONS` with power actions |
-| BMC reachability check | Verify BMC responds before attempting power operations; better error messages | Low | Single GET to `/redfish/v1/` before any action |
-| Collapsible error detail on dashboard | Show truncated error inline, expand on click; avoids navigating to node detail page | Low | CSS + 2 lines of JS for toggle |
-| Retry provisioning after power-on failure | If auto-power-on fails (BMC unreachable, wrong credentials), surface a clear "retry with power" action | Low | New action in `ACTION_CONFIG` |
+| Use-case filtering in recommendation request | Different workloads need different models (coding vs chat vs reasoning) | Low | Pass through to CLI: `--use-case coding\|reasoning\|chat\|general\|multimodal\|embedding`. Add optional `use_case` query param to admin API endpoint. llmfit adjusts composite score weights per use case (e.g., Chat=35% speed vs Reasoning=55% quality). |
+| Minimum fit level filtering | Operators only want "perfect" or "good" fits, not marginal | Low | Pass `--min-fit perfect\|good\|marginal` to llmfit CLI. Add optional `min_fit` query param to admin endpoint. |
+| Hardware detection display | Operators want to see detected VRAM, GPU name, CPU, backend before choosing a model | Low | The `system` object in llmfit JSON output already contains `gpu_vram_gb`, `cpu_name`, `total_ram_gb`, `backend`, `has_gpu`. Display as hardware summary card in dashboard alongside recommendations. Richer than current QUADS `gpu_vendor`/`gpu_model`/`gpu_count`. |
+| Cached recommendations with staleness indicator | Avoid re-running llmfit on every page load -- hardware doesn't change between reboots | Med | Store last llmfit result per hostname in memory (dict keyed by hostname). Show "refreshed 5m ago" badge. "Refresh" button re-runs via SSH. No persistence needed -- gateway restart clears cache, acceptable since hardware is static. |
+| Fleet-wide model compatibility matrix | Operators managing 10+ servers want "which servers can run Model X?" | Med | New endpoint: `GET /admin/recommendations/summary` -- aggregates cached recommendations across all nodes with llmfit data. Groups by model name, shows which hosts can run it and at what fit level. Requires cached per-host recommendations. |
+| Recommendation count limit control | Control how many models to show (top 5 vs top 20) | Low | Pass `-n {limit}` to llmfit CLI. Add optional `limit` query param to admin endpoint. Default 10. |
 
 ## Anti-Features
 
-Features to explicitly NOT build. Each adds complexity without proportional value for an internal ops tool.
+Features to explicitly NOT build.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| Redfish session-based auth | Session management adds token lifecycle, renewal, cleanup. Basic auth is sufficient for internal BMC calls that happen infrequently (power ops are rare). | HTTP Basic auth on every Redfish request. Internal network, TLS to BMC, no session state to manage. |
-| Per-host BMC credential storage | Database, encryption, credential management UI. Way beyond scope. | Single set of BMC credentials in env vars (`INFERENCE_PROXY_REDFISH__USERNAME`, `INFERENCE_PROXY_REDFISH__PASSWORD`). All QUADS lab BMCs use the same credentials. |
-| Automatic System ID discovery from `/redfish/v1/Systems` | Multi-system BMCs exist but QUADS lab servers are single-system. Hypermedia walking adds complexity. | Default `system_id = "1"` in config. Override per-host if needed later. |
-| IPMI fallback | Some older servers lack Redfish. Adds a second protocol path. | Redfish only. Servers without Redfish get manual power management. Flag as unsupported. |
-| Continuous power state polling | Background thread polling BMCs for power state wastes BMC resources and adds load. | Query power state on-demand when dashboard loads or before provisioning. Cache briefly (30s TTL). |
-| Chassis/thermal/fan monitoring | Redfish exposes far more than power state. Scope creep into full hardware monitoring. | Power state and reset actions only. Hardware monitoring is a separate product. |
-| Firmware update via Redfish | Redfish `UpdateService` is a separate complex domain. | Out of scope. Firmware is managed through existing lab processes. |
-| Provisioning log streaming to dashboard | WebSocket/SSE stream of provisioning output to the UI. Complex, adds persistent connections. | Poll `/admin/provisioning/tasks` as today. Error detail shows what failed. Full logs are in structlog output. |
-| Error notification system (email/Slack) | Notification infrastructure for provisioning failures. | Toast notifications in dashboard UI. Operators are watching the dashboard. |
+| Auto-deploy best model without operator confirmation | Operators need to validate model choice against team needs (specific model versions, licensing, org policy). Automated selection removes human judgment from a critical decision. | Show ranked recommendations, let operator click "Deploy with this model". The operator is the decision-maker. |
+| Custom scoring engine replacing llmfit | llmfit implements bandwidth-based speed estimation, dynamic quantization selection (Q8_0 down to Q2_K), MoE-aware memory calculation, 157+ model catalog, community benchmark data. Reimplementing this is months of work for worse results. | Use llmfit as-is. Parse its JSON output. Trust its scoring. |
+| Persistent recommendation history database | Adds storage dependency (SQLite/PostgreSQL) for data that's ephemeral -- hardware profile is constant per server, model catalog changes with llmfit version updates. | In-memory cache per hostname. Cleared on gateway restart. |
+| llmfit REST API server (`llmfit serve`) on each node | Running a long-lived llmfit HTTP server on every GPU node adds process management, port conflicts (8787 default), monitoring burden, firewall rules. | Run `llmfit recommend --json` on demand via SSH. One command, one result, no daemon to manage. |
+| Model downloading/pulling from gateway | Pulling model weights (10-100GB) through the gateway is wrong -- models live on NFS shared storage (`/srv/hf-cache`). | Ensure selected model exists on NFS. If not, show error "model not available on NFS storage". Model weight management is a separate concern. |
+| Support for non-vLLM runtimes from llmfit output | The gateway exclusively manages vLLM nodes. llmfit supports Ollama, llama.cpp, MLX, LM Studio runtimes but only vLLM matters here. | Ignore `runtime` field in llmfit output. The model `name` and fit analysis are what matter -- vLLM serves HuggingFace model IDs regardless. |
+| Building a web TUI mirroring llmfit's interactive mode | The TUI is for humans at a terminal. The gateway is a programmatic consumer. | Use `recommend --json` only. The dashboard provides the visual interface. |
+| llmfit version pinning or update management | llmfit is installed once during setup.sh. Version updates across fleet nodes is ops tooling, not gateway responsibility. | Install latest via curl script. If version matters later, pin in setup.sh URL. |
 
 ## Feature Dependencies
 
 ```
-RedfishSettings (config)         -->  Redfish client (needs BMC URL pattern, credentials)
-Redfish client                   -->  Power on / off / restart actions
-Redfish client                   -->  Power status query
-Power status query               -->  Auto-power-on (check if Off before powering on)
-Auto-power-on                    -->  SSH readiness poll (wait for OS boot after power-on)
-SSH readiness poll                -->  Existing preflight (TCP probe to port 22)
-
-Step-level error capture          -->  ProvisioningState model (extend error field)
-Step-level error capture          -->  NodeProvisioner._update_state (capture exception details)
-AdminNodeResponse extension       -->  Dashboard error display (add error fields to API response)
-Dashboard error display           -->  dashboard.js (render error inline in fleet table)
+Install llmfit (setup.sh step)
+        |
+        v
+Run llmfit via SSH (SSHClient.run_streaming)
+        |
+        v
+Parse JSON into Pydantic models (LLMFitSystemInfo, LLMFitModelRecommendation)
+        |
+        v
+Admin API endpoint (GET /admin/nodes/{hostname}/recommendations)
+        |
+        v
+Dashboard recommendations card (node_detail.html)
+        |
+        v
+Operator selects model --> SetupRequest.model field --> VLLM_MODEL env var --> start-vllm.sh
 ```
 
-## Redfish API Details
-
-### Standard Action URI
-
-```
-POST /redfish/v1/Systems/{system_id}/Actions/ComputerSystem.Reset
-Content-Type: application/json
-Authorization: Basic <base64(username:password)>
-
-{"ResetType": "On"}
-```
-
-Where `{system_id}` is typically `"1"` for single-system BMCs (Dell iDRAC, HPE iLO) or `"system"` for OpenBMC. Configurable via `INFERENCE_PROXY_REDFISH__SYSTEM_ID`.
-
-### ResetType Values (Use These Four)
-
-| ResetType | When to Use | Current PowerState Must Be |
-|-----------|-------------|---------------------------|
-| `On` | Power on a server that is off | Off |
-| `ForceOff` | Immediate power cut (like pulling the plug) | On |
-| `GracefulRestart` | Clean OS shutdown then restart | On |
-| `ForceRestart` | Immediate restart (power cycle, no OS shutdown) | On |
-
-Other ResetType values exist (`GracefulShutdown`, `Nmi`, `ForceOn`, `PushPowerButton`, `PowerCycle`) but are not needed for this use case. `GracefulShutdown` is notable but the gateway already has SSH-based graceful teardown that does `podman stop` first.
-
-### PowerState Values (Read-Only)
-
-| PowerState | Meaning | Operator Action |
-|------------|---------|-----------------|
-| `On` | Server is powered on and running | Can SSH, can provision |
-| `Off` | Server is powered off (BMC has AUX power) | Must power on before provisioning |
-| `PoweringOn` | Transitioning to On (BIOS POST, etc.) | Wait; poll until On |
-| `PoweringOff` | Transitioning to Off | Wait; poll until Off |
-
-### Power Status Query
-
-```
-GET /redfish/v1/Systems/{system_id}
-Authorization: Basic <base64(username:password)>
-
-Response includes: {"PowerState": "On", ...}
-```
-
-### Error Responses from Redfish
-
-| HTTP Status | Meaning | Retry? |
-|-------------|---------|--------|
-| 200/204 | Success | -- |
-| 400 | Invalid ResetType for current state (e.g., `On` when already On) | No, check PowerState first |
-| 401 | Bad credentials | No, fix config |
-| 403 | Insufficient privilege | No, fix BMC account |
-| 404 | Wrong system ID or path | No, fix config |
-| 409 | Reset already in progress | Wait, then retry |
-| 500 | BMC internal error | Retry once with backoff |
-| 503 | BMC busy/overloaded | Retry with backoff |
-
-Redfish returns extended error info in the response body:
-```json
-{
-  "error": {
-    "@Message.ExtendedInfo": [
-      {
-        "MessageId": "Base.1.0.ActionNotSupported",
-        "Message": "The action ComputerSystem.Reset is not supported...",
-        "Resolution": "..."
-      }
-    ]
-  }
-}
-```
-
-### BMC URL Pattern
-
-BMC addresses are typically derived from the hostname. Common patterns in QUADS labs:
-- `mgmt-{hostname}` (e.g., `mgmt-host01.example.com`)
-- `{hostname}-drac` (Dell iDRAC convention)
-- `{hostname}-ilo` (HPE iLO convention)
-
-Configurable via `INFERENCE_PROXY_REDFISH__BMC_HOST_PATTERN` defaulting to `"mgmt-{hostname}"`. The `{hostname}` placeholder is replaced with the short hostname.
-
-## Step-Level Error Capture Details
-
-### Current State
-
-The existing `ProvisioningState` model captures:
-- `failed_step: str | None` -- the step name where failure occurred (e.g., `"RemoteCommandError"`, `"teardown"`)
-- `error: str | None` -- the exception message string
-
-Problems:
-1. `failed_step` stores the exception class name, not the provisioning step name
-2. `error` is a raw exception string, not structured for display
-3. No distinction between transient errors (SSH timeout) and permanent errors (GPU not found)
-
-### Proposed Enhancement
-
-Capture the actual `ProvisioningStep` that was active when the failure occurred, plus a human-readable error summary:
-
-```python
-# In NodeProvisioner.provision(), the except block currently does:
-await self._update_state(
-    hostname, ProvisioningStep.FAILED,
-    failed_step=type(exc).__name__,  # <-- exception class name
-    error=str(exc),
-)
-
-# Change to:
-await self._update_state(
-    hostname, ProvisioningStep.FAILED,
-    failed_step=current_step_name,  # <-- "nvidia_driver", "health_poll", etc.
-    error=str(exc),
-)
-```
-
-This is a minimal change -- track the current step name as a local variable and pass it to `_update_state` on failure. The `ProvisioningState` model already has the right fields; the provisioner just populates `failed_step` with the wrong value.
-
-## Dashboard Error Display Details
-
-### Current State
-
-- **Fleet table (dashboard.html):** Shows state badge (`available`, `healthy`, `unhealthy`, `provisioning`, `failed`) but no error info. Operator must click through to node detail page.
-- **Node detail page:** Shows provisioning tasks table with error column. Already renders `task.error` as red text.
-
-### Proposed Enhancement
-
-Add error info to the fleet table for failed nodes:
-
-1. Extend `AdminNodeResponse` with optional `error` and `failed_step` fields
-2. In `UnifiedNodeService._from_etcd()`, look up the provisioning task for the node and attach error info
-3. In `dashboard.js`, render a small error summary below the state badge for failed nodes
-
-UI pattern: Below the "failed" badge, show a truncated error line (e.g., "Failed at nvidia_driver: exit code 1"). No expand/collapse needed in v1 -- clicking the node ID already navigates to the detail page with full error text.
+Orthogonal (no ordering dependency on each other, but all depend on admin API existing):
+- Use-case filtering: additive `--use-case` flag and query param
+- Min-fit filtering: additive `--min-fit` flag and query param
+- Limit control: additive `-n` flag and query param
+- Hardware detection display: comes free with llmfit JSON `system` object
+- Cached recommendations: wraps around the SSH execution layer
+- Fleet summary: depends on cached per-host data existing
 
 ## MVP Recommendation
 
-Build in this order -- each step is independently useful:
+Prioritize in this order -- each step is independently testable:
 
-1. **Redfish client + config** -- `RedfishSettings` pydantic model, `RedfishClient` class with httpx Basic auth, power status query, reset action. Tests with `pytest-httpx` mocking.
-2. **Admin API power endpoints** -- `POST /admin/nodes/{id}/power` with `action` body field. Returns 202.
-3. **Auto-power-on in provisioning** -- Before PREFLIGHT, check power state. If Off, send `On`, poll until SSH port 22 reachable. New `POWER_ON` step in `ProvisioningStep`.
-4. **Step-level error capture fix** -- Fix `failed_step` to use the actual provisioning step name instead of exception class name.
-5. **Dashboard error display** -- Add `failed_step` and `error` to `AdminNodeResponse`, render inline in fleet table for failed nodes.
-6. **Power action buttons in dashboard** -- Add power_on, power_off, power_restart to `ACTION_CONFIG` and `_STATE_ACTIONS`.
+1. **Pydantic models for llmfit JSON output** -- `LLMFitSystemInfo` and `LLMFitModelRecommendation` matching the documented schema. These are pure data models, no dependencies.
+2. **Install llmfit during setup.sh** -- new step in provisioning script, new `LLMFIT_INSTALL` value in `ProvisioningStep` enum.
+3. **SSH-based llmfit execution** -- new method (on NodeProvisioner or a dedicated service class) that runs `llmfit recommend --json` via SSH and returns parsed Pydantic models.
+4. **Admin API endpoint** -- `GET /admin/nodes/{hostname}/recommendations` returning typed response with system info + model list.
+5. **Dashboard recommendations card** -- table in node_detail.html with ranked models, hardware summary, select button.
+6. **Wire selected model into provisioning** -- `SetupRequest` gains optional `model` field, provisioner passes as `VLLM_MODEL` env var to `start-vllm.sh`.
 
-**Defer:** Power status column in fleet table (requires BMC calls per node on every poll), BMC reachability pre-check, collapsible error detail. Add when the core power flow works.
+Defer:
+- **Fleet-wide matrix**: useful but not v1.6 core -- requires all nodes to have cached recommendations.
+- **Cached recommendations**: start without caching (run llmfit per request). Add if 5-15s SSH round-trip becomes a UX problem.
+- **Use-case / min-fit / limit filtering**: trivial extensions after core flow works. One query param each.
 
-## Configuration Shape
+## llmfit JSON Schema Reference
 
-```python
-class RedfishSettings(BaseModel):
-    """Redfish BMC configuration."""
-    username: str = "root"
-    password: str = ""
-    bmc_host_pattern: str = "mgmt-{hostname}"
-    system_id: str = "1"
-    verify_ssl: bool = False  # Lab BMCs use self-signed certs
-    connect_timeout: float = 10.0
-    read_timeout: float = 30.0
-    power_on_wait_timeout: int = 300  # 5 min for server to POST and boot
-    power_on_poll_interval: int = 10
+The `recommend --json` output (v1.1.6, HIGH confidence -- verified via official docs at alexsjones-llmfit.mintlify.app):
+
+```json
+{
+  "system": {
+    "total_ram_gb": 64.0,
+    "available_ram_gb": 58.24,
+    "cpu_cores": 16,
+    "cpu_name": "AMD EPYC 7742",
+    "has_gpu": true,
+    "gpu_vram_gb": 80.0,
+    "unified_memory": false,
+    "backend": "CUDA"
+  },
+  "models": [
+    {
+      "name": "llama-3.3-70b",
+      "provider": "Meta",
+      "parameter_count": "70B",
+      "params_b": 70.0,
+      "context_length": 131072,
+      "use_case": "general",
+      "category": "General",
+      "release_date": "2024-12-06",
+      "fit_level": "perfect",
+      "run_mode": "gpu",
+      "score": 95.2,
+      "estimated_tps": 42.5,
+      "runtime": "vLLM",
+      "best_quant": "4bit",
+      "memory_required_gb": 43.68,
+      "utilization_pct": 68.2
+    }
+  ]
+}
 ```
 
-Env vars: `INFERENCE_PROXY_REDFISH__USERNAME`, `INFERENCE_PROXY_REDFISH__PASSWORD`, `INFERENCE_PROXY_REDFISH__BMC_HOST_PATTERN`, etc.
+### Scoring Dimensions (composite 0-100)
+
+| Dimension | What It Measures | General | Coding | Reasoning | Chat | Embedding |
+|-----------|-----------------|---------|--------|-----------|------|-----------|
+| Quality | Parameter count + quantization precision | 45% | 50% | 55% | 40% | 30% |
+| Speed | Memory-bandwidth tok/s estimate (55% efficiency factor) | 30% | 20% | 15% | 35% | 40% |
+| Fit | Memory budget vs model size at best quantization | 15% | 15% | 15% | 15% | 20% |
+| Context | Context window capacity given hardware | 10% | 15% | 15% | 10% | 10% |
+
+### Fit Levels
+
+| Level | Meaning | Default included |
+|-------|---------|-----------------|
+| perfect | Fits with headroom | Yes |
+| good | Fits, limited headroom | Yes |
+| marginal | Barely fits, may swap | Yes (default floor) |
+| too_tight | Does not fit | No (excluded by default) |
+
+### Dynamic Quantization
+
+llmfit walks Q8_0 -> Q6_K -> Q5_K_M -> Q5_0 -> Q4_K_M -> Q4_0 -> Q3_K_M -> Q2_K, picking the highest quality that fits available VRAM. If nothing fits at full context, retries at half context.
+
+### Installation on Target Servers
+
+Recommended: `curl -fsSL https://llmfit.axjns.dev/install.sh | sh` -- downloads prebuilt x86_64 binary to `/usr/local/bin/llmfit`. No Rust toolchain needed. Works on headless RHEL/Fedora servers.
+
+Alternative: `pip install llmfit` / `uv tool install llmfit` (Python wrapper on PyPI, v0.9.28).
+
+### What This Replaces
+
+The current `start-vllm.sh` `configure_vllm_params()` function uses a `case "$GPU_MODEL"` switch with 5 branches:
+
+| GPU Match | Hardcoded Model | VRAM Logic |
+|-----------|----------------|------------|
+| H100/A100 | Qwen2.5-72B or 32B | Total VRAM thresholds (240GB, 160GB) |
+| T4 | Qwen2.5-3B or 7B | Single GPU VRAM <= 16GB check |
+| V100 | Qwen2.5-32B or 14B | Total VRAM >= 64GB check |
+| RTX/GeForce | Qwen2.5-14B or 7B | Single GPU VRAM >= 24GB check |
+| Default | Qwen2.5-7B | Conservative fallback |
+
+Problems with current approach:
+- Only covers 4 GPU families (misses A10, L40, MI250, etc.)
+- Only recommends Qwen2.5 models (no Llama, Mistral, DeepSeek, etc.)
+- No memory-fit analysis beyond raw VRAM thresholds
+- No quantization awareness (always serves full precision)
+- No speed estimation
+- No composite scoring
+
+llmfit provides: 157+ models, 30+ providers, dynamic quantization, bandwidth-based speed estimation, MoE support, multi-GPU awareness, composite score across 4 dimensions.
 
 ## Sources
 
-- [DMTF Redfish Resource and Schema Guide (DSP2046)](https://www.dmtf.org/sites/default/files/standards/documents/DSP2046_2024.2.html) -- PowerState enum, ComputerSystem.Reset action, ResetType values
-- [DMTF Redfish Specification (DSP0266)](http://redfish.dmtf.org/schemas/DSP0266_1.0.html) -- Action URI format, AllowableValues annotation, error response structure
-- [Redfish Authentication and Sessions (HPE)](https://servermanagementportal.ext.hpe.com/docs/concepts/redfishauthentication) -- Basic auth vs session auth, X-Auth-Token flow
-- [Redfish Error Responses (HPE)](https://servermanagementportal.ext.hpe.com/docs/concepts/errorresponses) -- Extended error info, MessageId, Resolution
-- [NVIDIA DGX Redfish API Support](https://docs.nvidia.com/dgx/dgxh100-user-guide/redfish-api-supp.html) -- Reset action example, supported ResetType values
-- [OpenBMC Redfish Cheatsheet](https://github.com/openbmc/docs/blob/master/REDFISH-cheatsheet.md) -- System ID conventions, power control examples
-- [Redfish Protocol Overview (AI Infrastructure KB)](https://ai-infrastructure.net/redfish-protocol/) -- PowerState values, ComputerSystem resource
-- [OpenStack Ironic Redfish Power Driver](https://docs.openstack.org/ironic/train/_modules/ironic/drivers/modules/redfish/power.html) -- PoweringOn/PoweringOff to On/Off mapping
-- [Dell iDRAC Redfish Scripting](https://github.com/dell/iDRAC-Redfish-Scripting) -- Direct REST call patterns for power management
-- [Sushy (OpenStack Redfish Library)](https://pypi.org/project/sushy/) -- Reference for Redfish client design, though we use httpx directly
-- [Microsoft Entra Provisioning Logs](https://learn.microsoft.com/en-us/entra/identity/monitoring-health/concept-provisioning-logs) -- Step-level provisioning status patterns (Success/Failure/Skipped)
-- [Azure Monitoring Best Practices](https://learn.microsoft.com/en-us/azure/architecture/best-practices/monitoring) -- Multi-stage diagnostics pipeline pattern
+- [llmfit GitHub](https://github.com/AlexsJones/llmfit) -- v1.1.6, 30.5k stars, MIT license
+- [llmfit Documentation](https://alexsjones-llmfit.mintlify.app/) -- official docs
+- [llmfit recommend command reference](https://alexsjones-llmfit.mintlify.app/api/commands/recommend) -- JSON schema, all flags
+- [llmfit scoring system](https://alexsjones-llmfit.mintlify.app/concepts/how-it-works) -- dimension weights, quantization algorithm
+- [llmfit REST API guide](https://alexsjones-llmfit.mintlify.app/guides/rest-api) -- serve endpoints (not used, but documented)
+- [llmfit installation](https://alexsjones-llmfit.mintlify.app/installation) -- all install methods
+- [llmfit PyPI](https://pypi.org/project/llmfit/0.9.28/) -- Python package
+- [llmfit crates.io](https://crates.io/crates/llmfit) -- Rust crate
+- [llmfit.org](https://www.llmfit.org/) -- official website

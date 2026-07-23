@@ -1,258 +1,251 @@
 # Stack Research
 
-**Domain:** Redfish power management and provisioning diagnostics (v1.5 milestone)
-**Researched:** 2026-07-21
+**Domain:** llmfit CLI integration for hardware-aware model recommendations (v1.6 milestone)
+**Researched:** 2026-07-23
 **Confidence:** HIGH
-**Scope:** Stack additions for Redfish-based power on/off/restart, power status queries, auto-power-on before SSH provisioning, and step-level error capture with dashboard display. Existing stack (Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2) is validated and NOT re-evaluated here.
+**Scope:** Stack additions for integrating the llmfit Rust CLI tool into node provisioning. llmfit is installed on and runs on target GPU servers, not the gateway. The gateway runs llmfit via SSH and parses JSON output. Existing stack (Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2) is validated and NOT re-evaluated here.
 
-## New Python Dependencies for v1.5
+## New Python Dependencies for v1.6
 
 **None.**
 
-Zero new runtime or dev dependencies. httpx covers all Redfish REST calls natively.
+Zero new runtime or dev dependencies. The entire integration is: run a command over SSH, parse JSON output with stdlib `json`, validate with Pydantic.
 
 ## Why No New Python Dependencies
 
-### The Redfish API Is Trivial REST
+### llmfit Is a Remote CLI Tool, Not a Python Library
 
-Redfish (DMTF DSP0266) is a standard REST API served by BMC firmware over HTTPS. The operations needed for v1.5 are:
+llmfit is a Rust binary that runs on the target GPU server, not on the gateway. The integration pattern is identical to the existing `nvidia-smi` GPU verification in `provisioner.py`:
 
-| Operation | HTTP Method | Endpoint | Body |
-|-----------|-------------|----------|------|
-| Get power state | `GET` | `/redfish/v1/Systems/{id}` | None (read `PowerState` from response JSON) |
-| Power on | `POST` | `/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset` | `{"ResetType": "On"}` |
-| Force off | `POST` | `/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset` | `{"ResetType": "ForceOff"}` |
-| Graceful restart | `POST` | `/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset` | `{"ResetType": "GracefulRestart"}` |
-| Force restart | `POST` | `/redfish/v1/Systems/{id}/Actions/ComputerSystem.Reset` | `{"ResetType": "ForceRestart"}` |
-| Discover allowed actions | `GET` | `/redfish/v1/Systems/{id}` | None (read `Actions.#ComputerSystem.Reset.ResetType@Redfish.AllowableValues`) |
+1. SSH to host (asyncssh -- already installed)
+2. Run command (`llmfit recommend --json --limit 10`)
+3. Capture stdout (existing `SSHClient.run_streaming()` or `_ssh_run_command()`)
+4. Parse JSON (stdlib `json.loads()`)
+5. Validate with Pydantic model (Pydantic -- already installed)
+6. Return via FastAPI endpoint (FastAPI -- already installed)
 
-That is one GET and one POST with a JSON body. httpx does this in its sleep.
+Every piece of this chain already exists in the codebase.
 
-### Python Redfish Libraries Evaluated and Rejected
+### llmfit Installation on Target Servers
 
-Three libraries were evaluated. All three use synchronous `requests` under the hood, all three would add dependency trees larger than the code they replace, and none provide meaningful value for our 2-endpoint use case.
+llmfit must be installed on target GPU servers during provisioning. The installation is a shell command executed via SSH, not a Python dependency.
 
-| Library | Version | HTTP Client | Key Dependencies | Verdict |
-|---------|---------|-------------|------------------|---------|
-| `redfish` (DMTF) | 3.3.6 | `requests` (sync) | requests, requests-toolbelt, requests-unixsocket, jsonpatch, jsonpath_ng, jsonpointer | **REJECT** |
-| `sushy` (OpenStack) | 5.11.1 | `requests` (sync) | OpenStack dependency graph (openstacksdk ecosystem) | **REJECT** |
-| `python-ilorest-library` (HPE) | 7.2.0.0 | `requests` (sync) | HPE-specific; **conflicts with DMTF `redfish` package namespace** | **REJECT** |
+**Recommended installation method:** Pre-built binary download from GitHub releases.
 
-#### Why `redfish` (DMTF) Was Rejected
-
-- Pulls in `requests` (sync HTTP client) when we already have `httpx` (async). Every call would need `asyncio.to_thread()` wrapping.
-- Adds 6 transitive dependencies (requests, requests-toolbelt, requests-unixsocket, jsonpatch, jsonpath_ng, jsonpointer) for functionality we do not need (JSON patching, Unix socket connections, multipart uploads).
-- The library's value is navigating complex Redfish schemas (BIOS settings, storage controllers, firmware updates). We are calling exactly 2 endpoints.
-- Actively maintained (latest release July 2026), but the dependency cost is not justified.
-
-#### Why `sushy` (OpenStack) Was Rejected
-
-- Designed for OpenStack Ironic's bare metal provisioning needs. Scope is far broader than power management.
-- Pulls in the OpenStack dependency ecosystem. Adding OpenStack dependencies to a lightweight FastAPI proxy is the wrong direction.
-- Also uses `requests` (sync), same wrapping problem.
-- Good library for its intended audience (Ironic drivers), wrong tool here.
-
-#### Why `python-ilorest-library` (HPE) Was Rejected
-
-- HPE vendor-locked. While it claims generic Redfish support, it is optimized for iLO BMCs.
-- **Cannot coexist** with the DMTF `redfish` package in the same Python environment (namespace conflict). This is a hard blocker.
-- Our BMC fleet includes multiple vendors (Dell iDRAC, Supermicro, HPE iLO). A vendor-specific library is the wrong choice.
-
-### httpx Covers Everything
-
-httpx is already installed (`httpx>=0.28`). It provides:
-
-- **Async HTTP client**: `httpx.AsyncClient` with connection pooling (already used for proxy engine and QUADS client)
-- **Basic auth**: `httpx.BasicAuth(username, password)` -- built-in, one line
-- **Self-signed cert handling**: `verify=False` parameter (BMCs universally use self-signed certs)
-- **JSON request/response**: `client.post(url, json=payload)`, `response.json()` -- trivial
-- **Timeout control**: Per-request or client-level timeouts
-- **Error handling**: `httpx.HTTPError` hierarchy, `response.raise_for_status()`
-
-The Redfish client will follow the exact same pattern as `QUADSClient` (see `inference_proxy/quads/client.py`): thin async wrapper over an injected `httpx.AsyncClient`.
-
-## Redfish Client Design (httpx-based)
-
-### Authentication: Basic Auth
-
-Use HTTP Basic Authentication. Rationale:
-
-1. **Simplicity**: One header per request, no session lifecycle to manage.
-2. **Stateless**: No token expiry, no refresh logic, no cleanup on error.
-3. **Sufficient**: Internal network, BMC calls are infrequent (power operations, not continuous polling). Session-based auth saves nothing here.
-4. **Standard**: Every Redfish implementation supports basic auth. Session auth support varies by vendor firmware version.
-
-httpx handles this natively:
-
-```python
-auth = httpx.BasicAuth(username, password)
-client = httpx.AsyncClient(auth=auth, verify=False)
+```bash
+curl -fsSL https://github.com/AlexsJones/llmfit/releases/download/v1.1.6/llmfit-v1.1.6-x86_64-unknown-linux-gnu.tar.gz \
+  | tar xz -C /usr/local/bin/
 ```
 
-### Self-Signed Certificates
+**Why pre-built binary over other options:**
 
-BMCs universally use self-signed certificates. `verify=False` is standard practice for BMC communication on internal networks. The DMTF `redfish` library itself suppresses `InsecureRequestWarning` from urllib3 for the same reason. sushy has a dedicated `TLSHttpAdapter` for this.
+| Method | Verdict | Reason |
+|--------|---------|--------|
+| Pre-built binary (GitHub release) | **USE** | Single curl+tar, no dependencies, ~5 seconds, pinnable version |
+| `curl -fsSL llmfit.axjns.dev/install.sh \| sh` | REJECT | Runs unaudited remote script as root. Fine interactively, wrong for automated provisioning. |
+| `cargo install llmfit` | REJECT | Requires Rust toolchain on target servers. Compilation takes minutes. Adding a build toolchain to GPU inference nodes is waste. |
+| `brew install llmfit` | REJECT | Homebrew on RHEL/Fedora lab servers is non-standard. Adds package manager complexity. |
+| `uv tool install llmfit` (Python wrapper) | REJECT | llmfit has a Python shim on PyPI but it just wraps the Rust binary. Adds uv/pip dependency on target nodes. The gateway has uv; the target GPU nodes should not need it. |
+| Podman/Docker container | REJECT | llmfit needs to detect host hardware (GPU, RAM, CPU). Container isolation may hide GPUs unless CDI/device passthrough is configured. Bare-metal binary is simpler and more reliable. |
 
-httpx with `verify=False` handles this cleanly. Suppress the warning at the client level.
+**Version pinning:** Hardcode the version in the provisioning script or settings. llmfit is actively developed (v1.1.6 released 2026-07-21, 30K+ GitHub stars). Pin to a known-good version and bump deliberately.
 
-### System ID Discovery
+### llmfit JSON Output Schema
 
-The system ID in the Redfish URL (`/redfish/v1/Systems/{id}`) varies by vendor:
+llmfit `recommend --json` produces a well-structured JSON envelope. The fields we need for model recommendation:
 
-| Vendor | Typical System ID |
-|--------|-------------------|
-| Dell iDRAC | `System.Embedded.1` |
-| Supermicro | `1` |
-| HPE iLO | `1` |
-| NVIDIA DGX | `DGX` |
-| OpenBMC | `system` |
+**Envelope:**
 
-The safe approach: GET `/redfish/v1/Systems/` to list members, take the first (and usually only) entry. Cache the result per-BMC. This is what both sushy and the DMTF library do internally.
+| Field | Type | Purpose |
+|-------|------|---------|
+| `system` | object | Detected hardware (GPU VRAM, RAM, CPU) |
+| `total_models` | int | Total models matching |
+| `returned_models` | int | Count returned |
+| `models` | array | Ranked model recommendations |
 
-### Timeout Configuration
+**Per-model fields we consume:**
 
-BMC operations are slow compared to typical REST APIs. Power state changes take 1-30 seconds to execute. Network latency to BMCs on management networks is typically higher than application networks.
+| Field | Type | Example | Purpose |
+|-------|------|---------|---------|
+| `name` | string | `"Qwen/Qwen2.5-Coder-7B-Instruct"` | Full HuggingFace model ID |
+| `parameter_count` | string | `"7B"` | Human display |
+| `params_b` | float | `7.0` | Numeric params for sorting |
+| `fit_level` | string | `"good"` | `perfect`, `good`, `marginal`, `too_tight` |
+| `score` | float | `86.5` | Composite ranking score |
+| `score_components` | object | `{quality, speed, fit, context}` | Score breakdown |
+| `estimated_tps` | float | `42.5` | Estimated tokens/second |
+| `memory_required_gb` | float | `5.8` | VRAM needed |
+| `memory_available_gb` | float | `12.0` | VRAM detected |
+| `utilization_pct` | float | `48.3` | Memory utilization |
+| `best_quant` | string | `"Q5_K_M"` | Recommended quantization |
+| `context_length` | int | `32768` | Native context window |
+| `use_case` | string | `"Coding"` | Category |
+| `runtime` | string | `"llamacpp"` | Recommended runtime |
+| `license` | string | `"apache-2.0"` | License info |
+| `supports_tp` | array | `[1, 2, 4]` | Tensor parallelism degrees |
+| `disk_size_gb` | float | `5.1` | On-disk size at best_quant |
 
-Recommended: connect timeout 10s, read timeout 30s for power operations.
+**Fields we can ignore:** `gguf_sources`, `ollama_name`, `verify_command`, `measured_tps`, `estimate_basis`, `installed`, `capability_ids`, `notes`. These are relevant for local llama.cpp/Ollama use cases, not for vLLM serving.
 
-## Configuration Additions
+**Important context:** llmfit's default recommendations are oriented toward local inference runtimes (llama.cpp, MLX, Ollama). For vLLM serving, the hardware detection (GPU count, VRAM per GPU, total VRAM) is the primary value. The model rankings may not perfectly match vLLM's memory requirements since vLLM uses different quantization and tensor parallelism strategies. The `--force-runtime vllm` flag exists and should be used.
 
-New settings model for Redfish BMC access:
+### Pydantic Models for llmfit Output
+
+Define Pydantic models to validate llmfit JSON output. This is pure Pydantic (already installed), no new libraries:
 
 ```python
-class RedfishSettings(BaseModel):
-    """Redfish BMC configuration."""
-    username: str = "root"
-    password: str = ""  # Must be set via env var
-    connect_timeout: float = 10.0
-    read_timeout: float = 30.0
-    # ponytail: single credential set for all BMCs; per-BMC creds if fleet is heterogeneous
+class LLMFitScoreComponents(BaseModel):
+    quality: float
+    speed: float
+    fit: float
+    context: float
+
+class LLMFitModelRecommendation(BaseModel):
+    name: str
+    parameter_count: str
+    params_b: float
+    fit_level: str  # perfect, good, marginal, too_tight
+    score: float
+    score_components: LLMFitScoreComponents
+    estimated_tps: float
+    memory_required_gb: float
+    memory_available_gb: float
+    utilization_pct: float
+    best_quant: str
+    context_length: int
+    use_case: str
+    runtime: str
+    license: str
+    supports_tp: list[int] = []
+    disk_size_gb: float = 0.0
+
+class LLMFitResponse(BaseModel):
+    total_models: int
+    returned_models: int
+    models: list[LLMFitModelRecommendation]
 ```
 
-BMC endpoint derivation: convention-based from hostname. Most lab environments use a naming pattern like `{hostname}-mgmt` or `mgmt-{hostname}` for BMC addresses. This should be configurable:
+Use `model_config = ConfigDict(extra="ignore")` so new fields llmfit adds in future versions do not break parsing.
+
+## Integration Points with Existing App
+
+### SSH Execution (Existing Pattern)
+
+The `SSHClient._ssh_run_command()` helper already collects stdout from a remote command into a string. llmfit integration follows the exact same pattern as `_verify_gpu()` in `provisioner.py`:
 
 ```python
-    bmc_hostname_pattern: str = "{hostname}-mgmt"
-    # e.g., "server01" -> "server01-mgmt"
+# Existing pattern in provisioner.py:
+gpu_output = await self._ssh_run_command(hostname, "nvidia-smi ...")
+
+# llmfit follows same pattern:
+llmfit_output = await self._ssh_run_command(hostname, "llmfit recommend --json --limit 10 --force-runtime vllm")
 ```
 
-Env var: `INFERENCE_PROXY_REDFISH__USERNAME`, `INFERENCE_PROXY_REDFISH__PASSWORD`, etc.
+### llmfit Installation During Provisioning
 
-## Step-Level Error Capture
+llmfit installation should be a step in `setup.sh` or a separate script uploaded during provisioning. It runs after system setup but can run before or after NVIDIA driver installation (llmfit detects GPUs but does not require drivers to be installed for hardware inventory -- it reads PCI device info).
 
-### What Already Exists
+However, for accurate model recommendations including VRAM detection, llmfit should run **after** NVIDIA drivers are installed so it can detect GPU memory via `nvidia-smi` or NVML.
 
-The `ProvisioningState` model already has `failed_step: str | None` and `error: str | None` fields. The provisioner writes these to etcd on failure. The admin API already serves them via `GET /admin/provisioning/tasks`.
+### Admin API Extension
 
-### What Needs to Change (Code, Not Libraries)
+New endpoint following existing patterns:
 
-The current error capture is coarse: `failed_step` gets the exception class name (`RemoteCommandError`), and `error` gets the full exception message. The v1.5 improvement is:
+```
+GET /admin/nodes/{hostname}/recommendations -> LLMFitRecommendationsResponse
+```
 
-1. **Map `failed_step` to the actual provisioning step** (e.g., `nvidia_driver` instead of `RemoteCommandError`). The `_run_setup` method already parses `[STEP:name:FAIL]` markers but only logs them -- it should propagate the step name to the failure state.
+This endpoint SSHes to the host, runs llmfit, parses output, and returns recommendations. It is an on-demand operation (operator clicks a button), not part of the provisioning sequence.
 
-2. **Truncate `error` to a useful summary** rather than dumping full SSH output. First 500 chars of stderr is enough for dashboard display.
+### Provisioning Flow Change
 
-3. **Surface errors in the dashboard UI** -- the admin API already returns error data; the dashboard JS needs to read and display it.
+The provisioning flow does NOT change for v1.6. llmfit recommendations are a **pre-provisioning** step: the operator checks recommendations, picks a model, then starts provisioning with that model. The `provision()` method's sequence stays the same.
 
-No new libraries needed. This is a code change in `provisioner.py` (capture the step name from markers) and `dashboard.js` (display the error field).
+### ProvisioningStep Enum
+
+No new enum values needed. llmfit runs outside the provisioning state machine -- it is an advisory query, not a provisioning step.
+
+### Settings
+
+Minimal new config:
+
+```python
+class LLMFitSettings(BaseModel):
+    """llmfit CLI configuration."""
+    version: str = "v1.1.6"  # pinned version for binary download
+    binary_path: str = "/usr/local/bin/llmfit"  # install location on target
+    recommend_limit: int = 10  # --limit flag
+    install_timeout: int = 60  # seconds for download+install
+```
+
+Env var: `INFERENCE_PROXY_LLMFIT__VERSION`, `INFERENCE_PROXY_LLMFIT__RECOMMEND_LIMIT`, etc.
 
 ## Alternatives Considered
 
 | Recommended | Alternative | Why Not |
 |-------------|-------------|---------|
-| httpx (already installed) | DMTF `redfish` library | Adds `requests` + 5 transitive deps for 2 REST endpoints. Sync-only, needs thread wrapping. |
-| httpx (already installed) | `sushy` (OpenStack) | OpenStack dependency graph. Designed for Ironic, massive overkill. |
-| httpx (already installed) | `python-ilorest-library` (HPE) | Vendor-locked, namespace conflicts with DMTF package. |
-| httpx (already installed) | `aiohttp` | Already have httpx. Adding a second async HTTP client is waste. |
-| Basic auth | Session auth (X-Auth-Token) | Session management complexity for infrequent BMC calls. No benefit on internal network. |
-| Convention-based BMC hostname | QUADS BMC discovery API | QUADS may not expose BMC addresses. Convention pattern is simpler and standard in lab environments. Configurable pattern covers variations. |
-| In-memory error field on ProvisioningState | Separate error log storage | Already have `error` field in etcd state. No new storage needed. |
+| Run llmfit CLI via SSH | Build Python hardware detection | llmfit already exists, is well-maintained (30K stars), detects GPU/RAM/CPU accurately, and ranks models. Reimplementing this in Python is months of work for an inferior result. |
+| Pre-built binary download | `cargo install` on target | Requires Rust toolchain on GPU servers. Compilation is slow. Binary download is seconds. |
+| Pre-built binary download | Install script (`curl \| sh`) | Unaudited remote script in automated provisioning. Pre-built binary is more controlled. |
+| `--force-runtime vllm` flag | Default runtime detection | llmfit defaults to llama.cpp/MLX/Ollama. We serve with vLLM. Force the runtime to get relevant recommendations. |
+| On-demand SSH execution | Cache recommendations in etcd | Hardware does not change. Cache adds complexity for no benefit -- the operator queries once, picks a model, and provisions. YAGNI. |
+| Pydantic model with `extra="ignore"` | Parse raw dict | Pydantic gives type safety and forward compatibility. Already in the stack. Zero cost. |
+| `_ssh_run_command()` (existing) | New SSH execution method | The existing helper collects stdout into a string. That is exactly what we need. |
 
 ## What NOT to Add
 
 | Technology | Why Not |
 |------------|---------|
-| `redfish` (DMTF PyPI package) | sync `requests`-based, 6 transitive deps, overkill for 2 endpoints |
-| `sushy` (OpenStack) | OpenStack dependency ecosystem, designed for Ironic drivers |
-| `python-ilorest-library` (HPE) | Vendor-locked, namespace conflict |
-| `requests` | httpx already installed, async-native, same API surface |
-| `ipmi` / `pyghmi` | IPMI is legacy. Redfish is the standard. Do not add IPMI as fallback unless a BMC without Redfish is discovered in the fleet. |
-| Retry library (tenacity) | Power operations are idempotent and infrequent. If a BMC call fails, surface the error to the operator. One manual retry from the dashboard is simpler than retry logic with exponential backoff against a potentially unreachable BMC. |
-| Separate error database | etcd already stores provisioning state with error fields. No SQLite, no Redis, no new storage. |
-
-## Integration Points with Existing App
-
-### Follows QUADSClient Pattern
-
-The Redfish client mirrors `QUADSClient` exactly:
-
-- Constructor-injected `httpx.AsyncClient` (DIP, testable)
-- Thin async methods wrapping httpx calls
-- Custom exception type for connection errors
-- Registered in `config/dependencies.py` alongside other clients
-
-### Provisioner Integration
-
-The provisioner's `provision()` method gains a new step before `preflight`:
-
-```
-PENDING -> POWER_ON -> PREFLIGHT -> UPLOADING_SCRIPTS -> ...
-```
-
-If the host is already powered on (PowerState == "On"), skip the power-on step. This is a pre-flight enhancement, not a new workflow.
-
-### Admin API Extension
-
-New endpoints follow existing patterns:
-
-```
-POST /admin/nodes/{node_id}/power   {"action": "On|ForceOff|GracefulRestart|ForceRestart"}
-GET  /admin/nodes/{node_id}/power   -> {"power_state": "On|Off|..."}
-```
-
-### Dashboard UI Extension
-
-- Power state badge next to each node in the fleet table
-- Power action buttons (on/off/restart) in node row actions
-- Error display: inline expandable section showing `failed_step` and `error` from provisioning state
-
-All vanilla JS, same pattern as existing action buttons.
+| Any Python GPU detection library (`gputil`, `pynvml`, `nvidia-ml-py`) | llmfit handles hardware detection on the target server. The gateway never touches GPUs. |
+| `subprocess` / local llmfit execution | llmfit must run on the target server to detect that server's hardware, not on the gateway. |
+| Model database / SQLite | Recommendations are queried on-demand from live hardware. No persistence needed. |
+| Background polling for recommendations | Hardware does not change between queries. On-demand is correct. |
+| WebSocket for recommendation streaming | llmfit `recommend --json` returns in ~2 seconds. No streaming needed. HTTP request/response is fine. |
+| New HTTP client library | httpx is not involved. This is pure SSH + JSON parsing. |
+| Task queue (Celery, etc.) | Running llmfit takes ~2 seconds. An asyncio task or even a synchronous endpoint is fine. No queue needed. |
+| Custom model ranking algorithm | llmfit's scoring (quality, speed, fit, context) is well-designed. Use it, do not reinvent it. |
+| `requests` library | Not needed. No HTTP calls to external services. SSH only. |
 
 ## Installation
 
 ```bash
-# No new dependencies
-# Existing pyproject.toml already has everything needed
+# No new Python dependencies to install on the gateway.
+# Existing pyproject.toml already has everything needed.
+
+# On target servers (during provisioning, via SSH):
+curl -fsSL https://github.com/AlexsJones/llmfit/releases/download/v1.1.6/llmfit-v1.1.6-x86_64-unknown-linux-gnu.tar.gz \
+  | tar xz -C /usr/local/bin/
 ```
 
 ## Key Version Constraints
 
-No new version constraints. All existing constraints from v1.4 remain valid.
+No new Python version constraints. All existing constraints from v1.5 remain valid.
 
-| Existing Dependency | Minimum | Still Valid | v1.5 Relevance |
+| Existing Dependency | Minimum | Still Valid | v1.6 Relevance |
 |---------------------|---------|-------------|----------------|
-| httpx >= 0.28 | Stable async streaming | Yes | Redfish REST client uses `AsyncClient` with basic auth |
-| Pydantic >= 2.10 | Model validation | Yes | New `RedfishSettings` model, extended `ProvisioningStep` enum |
-| FastAPI >= 0.135 | Built-in SSE | Yes | New admin endpoints for power operations |
-| structlog >= 26.1.0 | Structured logging | Yes | Redfish operation logging |
+| asyncssh >= 2.20 | SSH client | Yes | Runs llmfit on remote hosts, downloads binary |
+| Pydantic >= 2.10 | Model validation | Yes | New Pydantic models for llmfit JSON output |
+| FastAPI >= 0.135 | HTTP framework | Yes | New admin endpoint for recommendations |
+| structlog >= 26.1.0 | Structured logging | Yes | llmfit operation logging |
+
+**External tool version:**
+
+| Tool | Version | Where | Why This Version |
+|------|---------|-------|------------------|
+| llmfit | v1.1.6 | Target GPU servers (not gateway) | Latest stable release (2026-07-21). Pre-built binaries available for x86_64 linux (gnu and musl). Supports `--json`, `--force-runtime vllm`, `--limit`. |
 
 ## Sources
 
-- DMTF Redfish specification: https://www.dmtf.org/standards/redfish -- DSP0266, REST API standard for hardware management
-- DMTF python-redfish-library: https://github.com/DMTF/python-redfish-library -- v3.3.6, evaluated and rejected (sync, heavy deps)
-- redfish PyPI: https://pypi.org/project/redfish/ -- v3.3.6 (July 2026), depends on requests + 5 others
-- sushy (OpenStack): https://github.com/openstack/sushy -- v5.11.1 (July 2026), requests-based, Ironic-scoped
-- sushy PyPI: https://pypi.org/project/sushy/ -- Python >=3.10, actively maintained
-- sushy connector.py: https://github.com/openstack/sushy/blob/master/sushy/connector.py -- confirms requests dependency, TLS adapter
-- python-ilorest-library: https://github.com/HewlettPackard/python-ilorest-library -- v7.2.0.0, HPE vendor-specific
-- Redfish authentication: https://redfish.redoc.ly/docs/concepts/redfishauthentication/ -- Basic + Session auth patterns
-- OpenBMC Redfish cheatsheet: https://github.com/openbmc/docs/blob/master/REDFISH-cheatsheet.md -- curl examples for power operations
-- Redfish power operations: https://advantech-ncg.zendesk.com/hc/en-us/articles/44142031579417 -- ComputerSystem.Reset action examples
-- NVIDIA DGX Redfish: https://docs.nvidia.com/dgx/dgxh100-user-guide/redfish-api-supp.html -- vendor-specific system IDs
-- Existing codebase: `inference_proxy/quads/client.py` -- httpx.AsyncClient pattern to follow
-- Existing codebase: `inference_proxy/provisioning/state.py` -- ProvisioningState already has error fields
-- Existing codebase: `inference_proxy/provisioning/provisioner.py` -- step marker parsing already exists
+- llmfit GitHub: https://github.com/AlexsJones/llmfit -- v1.1.6 (July 2026), 30K+ stars, Rust CLI
+- llmfit README: https://github.com/AlexsJones/llmfit/blob/main/README.md -- installation methods, CLI usage
+- llmfit CLI docs: https://github.com/AlexsJones/llmfit/blob/main/docs/cli.md -- `recommend --json --limit --force-runtime --use-case` flags
+- llmfit API docs: https://github.com/AlexsJones/llmfit/blob/main/API.md -- full JSON response schema for model recommendations
+- llmfit releases: https://github.com/AlexsJones/llmfit/releases/tag/v1.1.6 -- pre-built binaries for linux x86_64 (gnu, musl), aarch64
+- Existing codebase: `inference_proxy/provisioning/provisioner.py` -- `_verify_gpu()` and `_ssh_run_command()` patterns to follow
+- Existing codebase: `inference_proxy/provisioning/ssh_client.py` -- SSHClient with `run_streaming()` and `upload()`
+- Existing codebase: `inference_proxy/api/admin.py` -- admin endpoint patterns
+- Existing codebase: `inference_proxy/config/settings.py` -- settings model patterns
 
 ---
-*Stack research for: Redfish power management and provisioning diagnostics (v1.5)*
-*Researched: 2026-07-21*
+*Stack research for: llmfit CLI integration for hardware-aware model recommendations (v1.6)*
+*Researched: 2026-07-23*

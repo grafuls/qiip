@@ -1,338 +1,349 @@
 # Domain Pitfalls
 
-**Domain:** Redfish Power Management and Provisioning Diagnostics for Inference Proxy Gateway
-**Researched:** 2026-07-21
-**Confidence:** HIGH (verified against DMTF Redfish specification, MAAS Redfish driver bug reports, OpenBMC implementation, existing provisioner codebase)
+**Domain:** llmfit CLI Integration for Hardware-Aware Model Selection in Inference Proxy Gateway
+**Researched:** 2026-07-23
+**Confidence:** HIGH (verified against llmfit GitHub/docs, existing provisioner codebase, asyncssh issue tracker, NVIDIA driver documentation)
 
-**Scope:** Pitfalls specific to adding Redfish power management (v1.5) and step-level error capture/display to the existing provisioning pipeline. Prior pitfalls (v1.0-v1.4) are in git history.
+**Scope:** Pitfalls specific to adding llmfit CLI integration (v1.6) to the existing SSH-based provisioning pipeline. Prior pitfalls (v1.0-v1.5) are in git history.
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause failed power operations, leaked credentials, or require provisioning pipeline rework.
+Mistakes that cause failed installations, incorrect model recommendations, or require provisioning pipeline rework.
 
-### Pitfall 1: ForceOff on an Already-Off Server Returns HTTP 400
+### Pitfall 1: Installing Rust/Cargo Toolchain on Remote Servers Instead of Using Prebuilt Binaries
 
-**What goes wrong:** The code issues `POST /redfish/v1/Systems/1/Actions/ComputerSystem.Reset` with `{"ResetType": "ForceOff"}` to a server that is already powered off. The BMC returns HTTP 400 (Bad Request). The retry logic sees a 400, retries the same request, gets 400 again, exhausts retries, and reports a power-off failure -- even though the server is already in the desired state.
+**What goes wrong:** The developer installs llmfit via `cargo install llmfit` on target servers because it seems like the natural Rust installation path. This pulls the full Rust toolchain (`rustup` + `cargo` + `rustc`), downloads and compiles llmfit from source including all dependencies, and takes 5-15 minutes per server on a cold cache. The compilation requires gcc, make, and development headers to already be present. On a fleet of 20 servers, this is 100-300 minutes of build time across the fleet, and any compilation failure (missing openssl-devel, incompatible glibc, disk space exhaustion from the `~/.cargo` registry cache) fails the entire provisioning run for that server.
 
-This is the single most reported Redfish integration bug. MAAS, OpenShift Ironic, and StarlingX all hit this. The DMTF specification does not require BMCs to be idempotent on power actions; most are not. HPE iLO, Dell iDRAC, and Supermicro BMCs all return 400 when the requested action is a no-op relative to the current state.
+The existing setup.sh already runs 5+ minutes for system updates, NVIDIA driver install, and vLLM pip install. Adding a Rust toolchain install doubles provisioning time for a single CLI binary.
 
-**Why it happens:** Developers assume power actions are idempotent ("make it off" = "ensure it is off"). They are not. They are imperative ("turn it off now"), and if it is already off, there is nothing to turn off -- the BMC rejects the request.
+**Why it happens:** Developers familiar with Rust reach for `cargo install`. The llmfit README mentions it as an installation option. It seems robust because it compiles from source -- but "robust" on a developer workstation is "fragile" in automated provisioning.
 
 **Consequences:**
-- Teardown fails on servers that are already powered off (e.g., after a crash or manual shutdown).
-- Auto-power-on before provisioning fails if the server happens to already be on (sends On to an already-On server -- some BMCs accept this, some reject it).
-- The provisioner marks the operation as FAILED and the dashboard shows an error for a non-error situation.
+- Provisioning time doubles or triples per server.
+- `rustup` prompts for interactive input by default, hanging the SSH session indefinitely. The `-y` flag is required but easy to forget.
+- After `rustup` install, `source $HOME/.cargo/env` must be called in the same shell session, or `cargo` is not on PATH. Separate `ssh_client.run_streaming()` calls each start a fresh shell -- PATH changes from one command do not persist to the next.
+- 500MB+ disk usage for the Rust toolchain that is never used again after the single `cargo install`.
+- Compilation failures are opaque to the operator: the dashboard shows "Failed at step 'llmfit_install'" with 200 lines of compiler output.
 
 **Prevention:**
-- Always query `PowerState` via `GET /redfish/v1/Systems/1` before issuing any reset action. If the current state matches the desired state, skip the action and return success.
-- Handle HTTP 400 on power actions as a soft error: re-query `PowerState` immediately. If the state matches the desired outcome, treat it as success. If it does not match, then it is a real error.
-- The check-before-act pattern:
-  ```python
-  state = await self._get_power_state(hostname)
-  if action == "ForceOff" and state == "Off":
-      return  # Already off, skip
-  if action == "On" and state == "On":
-      return  # Already on, skip
-  await self._reset_action(hostname, action)
-  await self._poll_power_state(hostname, target_state, timeout)
+- Use the prebuilt binary. llmfit publishes `x86_64-unknown-linux-musl` static binaries on every GitHub release. The official install script (`curl -fsSL https://llmfit.org/install.sh | sh`) downloads the correct binary for the platform and places it in `/usr/local/bin` or `~/.local/bin`. Alternatively, there is a PyPI wrapper (`pip install llmfit`) that bundles the binary.
+- For maximum control and reproducibility, download the tarball directly in the provisioning script:
+  ```bash
+  LLMFIT_VERSION="${LLMFIT_VERSION:-v0.9.38}"
+  curl -fsSL "https://github.com/AlexsJones/llmfit/releases/download/${LLMFIT_VERSION}/llmfit-${LLMFIT_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+      -o /tmp/llmfit.tar.gz
+  tar -xzf /tmp/llmfit.tar.gz -C /usr/local/bin llmfit
+  chmod +x /usr/local/bin/llmfit
+  rm /tmp/llmfit.tar.gz
   ```
+- Pin the version. Do not use `latest` redirect in automation -- it introduces non-determinism across fleet nodes provisioned at different times.
+- The musl-linked binary has no runtime dependencies beyond a Linux 3.2+ kernel. No glibc version concerns, no shared library loading failures.
+- Add the version to `ProvisioningSettings` or `LlmfitSettings` so operators can upgrade fleet-wide by changing one env var.
 
-**Detection:** Call the power-off endpoint on a server that is already off. If it raises an exception instead of succeeding, this pitfall is present.
+**Detection:** Check the provisioning script for `rustup`, `cargo install`, or `cargo build`. If present, this pitfall is active.
 
-**Phase:** Core Redfish client phase. This must be in the initial implementation, not a follow-up.
+**Phase:** llmfit installation phase. This is the first design decision and must be correct before writing any code.
 
 ---
 
-### Pitfall 2: BMC Credentials Stored in Settings Model Leak into Logs and Error Responses
+### Pitfall 2: No Command Timeout on `llmfit recommend` via SSH
 
-**What goes wrong:** BMC username and password are added to the `Settings` Pydantic model (alongside `SSHSettings`, `QUADSSettings`, etc.). Structlog logs the settings at startup for debugging. Pydantic's `model_dump()` serializes the credentials to JSON. An error response includes the settings context. The BMC password appears in application logs, etcd provisioning state records, and potentially the dashboard error display.
+**What goes wrong:** The existing `SSHClient.run_streaming()` (ssh_client.py lines 69-116) has no command execution timeout. It has a `connect_timeout` (10 seconds for TCP connection), but once connected, `run_streaming()` will block indefinitely waiting for stdout to complete. The `llmfit recommend --json` command runs hardware detection which shells out to `nvidia-smi` (and potentially other probes). If `nvidia-smi` hangs (common when the GPU is in a bad state, driver mismatch, or the I2C bus is stuck), llmfit hangs, the SSH process hangs, and the provisioner's asyncio task hangs forever.
 
-This is especially dangerous because BMC credentials grant out-of-band hardware control. Unlike SSH keys (file path stored, not the key itself), BMC credentials are short strings (username/password) that are easily copy-pasted from logs.
+The existing provisioner avoids this problem for `setup.sh` and `start-vllm.sh` because those scripts are expected to run for minutes and produce continuous output (step markers). But `llmfit recommend` is expected to complete in seconds. A hang looks identical to "still running" from the provisioner's perspective.
 
-**Why it happens:** The existing `SSHSettings` stores a `key_path` (a file path, not the key itself), so credentials never leak from SSH settings. But BMC auth requires username+password strings in-memory. Developers follow the same pattern as `SSHSettings` without realizing the difference.
+**Why it happens:** asyncssh's `create_process()` (used in `run_streaming()`) does not have a built-in command timeout. The `timeout` parameter on `conn.run()` exists but is not used here because the codebase uses `create_process()` + `async for line in process.stdout` for streaming. There is no equivalent timeout on the streaming path.
 
 **Consequences:**
-- BMC passwords in application logs (shipped to centralized logging).
-- BMC passwords in etcd (if the error message from a failed Redfish call includes the request context).
-- BMC passwords in the dashboard error display (the `error` field of `ProvisioningState` is rendered in HTML).
-- An attacker with log access can power off every server in the fleet.
+- A single server with a hung GPU wedges the provisioner's asyncio task pool.
+- The dashboard shows the provisioning as "stuck" on the llmfit step indefinitely.
+- No error is raised, no cleanup happens, the operator must manually cancel.
+- If the gateway is restarted, the orphaned SSH session on the remote server may keep the llmfit process running.
 
 **Prevention:**
-- Use Pydantic's `SecretStr` type for the BMC password field. `SecretStr` masks the value in `repr()`, `str()`, and `model_dump()` unless explicitly called with `model_dump(mode="json")` and `SecretStr.get_secret_value()`.
+- Wrap the llmfit SSH call in `asyncio.wait_for()` with a generous but finite timeout (e.g., 60 seconds). llmfit's hardware detection + recommendation typically completes in 2-5 seconds; 60 seconds catches hangs without false positives.
   ```python
-  from pydantic import SecretStr
-
-  class RedfishSettings(BaseModel):
-      bmc_username: str = "admin"
-      bmc_password: SecretStr
+  async def run_llmfit(self, hostname: str) -> str:
+      try:
+          return await asyncio.wait_for(
+              self._ssh_run_command(hostname, "llmfit recommend --json --limit 10"),
+              timeout=self._settings.llmfit_timeout,  # e.g., 60
+          )
+      except asyncio.TimeoutError:
+          raise ProvisioningError(
+              f"llmfit timed out after {self._settings.llmfit_timeout}s on {hostname} "
+              "(possible GPU driver hang)"
+          )
   ```
-- Never include `RedfishSettings` in structlog context binds. Log the BMC hostname, never the credentials.
-- The `error` field written to etcd (`ProvisioningState.error`) must be sanitized: strip any URL that contains embedded credentials (e.g., `https://user:pass@bmc-host/redfish/...`). Use a sanitizer that redacts credentials from URLs and error messages before writing to etcd or returning to the dashboard.
-- Do NOT embed credentials in the Redfish URL. Use httpx's `auth` parameter or the `Authorization` header, never `https://user:pass@host/`.
+- Add `llmfit_timeout: int = 60` to the settings model (either `ProvisioningSettings` or a new `LlmfitSettings`).
+- Consider adding a general command timeout to `SSHClient.run_streaming()` as a broader improvement, but the llmfit-specific timeout is sufficient for v1.6.
+- After timeout, the remote llmfit process is still running. asyncssh will close the channel when the connection context exits, which sends SIGHUP to the remote process. This is acceptable cleanup for a read-only command.
 
-**Detection:** Dump the settings model at startup and search for the BMC password in the output. If it appears in plaintext, this pitfall is present.
+**Detection:** Mock `nvidia-smi` on a test server to hang indefinitely (`sleep infinity`), then trigger llmfit via provisioning. If the provisioner hangs rather than timing out, this pitfall is present.
 
-**Phase:** Core Redfish client phase. Credential handling must be correct from the first line of code.
+**Phase:** llmfit execution phase. The timeout must wrap every SSH invocation of llmfit.
 
 ---
 
-### Pitfall 3: Power-On Issued but SSH Preflight Starts Before OS Boots
+### Pitfall 3: Parsing llmfit JSON Output as a Stable API Contract
 
-**What goes wrong:** The provisioning flow becomes: Redfish power on -> preflight (TCP probe port 22 + SSH diagnostics). The power-on action returns HTTP 200/204 immediately (the BMC accepted the command), but the server takes 2-5 minutes to POST, boot the OS, and start sshd. The preflight TCP probe to port 22 fires immediately after the power-on returns, fails ("SSH port 22 unreachable"), and the provisioner marks the host as FAILED.
+**What goes wrong:** The developer parses `llmfit recommend --json` output, extracting fields like `models[].name`, `models[].score`, `models[].quantization`, etc. The parsing code hardcodes field names and assumes a specific JSON structure. llmfit releases every few days (v0.4 to v0.9+ in 5 months, Feb-Jul 2026). The JSON output schema has no stability guarantee -- it is a CLI tool, not a library with a versioned API. A llmfit update changes a field name (e.g., `score` -> `composite_score`, or `models` -> `recommendations`), and the parsing breaks across the entire fleet the next time a server is provisioned with a newer binary.
 
-The existing preflight (provisioner.py lines 124-176) has a 10-second TCP timeout -- sufficient for an already-running server, but far too short for a cold-booting server.
+The existing codebase already has this pattern: `start-vllm.sh` output is parsed via `MODEL_PATTERN = re.compile(r"#\s*Model:\s+(.+)")` in provisioner.py line 39. This works because the gateway controls both ends (it writes setup.sh, it reads the output). With llmfit, the gateway controls neither the output format nor the release cadence.
 
-**Why it happens:** The Redfish power-on API is fire-and-forget. HTTP 200 means "the BMC accepted the command," not "the server is ready." The server must go through: BMC power-on -> hardware POST -> BIOS -> bootloader -> kernel -> systemd -> sshd. This takes minutes, not seconds.
+**Why it happens:** `--json` flags on CLI tools feel like APIs. They are not. They are convenience output formats that change without semver guarantees unless explicitly documented as stable. llmfit's docs describe `--json` output for scripting but do not commit to schema stability.
 
 **Consequences:**
-- Every cold-start provisioning attempt fails on the first try.
-- Operators learn to manually power on servers, wait 3 minutes, then click Setup -- defeating the purpose of auto-power-on.
-- Retry logic that re-runs the entire provisioning sequence re-sends the power-on (which now gets a 400 because the server is already powering on -- Pitfall 1).
+- Fleet-wide recommendation failures when llmfit is updated on new servers (different versions across fleet if not pinned).
+- Silent data corruption if a field is renamed but the JSON still parses (e.g., a score field changes meaning from 0-100 to 0.0-1.0).
+- Version skew across the fleet: servers provisioned last week have llmfit 0.9.30, servers provisioned today have 0.9.38, and the JSON schemas differ.
 
 **Prevention:**
-- After issuing power on, poll `PowerState` until it reaches `On` (this means the BMC has confirmed power is applied, not that the OS is up). Then poll SSH port 22 with a generous timeout (e.g., 5 minutes with 10-second intervals) before running the full preflight.
-- Add a new provisioning step `POWER_ON` between `PENDING` and `PREFLIGHT` in the `ProvisioningStep` enum. The dashboard shows "Powering on..." during the boot wait, so operators know why it is taking time.
-- The polling sequence:
-  1. Query `PowerState`. If already `On`, skip to preflight.
-  2. Issue `{"ResetType": "On"}`.
-  3. Poll `PowerState` until `On` (timeout: 60s -- BMC response, not OS boot).
-  4. Poll TCP port 22 (timeout: 300s, interval: 10s).
-  5. Run existing preflight (GPU check, disk check).
-- Do NOT combine the SSH poll with the existing preflight. Preflight assumes SSH is reachable; the SSH poll waits for it to become reachable. These are different concerns.
+- Pin the llmfit version in settings (Pitfall 1 prevention). Every server gets the same binary, so the JSON format is consistent across the fleet.
+- Parse defensively with Pydantic models that use `model_config = ConfigDict(extra="ignore")`:
+  ```python
+  class LlmfitRecommendation(BaseModel):
+      model_config = ConfigDict(extra="ignore")
+      name: str
+      # Accept either field name for forward compatibility
+      score: float | None = None
+      composite_score: float | None = None
 
-**Detection:** Power off a server, trigger provisioning with auto-power-on, and verify it waits for SSH instead of immediately failing.
+      @property
+      def effective_score(self) -> float:
+          return self.composite_score or self.score or 0.0
+  ```
+- Validate the parsed output: if the JSON parses but has zero recommendations or missing critical fields, raise a clear error rather than returning empty results.
+- Write a version check: after installing llmfit, run `llmfit --version` and compare against the expected version. Log a warning if they differ (the binary may have been installed by a previous provisioning run with a different version).
+- When the llmfit version is bumped in settings, test the JSON parsing against the new version's actual output before rolling out fleet-wide.
 
-**Phase:** Provisioning integration phase. This is the bridge between Redfish power and the existing SSH provisioner.
+**Detection:** Run the parsing code against two different llmfit versions' JSON output. If it breaks on the newer version, this pitfall is present.
+
+**Phase:** llmfit output parsing phase. The Pydantic model for llmfit output must be designed for defensive parsing from the start.
 
 ---
 
-### Pitfall 4: TLS Verification Disabled Globally via `verify=False`
+### Pitfall 4: llmfit Detects No GPU Because nvidia-smi Is Not on PATH or Driver Not Loaded
 
-**What goes wrong:** BMCs use self-signed certificates by default. The developer adds `httpx.AsyncClient(verify=False)` and moves on. The `verify=False` flag disables TLS certificate verification for the entire httpx client instance. If the same client is later reused for other HTTP calls (health checks, QUADS API), those also lose TLS verification. Even if a dedicated client is created for Redfish, `verify=False` becomes the team's "standard pattern" and spreads.
+**What goes wrong:** llmfit uses `nvidia-smi` to detect NVIDIA GPUs and their VRAM. In the existing provisioning flow, `setup.sh` installs the NVIDIA driver (potentially from a `.run` file). After driver installation, `nvidia-smi` is available. But there are several edge cases where nvidia-smi is present but non-functional:
 
-On internal networks (this project's deployment context), the risk is lower than on the public internet, but it still enables man-in-the-middle attacks between the gateway and BMCs -- which is the power management plane.
+1. **Driver installed but kernel module not loaded.** The existing `install_nvidia_driver()` in setup.sh handles this (modprobe nvidia), but if setup.sh is skipped on a retry (because the operator thinks "setup already ran"), `nvidia-smi` may fail with "NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver."
 
-**Why it happens:** BMC self-signed certificates are the norm, not the exception. Every Redfish tutorial shows `verify=False` or `requests.get(..., verify=False)`. The DMTF Python Redfish library itself creates an unverified context by default.
+2. **Driver installed via RPM but kmod not built for running kernel.** The existing setup.sh already handles this case (lines 41-50), but it can still fail if `dkms autoinstall` and `akmods --force` both fail and the fallback `.run` installer is used. After the `.run` installer, `nvidia-smi` may require a reboot that never happens.
+
+3. **nvidia-smi in a non-standard PATH.** The `.run` installer puts nvidia-smi in `/usr/bin/nvidia-smi`. RPM packages put it in `/usr/bin/nvidia-smi`. But some installations put it in `/usr/local/cuda/bin/nvidia-smi` which may not be on the SSH session's PATH (non-login shells get a minimal PATH).
+
+When llmfit cannot find nvidia-smi, it falls back to CPU-only detection and recommends models that fit in RAM only -- completely ignoring the GPU hardware. The recommendations are valid (they will run on CPU), but useless for a GPU inference server.
+
+**Why it happens:** llmfit handles missing nvidia-smi gracefully by design -- it is not a bug in llmfit. The problem is that the provisioner does not verify GPU detection succeeded before trusting the recommendations.
 
 **Consequences:**
-- MITM attacks on the BMC management plane. An attacker on the management VLAN can intercept BMC credentials and issue arbitrary power commands.
-- Python emits `InsecureRequestWarning` on every request, which clutters logs (and developers add `urllib3.disable_warnings()` to suppress it, hiding the problem further).
-- Security audits flag it, requiring a retrofit later.
+- llmfit returns CPU-only model recommendations for a server with 8x A100 GPUs.
+- The operator sees "recommended: Qwen2.5-3B-Instruct" for a server that could run a 70B model.
+- If the operator does not notice and accepts the recommendation, the server runs a tiny model at a fraction of its capacity.
+- No error is raised -- llmfit exits 0 with valid (but wrong) recommendations.
 
 **Prevention:**
-- Create a dedicated `httpx.AsyncClient` for Redfish calls with an explicit SSL context that trusts the BMC CA certificate or the specific self-signed certificate. Do not share this client with other HTTP operations.
+- Run llmfit only after the existing `_verify_gpu()` step has confirmed nvidia-smi works. The existing provisioner already runs `nvidia-smi --query-gpu=name --format=csv,noheader` in `_verify_gpu()`. If that passes, llmfit should also detect GPUs.
+- After parsing llmfit's JSON output, validate that the detected hardware includes GPU VRAM. If llmfit's system info shows 0 VRAM or no GPU backend, raise an error:
   ```python
-  import ssl
-  ctx = ssl.create_default_context(cafile="/path/to/bmc-ca.pem")
-  redfish_client = httpx.AsyncClient(verify=ctx)
+  if not recommendations or all(r.run_mode == "cpu_only" for r in recommendations):
+      raise ProvisioningError(
+          f"llmfit detected no GPU on {hostname} -- nvidia-smi may have failed. "
+          "Check driver status."
+      )
   ```
-- If the CA certificate is not available (common in lab environments), use `verify=False` but:
-  1. Scope it to the Redfish client only (not shared with health check or QUADS clients).
-  2. Add a `ponytail:` comment: `# ponytail: verify=False scoped to Redfish client only, add CA cert path when available`.
-  3. Make it configurable: `RedfishSettings.verify_ssl: bool = False` with a note that `True` + `ca_cert_path` is the production path.
-- Do NOT suppress `InsecureRequestWarning` globally. If the warning is noisy, suppress it only within the Redfish client scope.
+- Alternatively, run `llmfit system --json` first, check that it reports CUDA backend and non-zero VRAM, then run `llmfit recommend --json`. This adds one extra SSH call but catches detection failures early with a clear diagnostic.
+- Consider passing `--memory` override to llmfit using the VRAM value already captured by `_verify_gpu()` / `detect_gpu_info()` in start-vllm.sh. This makes llmfit's VRAM detection a redundant check rather than the sole source of truth.
 
-**Detection:** Search for `verify=False` in the codebase. If it appears outside the Redfish client, or if the Redfish client is shared with other subsystems, this pitfall is present.
+**Detection:** Unload the nvidia kernel module (`sudo rmmod nvidia`) and run llmfit. If it returns CPU-only recommendations without any error, this pitfall is present.
 
-**Phase:** Core Redfish client phase. The client instance and its TLS configuration are the first thing built.
+**Phase:** llmfit execution phase. GPU detection validation must happen before or immediately after running llmfit.
 
 ---
 
-### Pitfall 5: Redfish Error Messages Rendered as Raw HTML in Dashboard
+### Pitfall 5: llmfit Installation Step Fails and Blocks Entire Provisioning
 
-**What goes wrong:** The existing `ProvisioningState.error` field (state.py line 56) is a `str | None` that stores the error message when provisioning fails. The dashboard renders this field in HTML. When a Redfish error is stored in this field, it may contain:
-- JSON with angle brackets or special characters from `@Message.ExtendedInfo`
-- Full Redfish error responses with BMC hostnames, IP addresses, URIs
-- Stack traces from the Python exception chain
-- Embedded credentials if the error was constructed from a URL (Pitfall 2)
+**What goes wrong:** llmfit installation is added as a mandatory step in the provisioning sequence (like NVIDIA driver or vLLM install). The GitHub release download fails because: the server has no outbound internet access (common in air-gapped labs), GitHub is rate-limited (unauthenticated API: 60 requests/hour, release downloads may be throttled), DNS resolution fails, or the pinned version no longer exists (release was deleted or renamed).
 
-The dashboard's Jinja2 template auto-escapes HTML by default, so XSS is not the concern. The concern is information leakage and unreadable error messages: operators see `{"error":{"code":"Base.1.12.GeneralError","message":"A general error has occurred. See ExtendedInfo for more information","@Message.ExtendedInfo":[...]}}` instead of "Power on failed: server did not respond within 60 seconds."
+The provisioner marks the node as FAILED. The operator cannot deploy a model on this server, even though the server is fully capable -- it has GPUs, drivers, vLLM, and NFS all working. The llmfit failure blocks a server that could be serving inference requests with the existing hardcoded model selection in start-vllm.sh.
 
-**Why it happens:** The current error handling in `provisioner.py` (line 228-232) stores `str(exc)` as the error message. For SSH errors, `str(exc)` is human-readable. For Redfish HTTP errors, `str(exc)` is the raw httpx exception string, which includes the response body.
+**Why it happens:** The developer adds llmfit install as a step in the main provisioning pipeline (`setup.sh` or a new step in the provisioner). Failures in any step cascade to FAILED status. llmfit is treated as a hard dependency even though it is an advisory tool (recommends models, does not run them).
 
 **Consequences:**
-- Operators cannot understand what failed or what to do about it.
-- Internal BMC details (IP addresses, firmware versions, Redfish URIs) leak to the dashboard.
-- Error messages are too long to display inline in the dashboard table row.
+- A transient network issue during llmfit download blocks server provisioning entirely.
+- Air-gapped labs cannot use llmfit without pre-staging the binary.
+- The existing hardcoded model selection in start-vllm.sh (which works) is not used as a fallback.
 
 **Prevention:**
-- Create a Redfish-specific exception class (e.g., `RedfishError`) that accepts the raw error and extracts a human-readable summary. Map common Redfish error codes to operator-friendly messages:
+- Separate llmfit from the critical provisioning path. llmfit is an advisory tool that helps operators choose the right model. It is not required for the server to serve inference. Two architectural approaches:
+
+  **Option A (recommended): Separate llmfit from provisioning entirely.** llmfit runs on-demand via the admin API (e.g., `GET /admin/nodes/{hostname}/recommendations`), not as part of the setup sequence. The operator clicks "Get Recommendations" in the dashboard after the server is provisioned, or before selecting which model to deploy. If llmfit is not installed, the endpoint returns a 404 or a message saying "install llmfit first."
+
+  **Option B: Install in provisioning, but as a non-fatal step.** If llmfit install fails, log a warning and continue. The server provisions with the existing hardcoded model selection. The operator can install llmfit later and re-run recommendations.
+
+- If llmfit binary must be installed during provisioning, pre-stage the binary: download it once to the gateway host and SCP it to target servers via the existing `ssh_client.upload()` method. This avoids each target server needing outbound internet access.
   ```python
-  REDFISH_ERROR_MAP = {
-      "Base.1.12.ActionNotSupported": "This action is not supported by the BMC",
-      "Base.1.12.ResourceNotFound": "BMC resource not found (check Redfish URI)",
-      "iLO.2.30.PowerOnFailed": "Power on failed (check server hardware status)",
-  }
+  # Upload pre-staged binary from gateway to target
+  await self._ssh_client.upload(hostname, self._settings.llmfit_binary_path, "/usr/local/bin/llmfit")
+  await self._ssh_run_command(hostname, "chmod +x /usr/local/bin/llmfit")
   ```
-- Sanitize the error message before writing to etcd: strip JSON, strip URLs, cap at 200 characters. Store the full error in structlog for debugging; store only the summary in `ProvisioningState.error`.
-- The error field in `ProvisioningState` is what the dashboard renders. It must be human-readable, not machine-readable.
+- Make llmfit binary path configurable: `LlmfitSettings.binary_path: Path | None = None`. When None, llmfit features are disabled (same pattern as `QUADSSettings.base_url` and `RedfishSettings.bmc_username`).
 
-**Detection:** Trigger a Redfish error (e.g., wrong BMC hostname) and check what appears in the dashboard error column. If it is raw JSON or an httpx exception string, this pitfall is present.
+**Detection:** Disconnect outbound internet on a target server and trigger provisioning. If provisioning fails at the llmfit step instead of continuing with degraded model selection, this pitfall is present.
 
-**Phase:** Error capture phase. This is directly about the "step-level error capture" milestone requirement.
+**Phase:** Architecture decision phase. Whether llmfit is in-band or out-of-band is the most important design decision for this milestone.
 
 ---
 
 ## Moderate Pitfalls
 
-Mistakes that cause operational friction, degraded reliability, or confusing dashboard behavior.
+Mistakes that cause operational friction, degraded recommendation quality, or confusing behavior.
 
-### Pitfall 6: BMC Session Exhaustion from Leaked Sessions
+### Pitfall 6: Multi-GPU VRAM Aggregation Mismatch Between llmfit and vLLM
 
-**What goes wrong:** The Redfish client creates a session (`POST /redfish/v1/SessionService/Sessions`) for each power operation but does not delete it afterward. Most BMCs support a maximum of 4-16 concurrent sessions. After 4-16 power operations (across all servers if a shared BMC manages multiple chassis, or on a single BMC across retries), session creation fails with HTTP 503 or 400. All subsequent Redfish operations fail until sessions expire (30-minute default timeout on most BMCs).
+**What goes wrong:** llmfit aggregates VRAM across all detected GPUs (e.g., 4x A100 80GB = 320GB total VRAM) and recommends models that fit in 320GB. The existing start-vllm.sh also calculates `total_vram=$((GPU_COUNT * GPU_VRAM_GB))`. But llmfit and vLLM disagree on how much VRAM is "available":
 
-MAAS explicitly documents this as a top issue: "If you do not properly log out from a session and open other sessions, you may reach this limit and will be locked out."
+- llmfit scores based on total VRAM minus a safety margin.
+- vLLM's `--gpu-memory-utilization` defaults to 0.90, meaning only 90% of VRAM is usable.
+- The existing start-vllm.sh sets `GPU_MEM_UTIL` between 0.75 and 0.90 depending on GPU model.
+- If CUDA context, framework overhead, or other processes consume VRAM, the available amount is lower than total.
 
-**Why it happens:** Developers use `async with httpx.AsyncClient() as client:` but do not close the Redfish session on the BMC side. The httpx client closing releases the TCP connection but does NOT invalidate the BMC session -- these are separate concerns.
+llmfit recommends a 70B model that "fits" in 320GB total. vLLM configured with `--gpu-memory-utilization 0.90` only sees 288GB. The model fails to load with OOM at the health poll step -- after the operator already chose it based on llmfit's recommendation.
+
+There is also a known llmfit bug (GitHub issue #68): with 2 GPUs, only 1 GPU's VRAM was factored into the calculation. While reportedly fixed, edge cases with mixed GPU types or partially failed GPUs may still exhibit this.
+
+**Why it happens:** llmfit is a standalone tool that does not know about vLLM's memory utilization settings. It recommends based on raw hardware specs. The translation from "llmfit says it fits" to "vLLM can actually load it" requires accounting for the memory utilization multiplier.
 
 **Consequences:**
-- After 4-16 operations, all power management stops working fleet-wide.
-- The failure message is confusing: "session limit exceeded" looks like an auth failure.
-- Sessions expire after 30 minutes, so the system self-heals eventually, but operators cannot power-manage servers during the lockout.
+- Operator selects a model that llmfit says fits, vLLM fails to load it.
+- The failure happens at the health poll step (minutes into provisioning), not at recommendation time (seconds).
+- Operators lose trust in llmfit recommendations and revert to manual model selection.
 
 **Prevention:**
-- Use HTTP Basic Auth instead of sessions for simple power operations. Basic auth does not create server-side state and cannot be exhausted. For short-lived operations (query power state, issue reset), Basic auth is simpler and more reliable.
-  ```python
-  auth = httpx.BasicAuth(username=settings.bmc_username,
-                         password=settings.bmc_password.get_secret_value())
-  async with httpx.AsyncClient(auth=auth, verify=verify_ctx) as client:
-      ...
+- Pass `--memory` to llmfit with the effective available VRAM, not the total:
+  ```bash
+  EFFECTIVE_VRAM_GB=$(python3 -c "print(int(${GPU_COUNT} * ${GPU_VRAM_GB} * ${GPU_MEM_UTIL}))")
+  llmfit --memory="${EFFECTIVE_VRAM_GB}G" recommend --json --limit 10
   ```
-- If session auth is preferred (e.g., for performance with many sequential operations), always delete the session in a `finally` block:
-  ```python
-  try:
-      session_uri = await create_session(client, bmc_host, credentials)
-      # ... do work ...
-  finally:
-      await delete_session(client, bmc_host, session_uri)
-  ```
-- `# ponytail: Basic auth for Redfish, sessions if per-BMC rate limiting needs amortization`
+- When presenting recommendations to the operator, show both llmfit's assessment and the effective VRAM used for scoring, so the operator can sanity-check.
+- Filter recommendations to exclude models whose memory requirement exceeds `GPU_COUNT * GPU_VRAM_GB * GPU_MEM_UTIL`. This is a backend filter applied after parsing llmfit output, not a change to llmfit itself.
+- Document in the API response that recommendations assume a specific `gpu_memory_utilization` value.
 
-**Detection:** Run 20 consecutive power operations on the same BMC and check if the last ones fail with session/auth errors.
+**Detection:** Run llmfit on a 2x A100 server and compare its top recommendation against what vLLM can actually load with `--gpu-memory-utilization 0.90`. If the top recommendation OOMs, this pitfall is present.
 
-**Phase:** Core Redfish client phase. Auth strategy is a day-one decision.
+**Phase:** llmfit output processing phase. The VRAM adjustment must be applied when translating llmfit output to operator-facing recommendations.
 
 ---
 
-### Pitfall 7: Asynchronous Power State Transitions Treated as Synchronous
+### Pitfall 7: llmfit Recommends Models Not Available on NFS Cache
 
-**What goes wrong:** The Redfish reset action (`POST .../Actions/ComputerSystem.Reset`) returns HTTP 200/204 immediately. The code treats this as "done" and moves to the next step. But the hardware has not transitioned yet. The server is still powering on (POST, BIOS, bootloader) or powering off (OS shutdown, ACPI). If the next step depends on the new power state (e.g., SSH preflight depends on power being On), it fails because the transition is still in progress.
+**What goes wrong:** llmfit recommends models from its database of 200+ models. The existing infrastructure serves models from NFS shared storage (`/srv/hf-cache` mounted from `rdu-storage02.scalelab.redhat.com`). Only models that have been pre-downloaded to the NFS share are available. llmfit recommends "Llama-3.1-70B-Instruct" as the best fit, but only "Qwen2.5-72B-Instruct" is on the NFS share. The operator either:
+1. Selects a model that is not available, and vLLM fails to load it (404 on HuggingFace or timeout trying to download 150GB).
+2. Ignores llmfit's recommendations entirely and picks from what they know is available.
 
-The DMTF Redfish Use-Case Checkers project documents exactly this: their test suite succeeds at "Reset Performed" but fails at "Power State Check" because the state has not changed yet.
-
-**Why it happens:** HTTP 200 from a REST API universally means "the operation completed." Redfish breaks this convention: 200 means "the command was accepted," not "the state has changed."
+**Why it happens:** llmfit has no knowledge of the deployment environment's model availability. It recommends based on hardware fit and model quality, not model availability.
 
 **Consequences:**
-- Intermittent failures: sometimes the server boots fast enough, sometimes it does not.
-- Tests pass locally (single server, fast hardware) but fail in production (many servers, slow POST times).
-- "Flaky" provisioning that works on retries -- because by the time the retry runs, the server has finished transitioning.
+- Misleading recommendations that cannot be acted on.
+- Operators start ignoring llmfit, defeating the purpose of the integration.
+- If vLLM tries to download the model from HuggingFace (when model is not on NFS), it consumes 50-150GB of bandwidth and takes hours, blocking the server.
 
 **Prevention:**
-- After every power action, poll `PowerState` until it reaches the expected value or times out. Do not proceed to the next step until the poll confirms the transition.
-- Poll intervals and timeouts by action type:
-  | Action | Expected State | Poll Interval | Timeout |
-  |--------|---------------|---------------|---------|
-  | On | On | 5s | 60s |
-  | ForceOff | Off | 5s | 30s |
-  | GracefulRestart | On | 10s | 180s |
-  | ForceRestart | On | 5s | 120s |
-- GracefulRestart takes the longest because it includes OS shutdown + POST + OS boot. ForceOff is fastest because it is equivalent to pulling the power cord.
-- Handle transitional states (`PoweringOn`, `PoweringOff`) as "in progress, keep polling." Handle `Unknown`, `Null`, `Reset` (returned by HPE Gen11+) as "transitional, keep polling" -- do not treat them as errors.
+- After getting llmfit recommendations, filter them against the models actually available on the NFS cache. This requires:
+  1. At provisioning time, listing the contents of the NFS mount (or a pre-computed manifest).
+  2. Matching llmfit model names to NFS directory names (e.g., `Qwen/Qwen2.5-72B-Instruct` maps to `/srv/hf-cache/models--Qwen--Qwen2.5-72B-Instruct/`).
+- Present two lists to the operator: "Recommended and available" (intersection) and "Recommended but not cached" (with a note that deployment would require download).
+- Alternatively, restrict llmfit to only score models that are available: use `llmfit search "model-name"` for each known available model rather than open-ended `recommend`. This is slower (one call per model) but guarantees only actionable results.
+- The simplest approach: maintain a list of available model names in settings and filter client-side after parsing llmfit output. No NFS probing needed.
 
-**Detection:** Issue a power-on action and immediately query `PowerState`. If the code does not poll and instead assumes `On` after the action returns, this pitfall is present.
+**Detection:** Run llmfit on a server and check if the top recommendation is present on the NFS share. If it is not, this pitfall is present.
 
-**Phase:** Core Redfish client phase. The power-action wrapper must include the post-action poll.
+**Phase:** Recommendation presentation phase. The filtering logic is part of the admin API endpoint, not the llmfit execution.
 
 ---
 
-### Pitfall 8: Vendor-Specific Redfish URI Paths Assumed Universal
+### Pitfall 8: SSH PATH Not Set for Non-Login Shell
 
-**What goes wrong:** The code hardcodes `GET /redfish/v1/Systems/1` for the system resource. This works on Dell iDRAC and HPE iLO. On Supermicro, the system resource is `/redfish/v1/Systems/1`. On Lenovo XCC, it is `/redfish/v1/Systems/1`. But on some multi-chassis servers or blade servers, the system ID is not `1` -- it might be a UUID or a different identifier. The code 404s on these systems.
+**What goes wrong:** asyncssh's `create_process()` runs commands in a non-login, non-interactive shell on the remote server. This means `~/.bash_profile`, `~/.profile`, and `/etc/profile.d/*.sh` are NOT sourced. If llmfit is installed to `/usr/local/bin` (the default from the install script), it may not be on PATH in the minimal shell environment that asyncssh provides.
 
-The MAAS Redfish driver hit this exact issue and had to add trailing-slash handling (Cisco BMCs reject requests without trailing slashes, Dell BMCs reject requests with trailing slashes) as a compatibility workaround.
+The existing setup.sh works because it is invoked as `bash auto-vllm/setup.sh` (explicit path). The existing nvidia-smi calls work because nvidia-smi is installed to `/usr/bin/` which is universally on PATH. But `/usr/local/bin` is not guaranteed to be on PATH in all non-login shell configurations.
 
-**Why it happens:** Tutorials and examples always use `/redfish/v1/Systems/1` as the URI. Developers hardcode it because they test against one BMC vendor. The Redfish specification says the system collection is at `/redfish/v1/Systems`, but individual system URIs are opaque -- clients should discover them by reading the collection.
+**Why it happens:** Different Linux distributions have different defaults for PATH in non-login shells. Fedora/RHEL typically include `/usr/local/bin` in the system-wide PATH via `/etc/environment` or compiled-in defaults. But stripped-down server images or containers may not.
 
 **Consequences:**
-- Works on lab hardware (usually one vendor), fails in production (mixed vendors).
-- 404 errors that look like auth failures or network issues.
-- Requires per-vendor URI configuration, which operators find painful.
+- "command not found: llmfit" on some servers but not others, depending on OS image.
+- Works when the operator SSHes in manually (login shell) but fails from the provisioner (non-login shell).
+- Intermittent failures that are hard to reproduce.
 
 **Prevention:**
-- Discover the system URI dynamically: `GET /redfish/v1/Systems` returns a `Members` array. Use the first member's `@odata.id` as the system URI.
+- Use the absolute path when invoking llmfit via SSH: `/usr/local/bin/llmfit recommend --json` instead of `llmfit recommend --json`. This eliminates PATH dependence entirely.
+- Make the remote binary path configurable: `LlmfitSettings.remote_binary_path: str = "/usr/local/bin/llmfit"`.
+- If using the SCP upload approach (Pitfall 5 prevention), you control where the binary goes. Upload it to a known absolute path and always invoke it by that path.
+
+**Detection:** Run `ssh root@server 'echo $PATH'` and check if `/usr/local/bin` is included. Then run `ssh root@server 'which llmfit'`. If the first shows `/usr/local/bin` is missing from PATH, this pitfall affects your fleet.
+
+**Phase:** llmfit execution phase. Use absolute paths from the start; do not rely on PATH.
+
+---
+
+### Pitfall 9: llmfit TUI Mode Activated Instead of CLI Mode
+
+**What goes wrong:** llmfit defaults to an interactive TUI (terminal user interface) when run without the `recommend` or `fit` subcommand. If the provisioner accidentally runs `llmfit` without a subcommand (e.g., due to a string formatting bug that drops the arguments), the TUI launches, waits for keyboard input, and the SSH session hangs indefinitely. There is no timeout on TUI mode -- it will wait forever for a keypress.
+
+Even with the correct subcommand, if llmfit detects a TTY-like environment, it may still try to render TUI elements (progress bars, colored output, ANSI escape sequences) that corrupt the JSON output or confuse the line-by-line parser in `run_streaming()`.
+
+**Why it happens:** llmfit is designed as an interactive tool first. The `--json` flag suppresses TUI behavior, but the detection of whether to use TUI mode depends on terminal detection (isatty check). asyncssh's `create_process()` does not allocate a PTY by default (which is correct), but some SSH configurations or shell init scripts may affect terminal detection.
+
+**Consequences:**
+- SSH session hangs waiting for TUI input (same effect as Pitfall 2 but different cause).
+- JSON output corrupted with ANSI escape codes: `\x1b[32m{...}\x1b[0m` wrapping the JSON, causing parse failures.
+- Partial output: TUI mode draws a table, the line parser captures table drawing characters, JSON parsing fails.
+
+**Prevention:**
+- Always pass `--json` to llmfit subcommands. The `recommend` subcommand defaults to JSON, but being explicit is safer.
+- Always specify the full subcommand: `llmfit recommend --json --limit 10`, never bare `llmfit`.
+- Set `TERM=dumb` in the SSH environment to suppress any ANSI output:
   ```python
-  async def _discover_system_uri(self, bmc_host: str) -> str:
-      resp = await self._client.get(f"https://{bmc_host}/redfish/v1/Systems")
-      members = resp.json()["Members"]
-      if not members:
-          raise RedfishError("No systems found in Redfish service")
-      return members[0]["@odata.id"]
+  await self._ssh_run_command(hostname, "TERM=dumb /usr/local/bin/llmfit recommend --json --limit 10")
   ```
-- Cache the discovered URI per BMC host for the lifetime of the operation (not across operations -- firmware updates can change URIs).
-- If dynamic discovery is too slow for the use case, make the system path configurable with a sensible default: `RedfishSettings.system_path: str = "/redfish/v1/Systems/1"`.
-- `# ponytail: hardcode /redfish/v1/Systems/1, add discovery if multi-vendor fleet grows`
+- The command timeout from Pitfall 2 is the safety net: even if TUI mode is accidentally triggered, the 60-second timeout will kill it.
 
-**Detection:** Test against two different BMC vendors. If one works and the other 404s, this pitfall is present.
+**Detection:** Run `llmfit` (no subcommand) via SSH and observe whether it hangs. Run `llmfit recommend --json` and check the output for ANSI escape codes.
 
-**Phase:** Core Redfish client phase. The URI strategy is a design decision, not a bug fix.
+**Phase:** llmfit execution phase. Command construction must be rigorous.
 
 ---
 
-### Pitfall 9: ProvisioningStep Enum Not Extended for Power Steps
+### Pitfall 10: Security Risk of Running Unvetted Binaries on Lab Servers
 
-**What goes wrong:** The existing `ProvisioningStep` enum (state.py lines 19-39) has 17 members covering the SSH provisioning sequence. Redfish power operations are added to the provisioner but no new steps are added to the enum. The dashboard shows `PENDING` -> `PREFLIGHT` with no indication that a power-on is happening in between. If the power-on takes 3 minutes (boot wait), the dashboard shows the provisioning as "stuck on PENDING" or "stuck on PREFLIGHT" for minutes with no progress feedback.
+**What goes wrong:** The provisioner downloads a binary from GitHub (a third-party repository) and executes it as root on lab servers that have access to the internal network, NFS storage, and potentially other infrastructure. If the GitHub release is compromised (supply chain attack), the attacker gets root access on every server in the fleet. If the binary has a vulnerability, it runs with full privileges on machines with GPU access.
 
-**Why it happens:** Adding steps to the enum requires updating: the enum itself, the provisioner state transitions, the etcd state writer, the dashboard JS rendering, and any tests that assert on step sequences. Developers skip it to reduce scope, planning to "add it later."
+The existing provisioning flow already runs third-party software (NVIDIA driver `.run` file from nvidia.com, pip packages from PyPI for vLLM). So this is not a new category of risk, but it is an incremental increase in attack surface.
 
-**Consequences:**
-- Operators see stuck provisioning with no explanation.
-- They cancel and retry, creating duplicate operations.
-- The error field does not capture power-related failures distinctly from SSH failures.
-
-**Prevention:**
-- Add new steps to `ProvisioningStep` for Redfish operations: `POWER_ON`, `POWER_OFF`, `POWER_STATUS_CHECK`. Insert `POWER_ON` before `PREFLIGHT` in the provisioning sequence. Insert `POWER_OFF` into the teardown sequence.
-- The dashboard already renders `current_step` as a human-readable string. New step values will display automatically as long as the step names are readable.
-- The `failed_step` field should reference the power step name when a Redfish operation fails, not a generic "preflight" or "provisioning" label.
-
-**Detection:** Trigger a provisioning with auto-power-on and watch the dashboard. If the step does not change during the boot wait, this pitfall is present.
-
-**Phase:** Provisioning integration phase. The enum must be extended before integrating Redfish into the provisioner.
-
----
-
-### Pitfall 10: httpx Timeouts Too Short for BMC Response Times
-
-**What goes wrong:** The existing `ProxySettings` timeout is 120s for read (LLM inference). The developer reuses this client or creates a new one with similar timeouts. But BMC response times are fundamentally different from HTTP API response times:
-- `GET /redfish/v1/Systems/1` typically responds in 1-3 seconds.
-- But a BMC under load (many sensors being polled, firmware update in progress, or I2C bus stuck) can take 30-60 seconds to respond.
-- BMCs return HTTP 503 ("service temporarily unavailable") during internal operations (firmware updates, sensor cache rebuilds) and resume normal operation 30-120 seconds later.
-
-If the httpx connect timeout is 5s (matching `ProxySettings.connect_timeout`) and the BMC is slow, every Redfish call times out.
-
-**Why it happens:** Developers set timeouts based on expected response times of healthy BMCs. They do not account for degraded BMC states, which are common in large fleets.
+**Why it happens:** The install script curls from GitHub and pipes to sh, or downloads and executes a binary -- standard open-source distribution patterns that are acceptable for development but deserve scrutiny in production infrastructure.
 
 **Consequences:**
-- Power operations fail on servers with slow BMCs, even though the BMC is functional.
-- Retry logic amplifies the problem: each retry also times out, consuming more BMC resources.
-- False negatives: the system reports "BMC unreachable" when it is just slow.
+- Supply chain compromise: malicious llmfit binary exfiltrates SSH keys, GPU data, or NFS contents.
+- The binary runs as root (since SSH provisioning uses the root user, per SSHSettings.username="root").
+- Fleet-wide impact: every provisioned server runs the same compromised binary.
 
 **Prevention:**
-- Set Redfish-specific timeouts in `RedfishSettings`, separate from proxy timeouts:
-  ```python
-  class RedfishSettings(BaseModel):
-      connect_timeout: float = 10.0   # BMC TCP connect
-      read_timeout: float = 60.0      # BMC response (can be slow)
-      power_poll_timeout: float = 300.0  # Wait for power state transition
-      power_poll_interval: float = 5.0   # Poll interval during transition
+- Verify checksums. llmfit publishes SHA256 checksums alongside release tarballs. After downloading, verify:
+  ```bash
+  sha256sum -c llmfit.tar.gz.sha256
   ```
-- Handle HTTP 503 from the BMC as a retryable error with exponential backoff, not as a failure. The BMC is telling you to try again later.
-- Do NOT share the httpx client between Redfish and proxy/health-check operations. Different timeout profiles, different TLS contexts, different retry strategies.
+  The install script already does this, but if downloading manually in the provisioner, the checksum step can be skipped accidentally.
+- Pin the exact version AND store the expected SHA256 in settings or the provisioning script. This ensures even if the GitHub release is tampered with, the checksum mismatch catches it.
+- Pre-stage the binary on the gateway host. Download once, verify once, then SCP to target servers via the internal network. Target servers never access GitHub directly. This also solves the air-gap problem (Pitfall 5).
+- Consider running llmfit as a non-root user. It only reads hardware info (nvidia-smi output, /proc/meminfo, /proc/cpuinfo). It does not need root. However, the existing SSH provisioning session is root, so this requires either: `su - llmfit-user -c 'llmfit recommend --json'` or accepting that it runs as root like everything else in the provisioner.
+- llmfit's privacy policy states it does not contact external services unless explicitly requested. The `recommend` and `system` subcommands are local-only. But verify this by running it in a network-isolated environment and confirming no outbound connections.
 
-**Detection:** Slow down BMC responses (e.g., run a firmware update) and check if power operations time out or succeed with patience.
+**Detection:** Run `strace -e trace=network llmfit recommend --json` and verify no outbound network connections are made during recommendation.
 
-**Phase:** Core Redfish client phase. Timeout configuration is part of the client setup.
+**Phase:** Architecture decision phase. Security posture (pre-staging, checksum verification, trust model) must be decided before implementation.
 
 ---
 
@@ -340,75 +351,77 @@ If the httpx connect timeout is 5s (matching `ProxySettings.connect_timeout`) an
 
 Issues that cause minor operational friction or developer confusion.
 
-### Pitfall 11: BMC Hostname vs OS Hostname Mismatch
+### Pitfall 11: ProvisioningStep Enum Not Extended for llmfit Steps
 
-**What goes wrong:** The existing provisioner uses the OS hostname as the node identifier (the `hostname` parameter throughout `provisioner.py`). BMC management interfaces have their own hostname or IP, typically on a separate management VLAN (e.g., OS hostname `gpu-server-01.lab.example.com`, BMC hostname `gpu-server-01-bmc.mgmt.example.com` or IP `10.0.1.101`). The Redfish client needs the BMC address, but the provisioner passes the OS hostname.
+**What goes wrong:** Same pattern as Pitfall 9 from the v1.5 PITFALLS: the `ProvisioningStep` enum (state.py) does not include llmfit-specific steps. The dashboard shows no progress feedback during llmfit installation or recommendation generation. If llmfit is run as part of provisioning, the step appears as the parent step name (e.g., "uploading_scripts" or "starting_vllm") rather than "detecting_hardware" or "getting_recommendations".
 
-**Why it happens:** The existing provisioning flow only needs the OS hostname (SSH connects to it directly). Adding Redfish requires a second address for the same physical server.
+**Why it happens:** Same as v1.5: adding enum members requires touching enum, provisioner, state writer, dashboard, and tests.
 
 **Consequences:**
-- Redfish calls fail with DNS resolution errors or connect to the wrong host.
-- If the developer "fixes" this by adding a BMC address column to QUADS, it creates a data model mismatch.
+- Operators cannot tell if provisioning is stuck or actively running llmfit.
+- If llmfit hangs (Pitfall 2), the dashboard shows the wrong step name, making diagnosis harder.
 
 **Prevention:**
-- Add a BMC address resolution strategy. Options (simplest first):
-  1. Convention: BMC address is `{hostname}-bmc.{domain}` or `{hostname}-mgmt.{domain}`. A string template in settings: `RedfishSettings.bmc_host_template: str = "{hostname}-mgmt"`.
-  2. Lookup: A mapping dict in settings or environment: `INFERENCE_PROXY_REDFISH__BMC_HOSTS='{"gpu-01": "10.0.1.101"}'`.
-  3. Discovery: Query QUADS API for the BMC address (if QUADS tracks it).
-- Start with the convention approach. It covers 90% of lab environments where BMC hostnames follow a naming pattern.
-- `# ponytail: hostname template, explicit mapping if convention breaks`
+- If llmfit runs as part of provisioning, add steps: `INSTALLING_LLMFIT`, `DETECTING_HARDWARE`, or simply `LLMFIT_RECOMMEND`.
+- If llmfit runs on-demand (Option A from Pitfall 5), no enum changes needed -- it is a separate API endpoint, not a provisioning step.
 
-**Detection:** Log the BMC address used for each Redfish call. If it matches the OS hostname (instead of the BMC address), this pitfall is present.
+**Detection:** Trigger provisioning with llmfit and watch the dashboard step progression. If there is no llmfit-specific step shown, this pitfall is present.
 
-**Phase:** Configuration phase. The BMC address strategy must be decided before the Redfish client can make its first call.
+**Phase:** Provisioning integration phase (only if llmfit is in-band).
 
 ---
 
-### Pitfall 12: Error Field in ProvisioningState Too Short for Diagnostic Value
+### Pitfall 12: llmfit Output Includes Models Not Compatible with vLLM
 
-**What goes wrong:** The current `ProvisioningState.error` field (state.py line 56) is `str | None`. Redfish errors from different steps need different error context: a power-on failure needs the BMC response code and `PowerState`; an SSH failure needs the command output and exit code; a health poll failure needs the HTTP response from vLLM.
+**What goes wrong:** llmfit's model database includes models for Ollama, llama.cpp, MLX, Docker Model Runner, and LM Studio -- not just vLLM. It may recommend GGUF-quantized models (for llama.cpp/Ollama) that vLLM cannot serve, or MLX-format models (for Apple Silicon) that are irrelevant on CUDA servers. The operator sees "recommended: llama-3.1-8b-q4_k_m.gguf" and tries to deploy it on vLLM, which only supports HuggingFace-format models (safetensors/pytorch).
 
-Storing everything in a single `error` string loses structure. The dashboard cannot distinguish between error types or offer step-specific guidance. Operators see "power on failed" with no information about whether the BMC was unreachable, the credentials were wrong, or the server hardware is broken.
-
-**Why it happens:** The v1.2 design assumed errors would be rare and simple (SSH connection failures). Redfish adds a second failure domain with its own error taxonomy.
+**Why it happens:** llmfit is runtime-agnostic. Its `recommend` output includes models across all supported runtimes. The `--json` output may include a provider/runtime field, but filtering by runtime is the consumer's responsibility.
 
 **Consequences:**
-- Operators cannot self-diagnose failures from the dashboard.
-- Every failure requires SSH-ing to the gateway and reading structlog output.
-- The milestone explicitly requires "step-level error capture" -- a single string per provisioning attempt does not meet this.
+- Operator selects a GGUF model, vLLM fails to load it.
+- Confusion about model format compatibility.
+- Recommendations include irrelevant entries, diluting the useful ones.
 
 **Prevention:**
-- Keep the `error` field as a short human-readable summary (what Pitfall 5 recommends).
-- Add a `failed_step` that clearly identifies which step failed (already exists, but should use the new Redfish step names).
-- For v1.5, the error field is sufficient if it contains a good summary. Do not over-engineer a structured error model until the need is demonstrated.
-- Log the full error context (Redfish response body, HTTP status, BMC hostname) to structlog. The dashboard shows the summary; operators who need details check logs.
-- `# ponytail: summary in error field, full context in structlog, structured error model if dashboard needs drill-down`
+- Filter recommendations to vLLM-compatible models only. Check if llmfit supports a provider/runtime filter flag (e.g., `llmfit recommend --provider vllm`). If not, filter in post-processing: only include models whose provider/source is HuggingFace and whose format is safetensors-compatible.
+- Cross-reference with vLLM's supported model architectures list to validate that recommended models are actually serveable.
+- At minimum, document in the API response which models are vLLM-compatible and which are not.
 
-**Detection:** Trigger three different failure modes (BMC unreachable, wrong credentials, hardware fault) and verify the dashboard error messages are distinguishable.
+**Detection:** Run `llmfit recommend --json` on a CUDA server and check if any recommended models are GGUF-format or MLX-only.
 
-**Phase:** Error capture phase. The error message quality is the entire point of the diagnostics feature.
+**Phase:** Recommendation filtering phase. This is a post-processing step applied to llmfit output.
 
 ---
 
-### Pitfall 13: Retry Logic Interferes with Power State Machine
+### Pitfall 13: Concurrent llmfit Runs on Same Host Race on nvidia-smi
 
-**What goes wrong:** The provisioner has retry logic for SSH operations (the admin API setup endpoint fires the provisioner as a background task, and the operator clicks "Retry" to re-run the entire sequence). If Redfish power-on is added as the first step and the provisioning fails at a later step (e.g., NVIDIA driver install), the retry re-runs the entire sequence including the power-on. The server is already on. The power-on either no-ops (if Pitfall 1 is handled) or fails (if not). Either way, the server reboots unnecessarily if `ForceRestart` is used instead of `On`.
+**What goes wrong:** If two provisioning requests or recommendation requests target the same host simultaneously (e.g., operator clicks "Get Recommendations" twice quickly, or a retry races with the original request), two `llmfit recommend` processes run concurrently on the same server. Both invoke nvidia-smi at the same time. nvidia-smi can handle concurrent queries, but if one of the llmfit processes is run while the other is mid-hardware-detection, they may see different snapshots of GPU state (one sees all GPUs, the other misses one that is briefly busy responding to the first query's NVML call).
 
-**Why it happens:** The provisioner does not track which steps completed successfully. Retry = re-run everything from the beginning.
+More realistically: the provisioner already guards against concurrent provisioning via etcd state (PROVISIONING status prevents a second setup). But if llmfit runs as an on-demand API call (Option A from Pitfall 5), there is no such guard. Two concurrent API calls to `GET /admin/nodes/{hostname}/recommendations` both SSH into the server and run llmfit simultaneously.
+
+**Why it happens:** llmfit is a stateless read-only tool. Running it twice is harmless in isolation. But the SSH sessions and nvidia-smi calls consume resources, and the results may diverge under concurrent access.
 
 **Consequences:**
-- Unnecessary server reboots kill any partially-installed state.
-- Power cycling a running vLLM container (from a previous partial provisioning) drops in-flight inference requests.
-- Operators lose confidence in the retry mechanism.
+- Minor: wasted resources from duplicate SSH sessions and nvidia-smi queries.
+- Minor: potentially inconsistent recommendations if GPU state changes between the two runs.
+- Moderate: if the server is under provisioning and llmfit runs concurrently with nvidia-smi in `_verify_gpu()` or GPU detection in start-vllm.sh, the concurrent probes may interfere.
 
 **Prevention:**
-- The power-on step should be idempotent by design (Pitfall 1 prevention): if the server is already on, skip the power-on. This makes re-running the full sequence safe.
-- For v1.5, do NOT add step-level resume to the provisioner. The complexity is not justified until the provisioning failure rate warrants it. The idempotent power-on check is sufficient.
-- `# ponytail: idempotent power check makes full-sequence retry safe, step-level resume if failure rate > 10%`
+- For the on-demand API approach, add a simple per-host lock (asyncio.Lock per hostname) to prevent concurrent llmfit runs:
+  ```python
+  self._llmfit_locks: dict[str, asyncio.Lock] = {}
 
-**Detection:** Run provisioning, let it fail at a late step (e.g., health poll timeout), retry, and verify the server is not rebooted.
+  async def get_recommendations(self, hostname: str) -> list[Recommendation]:
+      lock = self._llmfit_locks.setdefault(hostname, asyncio.Lock())
+      async with lock:
+          return await self._run_llmfit(hostname)
+  ```
+- Cache recommendations for a configurable TTL (e.g., 5 minutes). Hardware does not change between calls -- there is no reason to re-run llmfit on the same server within minutes.
+- `# ponytail: per-host lock + 5min cache, remove lock if cache alone prevents concurrent calls`
 
-**Phase:** Provisioning integration phase. The idempotent power check is part of the provisioner's power-on step.
+**Detection:** Send two concurrent recommendation requests for the same host and check if both SSH into the server simultaneously.
+
+**Phase:** API endpoint phase. The lock/cache is part of the endpoint handler, not the llmfit execution logic.
 
 ---
 
@@ -416,35 +429,32 @@ Storing everything in a single `error` string loses structure. The dashboard can
 
 | Phase Topic | Likely Pitfall | Mitigation |
 |-------------|---------------|------------|
-| Redfish client (HTTP wrapper) | TLS verify=False leak (#4), session exhaustion (#6), timeout too short (#10), hardcoded URIs (#8) | Scoped httpx client with Redfish-specific TLS and timeouts, Basic auth, discover system URI |
-| Power actions (on/off/restart) | ForceOff on off server (#1), async transitions (#7) | Check-before-act pattern, post-action power state polling |
-| Credential management | Password in logs (#2) | SecretStr, sanitize error messages, never log credentials |
-| Provisioner integration | SSH before boot (#3), enum not extended (#9), retry reboots server (#13) | Boot wait polling, new ProvisioningStep members, idempotent power check |
-| Error capture & display | Raw Redfish JSON in dashboard (#5), error field too terse (#12) | Human-readable error summaries, map Redfish error codes, full context in structlog |
-| BMC addressing | Hostname mismatch (#11) | BMC host template or mapping in settings |
+| Architecture decision (in-band vs on-demand) | llmfit failure blocks provisioning (#5), security posture (#10) | Run llmfit on-demand via admin API, not as provisioning step. Pre-stage binary via SCP. |
+| Binary installation | Rust toolchain on servers (#1), download failures (#5), PATH issues (#8) | Prebuilt musl binary, pin version, SCP from gateway, use absolute paths |
+| SSH execution of llmfit | No command timeout (#2), TUI hang (#9), nvidia-smi not functional (#4) | asyncio.wait_for(), TERM=dumb, absolute path, run after GPU verification |
+| JSON output parsing | Unstable schema (#3), non-vLLM models (#12) | Pydantic with extra="ignore", pin version, filter by provider/format |
+| VRAM and model matching | Aggregation mismatch (#6), models not on NFS (#7) | Pass effective VRAM via --memory, filter against NFS manifest |
+| API endpoint | Concurrent requests (#13), enum not extended (#11) | Per-host asyncio.Lock + cache, add enum steps if in-band |
 
 ---
 
 ## Sources
 
-- [MAAS Redfish power driver quirks (Canonical Discourse)](https://discourse.maas.io/t/redfish-power-driver-quirks/512) -- vendor compatibility, trailing slashes, HTTP 400 on transitional states
-- [MAAS Redfish power driver source (GitHub)](https://github.com/canonical/maas/blob/master/src/provisioningserver/drivers/power/redfish.py) -- retry logic, session management, ETag handling, state polling
-- [MAAS Bug 2092172: Redfish I/O operation on closed file](https://bugs.launchpad.net/maas/+bug/2092172) -- race conditions in power state transitions, lag between command and state change
-- [MAAS Bug 2117200: Machines get into inconsistent power state](https://launchpad.net/maas/+bug/2117200) -- power type switching during commissioning
-- [DMTF Redfish Use-Case Checkers Issue #40](https://github.com/DMTF/Redfish-Use-Case-Checkers/issues/40) -- PowerState check fails after reset actions
-- [OpenBMC state management design doc (GitHub)](https://github.com/openbmc/docs/blob/master/designs/state-management-and-external-interfaces.md) -- ResetType mapping, transitional states
-- [OpenBMC bmcweb Issue #158: GracefulRestart flushes sessions](https://github.com/openbmc/bmcweb/issues/158) -- session invalidation on BMC restart
-- [HPE Redfish authentication and sessions](https://servermanagementportal.ext.hpe.com/docs/concepts/redfishauthentication) -- session limits (16 max), timeout configuration, token lifecycle
-- [Supermicro Redfish User Guide](https://www.supermicro.com/manuals/other/RedfishUserGuide.pdf) -- session timeout 30-86400s, Basic vs session auth
-- [DMTF Redfish error responses](https://redfish.redoc.ly/docs/concepts/errorresponses/) -- ExtendedInfo format, MessageId structure, error registries
-- [DMTF Python Redfish library (GitHub)](https://github.com/DMTF/python-redfish-library) -- uses requests not httpx, auth patterns, proxy config
-- [Dell PowerEdge: Graceful Shutdown/Restart fails](https://www.dell.com/support/kbdoc/en-us/000224986/poweredge-graceful-shutdown-or-graceful-restart-operations-using-redfish-fails-for-windows-server) -- GracefulShutdown requires active OS session
-- [DMTF Redfish Resource and Schema Guide](https://www.dmtf.org/sites/default/files/standards/documents/DSP2046_2024.2.html) -- ResetType enum, AllowableValues, PowerState values
-- [Redfish server states (SourceForge)](https://sourceforge.net/p/redfish-lab/wiki/Master-the-Redfish-Server-States/) -- PostState progression, boot wait monitoring
-- [httpx SSL documentation](https://www.python-httpx.org/advanced/ssl/) -- custom SSL context, verify parameter, truststore
-- [OpenBMC TLS configuration (GitHub)](https://github.com/openbmc/docs/blob/master/security/TLS-configuration.md) -- self-signed cert defaults, certificate replacement
-- [BMC Communication guide (THNKBIG)](https://www.thnkbig.com/blog/bmc-communication-ipmi-redfish/) -- protocol mixing, clock issues, 503 from sensor polling
-- Existing codebase: `inference_proxy/provisioning/provisioner.py` (state machine, error handling, SSH operations)
-- Existing codebase: `inference_proxy/provisioning/state.py` (ProvisioningStep enum, ProvisioningState model)
-- Existing codebase: `inference_proxy/config/settings.py` (SSHSettings pattern, ProvisioningSettings)
-- Existing codebase: `inference_proxy/models/admin.py` (TaskStatusResponse with error field)
+- [llmfit GitHub repository (AlexsJones/llmfit)](https://github.com/AlexsJones/llmfit) -- installation methods, CLI commands, JSON output, GPU detection, platform support
+- [llmfit official website](https://www.llmfit.org/) -- feature overview, hardware detection, multi-GPU support
+- [llmfit install.sh source](https://github.com/AlexsJones/llmfit/blob/main/install.sh) -- platform detection, binary download, checksum verification, install locations
+- [llmfit documentation (Mintlify)](https://alexsjones-llmfit.mintlify.app/installation) -- installation methods, platform requirements (kernel >= 3.2, glibc >= 2.17 or musl >= 1.2.5)
+- [llmfit-pypi (JEHoctor/llmfit-pypi)](https://github.com/JEHoctor/llmfit-pypi) -- PyPI binary wrapper, pip/uv installation, versioning policy
+- [llmfit issue #68: 2 GPUs detected but only 1 factored](https://github.com/AlexsJones/llmfit/issues/68) -- multi-GPU VRAM aggregation bug
+- [llmfit issue #303: Integrated GPU detected instead of discrete](https://github.com/AlexsJones/llmfit/issues/303) -- GPU detection edge case
+- [asyncssh issue #626: Timeout in run() doesn't always apply](https://github.com/ronf/asyncssh/issues/626) -- timeout applies to wait(), not create_process()
+- [asyncssh issue #411: run() does not respect timeout parameter](https://github.com/ronf/asyncssh/issues/411) -- timeout scoping in asyncssh
+- [Headless Rust/cargo installation (ctron blog)](https://dentrassi.de/2020/06/17/headless-installation-of-cargo-and-rust/) -- `-y` flag, PATH sourcing, automation pitfalls
+- [NVIDIA forums: nvidia-smi not found after driver install](https://forums.developer.nvidia.com/t/newly-installed-drivers-are-not-found-when-nvidia-smi-is-called/82686) -- reboot required, kernel module loading, Secure Boot, PATH issues
+- [NVIDIA forums: nvidia-smi failed to communicate with driver](https://forums.developer.nvidia.com/t/nvidia-smi-has-failed-because-it-couldnt-communicate-with-the-nvidia-driver-make-sure-that-the-latest-nvidia-driver-is-installed-and-running/197141) -- driver/kernel mismatch, DKMS
+- Existing codebase: `inference_proxy/provisioning/ssh_client.py` -- no command timeout in run_streaming(), connect_timeout only
+- Existing codebase: `inference_proxy/provisioning/provisioner.py` -- step markers, _verify_gpu(), MODEL_PATTERN regex, state machine
+- Existing codebase: `inference_proxy/provisioning/state.py` -- ProvisioningStep enum (18 members, no llmfit steps)
+- Existing codebase: `inference_proxy/config/settings.py` -- SSHSettings, ProvisioningSettings patterns
+- Existing codebase: `auto-vllm/setup.sh` -- NVIDIA driver install, kernel module handling, idempotent steps
+- Existing codebase: `auto-vllm/start-vllm.sh` -- GPU detection, hardcoded model selection, VRAM calculation, NFS mount dependency
