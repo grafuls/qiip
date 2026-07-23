@@ -1,5 +1,5 @@
 # Use vLLM's official OpenAI-compatible GPU image (CUDA 12.x + PyTorch + vLLM)
-FROM vllm/vllm-openai:v0.8.5
+FROM docker.io/vllm/vllm-openai:v0.8.5
 
 # Optional: install extra tools you like (curl, jq, etc.)
 RUN apt-get update && \

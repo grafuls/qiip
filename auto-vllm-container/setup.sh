@@ -46,8 +46,8 @@ install_nvidia_driver() {
     if modinfo nvidia &>/dev/null; then
         echo "NVIDIA kernel module found but not loaded, loading"
         sudo modprobe nvidia
-        nvidia-smi
-        return $?
+        # nvidia-smi
+        # return $?
     fi
     # Driver userspace libs exist without kernel module — RPM driver whose
     # kmod isn't built for the running kernel.  Try rebuilding the kmod;

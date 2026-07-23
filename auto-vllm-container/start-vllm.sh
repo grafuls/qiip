@@ -110,6 +110,25 @@ derive_container_name() {
     echo "vllm-$(echo "$model_name" | awk -F'/' '{print $NF}' | tr '[:upper:]' '[:lower:]')"
 }
 
+build_gpu_device_flags() {
+    # CDI "gpu=all" requires nvidia-container-toolkit >= 1.17.
+    # Fall back to per-GPU device names from the CDI spec.
+    local flags=()
+    local cdi_file="/etc/cdi/nvidia.yaml"
+    if nvidia-ctk cdi list 2>/dev/null | grep -q 'nvidia.com/gpu=all'; then
+        flags+=(--device nvidia.com/gpu=all)
+    elif [ -f "$cdi_file" ]; then
+        while IFS= read -r dev; do
+            flags+=(--device "$dev")
+        done < <(grep -oP 'nvidia\.com/gpu=\d+' "$cdi_file" | sort -u)
+    fi
+    if [ ${#flags[@]} -eq 0 ]; then
+        echo "FATAL: no CDI GPU devices found. Run setup.sh or regenerate CDI spec." >&2
+        exit 1
+    fi
+    echo "${flags[@]}"
+}
+
 build_and_run_container() {
     cat <<EOF
 
@@ -130,10 +149,13 @@ EOF
 
     CONTAINER_NAME=$(derive_container_name "$MODEL")
 
+    local gpu_flags
+    read -ra gpu_flags <<< "$(build_gpu_device_flags)"
+
     podman run -d --replace \
         --name "$CONTAINER_NAME" \
         --network=host \
-        --device nvidia.com/gpu=all \
+        "${gpu_flags[@]}" \
         -v "${NFS_MOUNT_POINT}:/root/.cache/huggingface" \
         -e VLLM_MODEL="$MODEL" \
         -e VLLM_PORT="${VLLM_PORT}" \
