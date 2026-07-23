@@ -42,6 +42,16 @@ install_nvidia_driver() {
         echo "NVIDIA driver already installed, skipping"
         return 0
     fi
+    # Driver may be installed (e.g. via RPM) but kernel module not loaded
+    if modinfo nvidia &>/dev/null; then
+        echo "NVIDIA driver installed but module not loaded, loading"
+        sudo modprobe nvidia
+        if nvidia-smi &>/dev/null; then
+            echo "NVIDIA driver loaded successfully"
+            return 0
+        fi
+        echo "WARNING: modprobe succeeded but nvidia-smi still fails"
+    fi
     echo 'blacklist nouveau' | sudo tee /etc/modprobe.d/blacklist-nouveau.conf
     sudo dracut --force
     sudo modprobe -r nouveau 2>/dev/null || true
