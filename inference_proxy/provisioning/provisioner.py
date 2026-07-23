@@ -189,13 +189,16 @@ class NodeProvisioner:
         )
 
     async def preflight(self, hostname: str) -> None:
-        """Pre-flight validation: TCP probe + SSH diagnostics (D-01, D-04).
+        """Pre-flight validation: TCP probe + disk check (D-01, D-04).
 
         Stage 1: TCP probe to port 22.  If unreachable, raises immediately
         (cannot proceed to SSH diagnostics).
 
-        Stage 2: GPU and disk checks via SSH.  All failures collected
-        before raising a single PreflightError (D-03).
+        Stage 2: Disk check via SSH.  Failures collected before raising
+        a single PreflightError (D-03).
+
+        Note: GPU check runs after setup.sh installs the NVIDIA driver,
+        not here — nvidia-smi doesn't exist on a fresh node.
         """
         failures: list[str] = []
 
@@ -210,18 +213,6 @@ class NodeProvisioner:
         except (OSError, TimeoutError, asyncio.TimeoutError) as exc:
             failures.append(f"SSH port 22 unreachable: {exc}")
             raise PreflightError(hostname, failures) from exc
-
-        # Stage 2: SSH diagnostics (D-01)
-        # GPU check
-        try:
-            gpu_output = await self._ssh_run_command(
-                hostname, "nvidia-smi --query-gpu=name --format=csv,noheader"
-            )
-            gpu_lines = [ln for ln in gpu_output.strip().splitlines() if ln.strip()]
-            if len(gpu_lines) == 0:
-                failures.append("No GPUs detected")
-        except (SSHConnectionError, RemoteCommandError) as exc:
-            failures.append(f"SSH diagnostic failed: {exc}")
 
         # Disk check
         try:
@@ -294,6 +285,8 @@ class NodeProvisioner:
             await self._upload_scripts(hostname)
             self._log(hostname, "info", "Running setup.sh")
             await self._run_setup(hostname)
+            current_step = "gpu_verify"
+            await self._verify_gpu(hostname)
             current_step = "starting_vllm"
             await self._update_state(hostname, ProvisioningStep.STARTING_VLLM, started_at=provision_started_at)
             self._log(hostname, "info", "Running start-vllm.sh")
@@ -365,6 +358,16 @@ class NodeProvisioner:
             else:
                 logger.warning("setup_stderr", line=line, hostname=hostname)
                 self._log(hostname, "warning", line, stream="stderr")
+
+    async def _verify_gpu(self, hostname: str) -> None:
+        """Verify GPUs are visible after setup.sh installs the NVIDIA driver."""
+        gpu_output = await self._ssh_run_command(
+            hostname, "nvidia-smi --query-gpu=name --format=csv,noheader"
+        )
+        gpu_lines = [ln for ln in gpu_output.strip().splitlines() if ln.strip()]
+        if not gpu_lines:
+            raise ProvisioningError(f"No GPUs detected on {hostname} after setup")
+        self._log(hostname, "info", f"Detected {len(gpu_lines)} GPU(s)")
 
     async def _run_start_vllm(self, hostname: str) -> str:
         """Run start-vllm.sh and extract model name from stdout."""

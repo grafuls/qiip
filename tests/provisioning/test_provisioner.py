@@ -93,10 +93,11 @@ class TestProvisionSequence:
         provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
         with patch.object(provisioner, "preflight", new_callable=AsyncMock):
-            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
-                mock_to_thread.return_value = True
-                await provisioner.provision("host1")
-                call_order.append("register")
+            with patch.object(provisioner, "_verify_gpu", new_callable=AsyncMock):
+                with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                    mock_to_thread.return_value = True
+                    await provisioner.provision("host1")
+                    call_order.append("register")
 
         assert "setup" in call_order
         assert "start_vllm" in call_order
@@ -142,9 +143,10 @@ class TestScriptUpload:
         provisioner = _make_provisioner(ssh_client=ssh, etcd_client=etcd)
 
         with patch.object(provisioner, "preflight", new_callable=AsyncMock):
-            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_tt:
-                mock_tt.return_value = True
-                await provisioner.provision("host1")
+            with patch.object(provisioner, "_verify_gpu", new_callable=AsyncMock):
+                with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_tt:
+                    mock_tt.return_value = True
+                    await provisioner.provision("host1")
 
         assert call_order.index("upload") < call_order.index("setup")
 
@@ -357,20 +359,6 @@ class TestPreflight:
             assert len(exc_info.value.failures) == 1
 
     @pytest.mark.asyncio
-    async def test_no_gpu(self) -> None:
-        """No GPUs detected raises PreflightError."""
-        provisioner = _make_provisioner()
-        mock_writer = MagicMock()
-        mock_writer.close = MagicMock()
-        mock_writer.wait_closed = AsyncMock()
-
-        with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
-            with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
-                mock_cmd.side_effect = lambda h, c: "" if "nvidia-smi" in c else "20971520"
-                with pytest.raises(PreflightError, match="No GPUs detected"):
-                    await provisioner.preflight("host1")
-
-    @pytest.mark.asyncio
     async def test_insufficient_disk(self) -> None:
         """Insufficient disk space raises PreflightError."""
         settings = ProvisioningSettings(health_poll_timeout=2, health_poll_interval=0, min_disk_gb=20)
@@ -381,8 +369,7 @@ class TestPreflight:
 
         with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
             with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
-                # nvidia-smi returns one GPU, df returns 5GB in KB (5*1024*1024)
-                mock_cmd.side_effect = lambda h, c: "Tesla V100" if "nvidia-smi" in c else "5242880"
+                mock_cmd.return_value = "5242880"
                 with pytest.raises(PreflightError, match="Insufficient disk") as exc_info:
                     await provisioner.preflight("host1")
                 assert "5.0" in str(exc_info.value) or "5" in str(exc_info.value)
@@ -398,11 +385,13 @@ class TestPreflight:
 
         with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
             with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
-                # Both GPU and disk fail
-                mock_cmd.side_effect = lambda h, c: "" if "nvidia-smi" in c else "5242880"
+                # Disk check fails + SSH diagnostic error on a second call
+                mock_cmd.side_effect = [
+                    "5242880",  # disk: 5GB, below min_disk_gb=20
+                ]
                 with pytest.raises(PreflightError) as exc_info:
                     await provisioner.preflight("host1")
-                assert len(exc_info.value.failures) == 2
+                assert len(exc_info.value.failures) == 1
 
     @pytest.mark.asyncio
     async def test_standalone_preflight(self) -> None:
@@ -414,8 +403,7 @@ class TestPreflight:
 
         with patch("inference_proxy.provisioning.provisioner.asyncio.open_connection", return_value=(MagicMock(), mock_writer)):
             with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock) as mock_cmd:
-                # 1 GPU, 50GB disk in KB
-                mock_cmd.side_effect = lambda h, c: "Tesla V100" if "nvidia-smi" in c else "52428800"
+                mock_cmd.return_value = "52428800"  # 50GB disk in KB
                 await provisioner.preflight("host1")  # Should not raise
 
     @pytest.mark.asyncio
@@ -432,6 +420,25 @@ class TestPreflight:
                 with pytest.raises(PreflightError, match="SSH diagnostic failed") as exc_info:
                     await provisioner.preflight("host1")
                 assert len(exc_info.value.failures) >= 1
+
+
+class TestVerifyGpu:
+    """GPU verification after setup.sh installs the NVIDIA driver."""
+
+    @pytest.mark.asyncio
+    async def test_no_gpu_after_setup(self) -> None:
+        """No GPUs detected raises ProvisioningError."""
+        provisioner = _make_provisioner()
+        with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock, return_value=""):
+            with pytest.raises(ProvisioningError, match="No GPUs detected"):
+                await provisioner._verify_gpu("host1")
+
+    @pytest.mark.asyncio
+    async def test_gpu_detected(self) -> None:
+        """GPUs detected passes without error."""
+        provisioner = _make_provisioner()
+        with patch.object(provisioner, "_ssh_run_command", new_callable=AsyncMock, return_value="Tesla V100\nTesla V100"):
+            await provisioner._verify_gpu("host1")  # Should not raise
 
 
 def _make_full_provisioner(etcd: MagicMock) -> tuple[NodeProvisioner, MagicMock]:
@@ -475,9 +482,10 @@ class TestStateTracking:
         mock_httpx_cls.return_value = mock_client
 
         with patch.object(provisioner, "preflight", new_callable=AsyncMock):
-            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
-                mock_to_thread.return_value = True
-                await provisioner.provision("host1")
+            with patch.object(provisioner, "_verify_gpu", new_callable=AsyncMock):
+                with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                    mock_to_thread.return_value = True
+                    await provisioner.provision("host1")
 
         # Collect all etcd put calls -- both via to_thread and direct mock
         put_calls = mock_to_thread.call_args_list
@@ -544,19 +552,18 @@ class TestStateTracking:
         provisioner, _ = _make_full_provisioner(etcd)
 
         with patch.object(provisioner, "preflight", new_callable=AsyncMock):
-            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
-                mock_to_thread.return_value = True
-                # provision() will fail at _poll_health without httpx mock, but
-                # we only need to check early state writes
-                with patch("inference_proxy.provisioning.provisioner.httpx.AsyncClient") as mock_httpx:
-                    mock_resp = MagicMock()
-                    mock_resp.status_code = 200
-                    mock_cl = AsyncMock()
-                    mock_cl.get = AsyncMock(return_value=mock_resp)
-                    mock_cl.__aenter__ = AsyncMock(return_value=mock_cl)
-                    mock_cl.__aexit__ = AsyncMock(return_value=False)
-                    mock_httpx.return_value = mock_cl
-                    await provisioner.provision("host1")
+            with patch.object(provisioner, "_verify_gpu", new_callable=AsyncMock):
+                with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                    mock_to_thread.return_value = True
+                    with patch("inference_proxy.provisioning.provisioner.httpx.AsyncClient") as mock_httpx:
+                        mock_resp = MagicMock()
+                        mock_resp.status_code = 200
+                        mock_cl = AsyncMock()
+                        mock_cl.get = AsyncMock(return_value=mock_resp)
+                        mock_cl.__aenter__ = AsyncMock(return_value=mock_cl)
+                        mock_cl.__aexit__ = AsyncMock(return_value=False)
+                        mock_httpx.return_value = mock_cl
+                        await provisioner.provision("host1")
 
         # All state writes should use /provisioning/ prefix
         for c in mock_to_thread.call_args_list:
@@ -593,9 +600,10 @@ class TestStateTracking:
             return True
 
         with patch.object(provisioner, "preflight", new_callable=AsyncMock):
-            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=flaky_to_thread):
-                # Should complete despite state write failures
-                await provisioner.provision("host1")
+            with patch.object(provisioner, "_verify_gpu", new_callable=AsyncMock):
+                with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=flaky_to_thread):
+                    # Should complete despite state write failures
+                    await provisioner.provision("host1")
 
     @pytest.mark.asyncio
     @patch("inference_proxy.provisioning.provisioner.httpx.AsyncClient")
@@ -613,16 +621,17 @@ class TestStateTracking:
         mock_httpx_cls.return_value = mock_client
 
         with patch.object(provisioner, "preflight", new_callable=AsyncMock):
-            with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
-                mock_to_thread.return_value = True
-                with patch("inference_proxy.provisioning.provisioner.node_to_etcd") as mock_ser:
-                    mock_ser.return_value = ("/nodes/host1", b'{"status":"provisioning"}')
-                    await provisioner.provision("host1")
+            with patch.object(provisioner, "_verify_gpu", new_callable=AsyncMock):
+                with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", new_callable=AsyncMock) as mock_to_thread:
+                    mock_to_thread.return_value = True
+                    with patch("inference_proxy.provisioning.provisioner.node_to_etcd") as mock_ser:
+                        mock_ser.return_value = ("/nodes/host1", b'{"status":"provisioning"}')
+                        await provisioner.provision("host1")
 
-                    # Find the first call to node_to_etcd
-                    first_call = mock_ser.call_args_list[0]
-                    node = first_call[0][0]
-                    assert node.status == NodeStatus.PROVISIONING
+                        # Find the first call to node_to_etcd
+                        first_call = mock_ser.call_args_list[0]
+                        node = first_call[0][0]
+                        assert node.status == NodeStatus.PROVISIONING
 
     @pytest.mark.asyncio
     async def test_preflight_called_before_setup(self) -> None:
