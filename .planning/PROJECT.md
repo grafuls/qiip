@@ -70,7 +70,10 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Active
 
-(No active requirements — start next milestone with `/gsd:new-milestone`)
+- [ ] Install llmfit CLI on target GPU servers during provisioning setup
+- [ ] Run llmfit via SSH to detect hardware and produce ranked model recommendations
+- [ ] Admin API endpoint returning model fit recommendations for a given server
+- [ ] Operator reviews recommendations and selects which model to deploy
 
 ### Out of Scope
 
@@ -82,20 +85,19 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - Geographic distribution — future work
 - Model caching/optimization — future work
 
-## Current Milestone: v1.5 Node Setup Enhancements
+## Current Milestone: v1.6 LLMFit for Best Fit Models
 
-**Goal:** Add Redfish-based power management and improve provisioning failure diagnostics
+**Goal:** Integrate the llmfit CLI into node provisioning to recommend which LLM models best fit a server's hardware before deployment.
 
 **Target features:**
-- Power on/off/restart via Redfish API (On, ForceOff, GracefulRestart, ForceRestart)
-- Power status query (On/Off/PoweringOn/PoweringOff)
-- Auto-power-on before SSH provisioning starts
-- Step-level error capture for failed provisioning steps
-- Dashboard error display showing failure details inline
+- Install llmfit on target GPU servers during the provisioning setup process
+- Run llmfit via SSH to detect hardware and produce ranked model recommendations
+- Admin API endpoint returning model fit recommendations for a given server
+- Operator reviews recommendations and selects which model to deploy
 
 ## Context
 
-Shipped v1.4 across 20 phases (451 tests). All milestones complete: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground. The gateway proxies OpenAI-compatible requests to vLLM nodes with service discovery, load balancing, circuit breakers, SSH provisioning, QUADS host discovery, operations dashboard, and chatbot playground with system prompt configuration.
+Shipped v1.5 across 24 phases. All milestones complete: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements. The gateway proxies OpenAI-compatible requests to vLLM nodes with service discovery, load balancing, circuit breakers, SSH provisioning, QUADS host discovery, Redfish power management, operations dashboard, and chatbot playground with system prompt configuration.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
@@ -166,4 +168,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-22 after v1.5 (Node Setup Enhancements) milestone*
+*Last updated: 2026-07-23 after starting v1.6 (LLMFit for Best Fit Models) milestone*
