@@ -20,7 +20,6 @@ from inference_proxy.provisioning.provisioner import (
     NodeProvisioner,
     PreflightError,
     ProvisioningError,
-    _derive_container_name,
 )
 from inference_proxy.provisioning.ssh_client import (
     RemoteCommandError,
@@ -72,7 +71,7 @@ class TestProvisionSequence:
         async def mock_streaming(host: str, command: str):
             if "setup.sh" in command:
                 call_order.append("setup")
-                for item in [("stdout", "[STEP:nvidia_repo:START]"), ("stdout", "[STEP:nvidia_repo:OK]")]:
+                for item in [("stdout", "[STEP:system_update:START]"), ("stdout", "[STEP:system_update:OK]")]:
                     yield item
             elif "start-vllm.sh" in command:
                 call_order.append("start_vllm")
@@ -123,7 +122,7 @@ class TestScriptUpload:
         async def mock_streaming(host: str, command: str):
             if "setup.sh" in command:
                 call_order.append("setup")
-                for item in [("stdout", "[STEP:nvidia_repo:START]")]:
+                for item in [("stdout", "[STEP:system_update:START]")]:
                     yield item
             elif "start-vllm.sh" in command:
                 for item in [("stdout", "# Model:              Qwen/Qwen2.5-72B-Instruct")]:
@@ -179,9 +178,9 @@ class TestStepMarkerParsing:
 
         async def mock_streaming(host: str, command: str):
             for item in [
-                ("stdout", "[STEP:nvidia_repo:START]"),
+                ("stdout", "[STEP:system_update:START]"),
                 ("stdout", "some debug output"),
-                ("stdout", "[STEP:nvidia_repo:OK]"),
+                ("stdout", "[STEP:system_update:OK]"),
                 ("stdout", "[STEP:system_update:START]"),
                 ("stdout", "[STEP:system_update:FAIL]"),
                 ("stderr", "error details"),
@@ -308,7 +307,7 @@ class TestSetupFailure:
         etcd.put = MagicMock(return_value=True)
 
         async def mock_streaming(host: str, command: str):
-            yield ("stdout", "[STEP:nvidia_repo:START]")
+            yield ("stdout", "[STEP:system_update:START]")
             raise RemoteCommandError("host1", "bash setup.sh", 1)
 
         ssh.run_streaming = mock_streaming
@@ -447,7 +446,7 @@ def _make_full_provisioner(etcd: MagicMock) -> tuple[NodeProvisioner, MagicMock]
 
     async def mock_streaming(host: str, command: str):
         if "setup.sh" in command:
-            for item in [("stdout", "[STEP:nvidia_repo:START]"), ("stdout", "[STEP:nvidia_repo:OK]")]:
+            for item in [("stdout", "[STEP:system_update:START]"), ("stdout", "[STEP:system_update:OK]")]:
                 yield item
         elif "start-vllm.sh" in command:
             for item in [("stdout", "# Model:              Qwen/Qwen2.5-72B-Instruct")]:
@@ -661,19 +660,6 @@ class TestStateTracking:
         assert not setup_called
 
 
-class TestContainerNameDerivation:
-    """Container name derived from model name per start-vllm.sh convention."""
-
-    def test_model_with_org(self) -> None:
-        assert _derive_container_name("Qwen/Qwen2.5-72B-Instruct") == "vllm-qwen2.5-72b-instruct"
-
-    def test_model_without_org(self) -> None:
-        assert _derive_container_name("some-model") == "vllm-some-model"
-
-    def test_model_multiple_slashes(self) -> None:
-        assert _derive_container_name("org/sub/Model-Name") == "vllm-model-name"
-
-
 def _make_teardown_provisioner(
     *,
     model: str = "Qwen/Qwen2.5-72B-Instruct",
@@ -711,7 +697,7 @@ def _make_teardown_provisioner(
         tracker.get.return_value = tracker_get_returns
 
     async def mock_streaming(host: str, command: str):
-        for item in [("stdout", "container stopped")]:
+        for item in [("stdout", "ok")]:
             yield item
 
     ssh.run_streaming = mock_streaming
@@ -750,7 +736,7 @@ class TestTeardownGraceful:
         registry.drain.assert_called_once_with("host1")
         # Verify state progression: DRAINING -> STOPPING_CONTAINER -> DEREGISTERING -> TEARDOWN_COMPLETE
         assert "draining" in state_steps
-        assert "stopping_container" in state_steps
+        assert "stopping_vllm" in state_steps
         assert "deregistering" in state_steps
         assert "teardown_complete" in state_steps
 
@@ -770,9 +756,8 @@ class TestTeardownGraceful:
             mock_tt.return_value = True
             await provisioner.teardown("host1")
 
-        # Should use podman stop + podman rm (graceful)
-        assert any("podman stop" in c for c in commands)
-        assert any("podman rm" in c for c in commands) or any("podman stop" in c and "podman rm" in c for c in commands)
+        assert any("kill " in c and "vllm.pid" in c for c in commands)
+        assert not any("kill -9" in c for c in commands)
 
     @pytest.mark.asyncio
     async def test_etcd_node_key_deleted(self) -> None:
@@ -792,7 +777,7 @@ class TestTeardownGraceful:
 
 
 class TestTeardownForce:
-    """D-03: Force teardown skips drain, uses podman rm --force."""
+    """Force teardown skips drain, uses kill -9."""
 
     @pytest.mark.asyncio
     async def test_force_skips_drain(self) -> None:
@@ -811,14 +796,14 @@ class TestTeardownForce:
         # Force mode should NOT have DRAINING step
         assert "draining" not in state_steps
         # But should still have the rest
-        assert "stopping_container" in state_steps
+        assert "stopping_vllm" in state_steps
         assert "deregistering" in state_steps
         assert "teardown_complete" in state_steps
         # registry.drain should NOT be called
         registry.drain.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_force_uses_podman_rm_force(self) -> None:
+    async def test_force_uses_kill_9(self) -> None:
         provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
         commands: list[str] = []
 
@@ -833,7 +818,7 @@ class TestTeardownForce:
             mock_tt.return_value = True
             await provisioner.teardown("host1", force=True)
 
-        assert any("podman rm --force" in c for c in commands)
+        assert any("kill -9" in c and "vllm.pid" in c for c in commands)
 
 
 class TestDrainTimeout:
@@ -857,7 +842,7 @@ class TestDrainTimeout:
             await provisioner.teardown("host1")
 
         # Should still complete despite never draining
-        assert "stopping_container" in state_steps
+        assert "stopping_vllm" in state_steps
         assert "teardown_complete" in state_steps
 
 
@@ -878,7 +863,7 @@ class TestTeardownStateProgression:
         with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
             await provisioner.teardown("host1")
 
-        expected_order = ["draining", "stopping_container", "deregistering", "teardown_complete"]
+        expected_order = ["draining", "stopping_vllm", "deregistering", "teardown_complete"]
         assert state_steps == expected_order
 
     @pytest.mark.asyncio
@@ -895,7 +880,7 @@ class TestTeardownStateProgression:
         with patch("inference_proxy.provisioning.provisioner.asyncio.to_thread", side_effect=capture_to_thread):
             await provisioner.teardown("host1", force=True)
 
-        expected_order = ["stopping_container", "deregistering", "teardown_complete"]
+        expected_order = ["stopping_vllm", "deregistering", "teardown_complete"]
         assert state_steps == expected_order
 
 

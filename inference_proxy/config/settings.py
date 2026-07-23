@@ -104,17 +104,17 @@ class SSHSettings(BaseModel):
 
 
 class ProvisioningSettings(BaseModel):
-    """Node provisioning configuration (D-17).
+    """Node provisioning configuration.
 
-    Controls health polling after vLLM container startup.
+    Controls health polling after vLLM startup.
     """
 
-    health_poll_timeout: int = 600  # D-09: 10 minutes for large model loading
+    health_poll_timeout: int = 600  # 10 minutes for large model loading
     health_poll_interval: int = 10
     vllm_port: int = 8000
-    min_disk_gb: int = 20  # D-02: minimum free disk for provisioning
-    drain_timeout: int = 30  # D-10: seconds to wait for connections to drain
-    scripts_dir: Path = Path("auto-vllm-container")
+    min_disk_gb: int = 20
+    drain_timeout: int = 30
+    scripts_dir: Path = Path("auto-vllm")
     boot_wait_timeout: int = 300  # D-05: 5 minutes for cold boot
     boot_wait_interval: int = 10
 

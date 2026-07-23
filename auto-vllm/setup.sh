@@ -1,14 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# --- Configurable defaults (D-07, D-08) ---
+# --- Configurable defaults ---
 NFS_SERVER="${NFS_SERVER:-rdu-storage02.scalelab.redhat.com:/mnt/SATA/scratch/grafuls/hf-cache}"
 NFS_MOUNT_POINT="${NFS_MOUNT_POINT:-/srv/hf-cache}"
 NVIDIA_DRIVER_VERSION="${NVIDIA_DRIVER_VERSION:-580.126.09}"
 NVIDIA_DRIVER_URL="${NVIDIA_DRIVER_URL:-https://us.download.nvidia.com/tesla/${NVIDIA_DRIVER_VERSION}/NVIDIA-Linux-x86_64-${NVIDIA_DRIVER_VERSION}.run}"
 VLLM_PORT="${VLLM_PORT:-8000}"
 
-# --- Step wrapper (D-10) ---
+# --- Step wrapper ---
 step() {
     local name="$1"; shift
     echo "[STEP:${name}:START]"
@@ -20,21 +20,12 @@ step() {
     fi
 }
 
-# --- Step functions (D-09, D-06 idempotency) ---
-
-install_nvidia_repo() {
-    if [ -f /etc/yum.repos.d/nvidia-container-toolkit.repo ]; then
-        echo "NVIDIA repo already configured, skipping"
-        return 0
-    fi
-    curl -fsSL https://nvidia.github.io/libnvidia-container/stable/rpm/nvidia-container-toolkit.repo \
-        | sudo tee /etc/yum.repos.d/nvidia-container-toolkit.repo > /dev/null
-}
+# --- Step functions (idempotent) ---
 
 run_system_update() {
     sudo dnf -y update
     sudo dnf -y install kernel-devel-"$(uname -r)" kernel-headers-"$(uname -r)" \
-        nvidia-container-toolkit podman-plugins gcc make wget podman nfs-utils elfutils-libelf-devel
+        gcc make wget nfs-utils elfutils-libelf-devel python3.12 python3.12-devel
 }
 
 install_nvidia_driver() {
@@ -42,16 +33,11 @@ install_nvidia_driver() {
         echo "NVIDIA driver already installed, skipping"
         return 0
     fi
-    # Driver may be installed (e.g. via RPM) but kernel module not loaded
     if modinfo nvidia &>/dev/null; then
         echo "NVIDIA kernel module found but not loaded, loading"
         sudo modprobe nvidia
-        # nvidia-smi
-        # return $?
     fi
-    # Driver userspace libs exist without kernel module — RPM driver whose
-    # kmod isn't built for the running kernel.  Try rebuilding the kmod;
-    # if that fails, remove the broken RPM driver and fall through to .run.
+    # RPM driver whose kmod isn't built for the running kernel.
     if ls /usr/lib64/libnvidia-ml.so.* &>/dev/null; then
         echo "RPM-installed NVIDIA driver found, kernel module missing for $(uname -r)"
         echo "Rebuilding kernel module"
@@ -63,7 +49,6 @@ install_nvidia_driver() {
         sudo dnf -y remove '*nvidia*driver*' 2>/dev/null || true
         sudo rm -f /etc/modprobe.d/blacklist-nouveau.conf
     fi
-    # No driver at all — install via .run
     echo 'blacklist nouveau' | sudo tee /etc/modprobe.d/blacklist-nouveau.conf
     sudo dracut --force
     sudo modprobe -r nouveau 2>/dev/null || true
@@ -73,12 +58,14 @@ install_nvidia_driver() {
     rm -f /tmp/NVIDIA-driver.run
 }
 
-generate_nvidia_cdi() {
-    if [ -f /etc/cdi/nvidia.yaml ]; then
-        echo "NVIDIA CDI descriptor already exists, skipping"
+install_vllm() {
+    if [ -x /opt/vllm-venv/bin/vllm ]; then
+        echo "vLLM already installed in /opt/vllm-venv, skipping"
         return 0
     fi
-    sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    python3.12 -m venv /opt/vllm-venv
+    /opt/vllm-venv/bin/pip install --upgrade pip
+    /opt/vllm-venv/bin/pip install vllm
 }
 
 mount_nfs_cache() {
@@ -110,11 +97,10 @@ configure_firewall() {
     fi
 }
 
-# --- Main (D-11: 6 step names) ---
-step nvidia_repo install_nvidia_repo
+# --- Main ---
 step system_update run_system_update
 step nvidia_driver install_nvidia_driver
-step nvidia_cdi generate_nvidia_cdi
+step vllm_install install_vllm
 step nfs_mount mount_nfs_cache
 step firewall configure_firewall
 

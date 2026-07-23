@@ -105,31 +105,7 @@ configure_vllm_params() {
     EXTRA_ARGS="${VLLM_EXTRA_ARGS:-$EXTRA_ARGS}"
 }
 
-derive_container_name() {
-    local model_name="$1"
-    echo "vllm-$(echo "$model_name" | awk -F'/' '{print $NF}' | tr '[:upper:]' '[:lower:]')"
-}
-
-build_gpu_device_flags() {
-    # CDI "gpu=all" requires nvidia-container-toolkit >= 1.17.
-    # Fall back to per-GPU device names from the CDI spec.
-    local flags=()
-    local cdi_file="/etc/cdi/nvidia.yaml"
-    if nvidia-ctk cdi list 2>/dev/null | grep -q 'nvidia.com/gpu=all'; then
-        flags+=(--device nvidia.com/gpu=all)
-    elif [ -f "$cdi_file" ]; then
-        while IFS= read -r dev; do
-            flags+=(--device "$dev")
-        done < <(grep -oP 'nvidia\.com/gpu=\d+' "$cdi_file" | sort -u)
-    fi
-    if [ ${#flags[@]} -eq 0 ]; then
-        echo "FATAL: no CDI GPU devices found. Run setup.sh or regenerate CDI spec." >&2
-        exit 1
-    fi
-    echo "${flags[@]}"
-}
-
-build_and_run_container() {
+run_vllm() {
     cat <<EOF
 
 # vLLM Configuration
@@ -144,35 +120,30 @@ build_and_run_container() {
 
 EOF
 
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    podman build -t vllm-inference "$SCRIPT_DIR"
+    mkdir -p /root/.cache
+    ln -sfn "${NFS_MOUNT_POINT}" /root/.cache/huggingface
 
-    CONTAINER_NAME=$(derive_container_name "$MODEL")
+    set -f
+    /opt/vllm-venv/bin/vllm serve "$MODEL" \
+        --host 0.0.0.0 \
+        --port "${VLLM_PORT}" \
+        --tensor-parallel-size "$TENSOR_PARALLEL" \
+        --gpu-memory-utilization "$GPU_MEM_UTIL" \
+        --max-model-len "$MAX_MODEL_LEN" \
+        --max-num-batched-tokens "$MAX_BATCHED_TOKENS" \
+        --enable-auto-tool-choice \
+        --tool-call-parser hermes \
+        ${EXTRA_ARGS:-} \
+        > /var/log/vllm-serve.log 2>&1 &
 
-    local gpu_flags
-    read -ra gpu_flags <<< "$(build_gpu_device_flags)"
-
-    podman run -d --replace \
-        --name "$CONTAINER_NAME" \
-        --network=host \
-        "${gpu_flags[@]}" \
-        -v "${NFS_MOUNT_POINT}:/root/.cache/huggingface" \
-        -e VLLM_MODEL="$MODEL" \
-        -e VLLM_PORT="${VLLM_PORT}" \
-        -e VLLM_TENSOR_PARALLEL="$TENSOR_PARALLEL" \
-        -e VLLM_GPU_MEM_UTIL="$GPU_MEM_UTIL" \
-        -e VLLM_MAX_MODEL_LEN="$MAX_MODEL_LEN" \
-        -e VLLM_MAX_BATCHED_TOKENS="$MAX_BATCHED_TOKENS" \
-        -e VLLM_EXTRA_ARGS="$EXTRA_ARGS" \
-        vllm-inference
-
-    echo "Container started: $CONTAINER_NAME"
+    echo $! > /var/run/vllm.pid
+    echo "vLLM started (PID $(cat /var/run/vllm.pid))"
 }
 
 main() {
     detect_gpu_info
     configure_vllm_params
-    build_and_run_container
+    run_vllm
 }
 
 main

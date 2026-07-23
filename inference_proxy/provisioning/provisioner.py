@@ -11,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import shlex
 from collections.abc import Coroutine
 from datetime import datetime, timezone
 
@@ -38,12 +37,6 @@ logger = structlog.get_logger()
 
 STEP_PATTERN = re.compile(r"\[STEP:(\w+):(START|OK|FAIL)\]")
 MODEL_PATTERN = re.compile(r"#\s*Model:\s+(.+)")
-
-
-def _derive_container_name(model: str) -> str:
-    """Replicate start-vllm.sh container name derivation."""
-    suffix = model.rsplit("/", 1)[-1].lower()
-    return f"vllm-{suffix}"
 
 
 class ProvisioningError(Exception):
@@ -335,7 +328,7 @@ class NodeProvisioner:
     async def _run_setup(self, hostname: str) -> None:
         """Run setup.sh and parse step markers from stdout (D-05, D-06)."""
         async for stream, line in self._ssh_client.run_streaming(
-            hostname, "bash auto-vllm-container/setup.sh"
+            hostname, "bash auto-vllm/setup.sh"
         ):
             if stream == "stdout":
                 match = STEP_PATTERN.search(line)
@@ -373,7 +366,7 @@ class NodeProvisioner:
         """Run start-vllm.sh and extract model name from stdout."""
         model: str | None = None
         async for stream, line in self._ssh_client.run_streaming(
-            hostname, "bash auto-vllm-container/start-vllm.sh"
+            hostname, "bash auto-vllm/start-vllm.sh"
         ):
             logger.debug("start_vllm_output", stream=stream, line=line, hostname=hostname)
             self._log(hostname, "debug", line, stream=stream)
@@ -448,22 +441,13 @@ class NodeProvisioner:
             await asyncio.sleep(1)
 
     async def teardown(self, hostname: str, *, force: bool = False) -> None:
-        """Teardown a provisioned node (D-01, D-03).
+        """Teardown a provisioned node.
 
-        Graceful: drain -> stop -> rm -> deregister.
-        Force: rm --force -> deregister.
+        Graceful: drain -> kill vllm -> deregister.
+        Force: kill -9 -> deregister.
         """
         teardown_started_at = datetime.now(timezone.utc)
         logger.info("teardown_start", hostname=hostname, force=force)
-
-        # Derive container name from registry model, fallback to hostname
-        container_name = f"vllm-{hostname}"
-        if self._registry is not None:
-            node = self._registry.get(hostname)
-            if node and node.model:
-                container_name = _derive_container_name(node.model)
-            else:
-                logger.warning("teardown_model_unknown", hostname=hostname)
 
         try:
             if not force:
@@ -472,14 +456,16 @@ class NodeProvisioner:
                     self._registry.drain(hostname)
                 await self._drain_wait(hostname)
 
-            await self._update_state(hostname, ProvisioningStep.STOPPING_CONTAINER, started_at=teardown_started_at)
+            await self._update_state(hostname, ProvisioningStep.STOPPING_VLLM, started_at=teardown_started_at)
             if force:
-                safe_name = shlex.quote(container_name)
-                await self._ssh_run_command(hostname, f"podman rm --force {safe_name}")
-            else:
-                safe_name = shlex.quote(container_name)
                 await self._ssh_run_command(
-                    hostname, f"podman stop {safe_name} && podman rm {safe_name}"
+                    hostname,
+                    "kill -9 $(cat /var/run/vllm.pid) 2>/dev/null; rm -f /var/run/vllm.pid",
+                )
+            else:
+                await self._ssh_run_command(
+                    hostname,
+                    "kill $(cat /var/run/vllm.pid) 2>/dev/null; rm -f /var/run/vllm.pid",
                 )
 
             await self._update_state(hostname, ProvisioningStep.DEREGISTERING, started_at=teardown_started_at)
