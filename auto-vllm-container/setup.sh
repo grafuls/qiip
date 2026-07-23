@@ -44,14 +44,23 @@ install_nvidia_driver() {
     fi
     # Driver may be installed (e.g. via RPM) but kernel module not loaded
     if modinfo nvidia &>/dev/null; then
-        echo "NVIDIA driver installed but module not loaded, loading"
+        echo "NVIDIA kernel module found but not loaded, loading"
         sudo modprobe nvidia
-        if nvidia-smi &>/dev/null; then
-            echo "NVIDIA driver loaded successfully"
-            return 0
-        fi
-        echo "WARNING: modprobe succeeded but nvidia-smi still fails"
+        nvidia-smi
+        return $?
     fi
+    # Driver userspace libs exist without kernel module — RPM driver whose
+    # kmod isn't built for the running kernel.  The .run installer will
+    # refuse ("alternate driver installation"), so rebuild the kmod instead.
+    if ls /usr/lib64/libnvidia-ml.so.* &>/dev/null; then
+        echo "RPM-installed NVIDIA driver found, kernel module missing for $(uname -r)"
+        echo "Rebuilding kernel module"
+        sudo dkms autoinstall 2>/dev/null || sudo akmods --force 2>/dev/null || true
+        sudo modprobe nvidia
+        nvidia-smi
+        return $?
+    fi
+    # No driver at all — install via .run
     echo 'blacklist nouveau' | sudo tee /etc/modprobe.d/blacklist-nouveau.conf
     sudo dracut --force
     sudo modprobe -r nouveau 2>/dev/null || true
