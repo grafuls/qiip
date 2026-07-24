@@ -61,24 +61,24 @@ Deferred to future milestone. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INST-01 | TBD | Pending |
-| INST-02 | TBD | Pending |
-| EXEC-01 | TBD | Pending |
-| EXEC-02 | TBD | Pending |
-| EXEC-03 | TBD | Pending |
-| API-01 | TBD | Pending |
-| API-02 | TBD | Pending |
-| API-03 | TBD | Pending |
-| SEL-01 | TBD | Pending |
-| SEL-02 | TBD | Pending |
-| DASH-01 | TBD | Pending |
-| DASH-02 | TBD | Pending |
+| INST-01 | Phase 26 | Pending |
+| INST-02 | Phase 26 | Pending |
+| EXEC-01 | Phase 25 | Pending |
+| EXEC-02 | Phase 25 | Pending |
+| EXEC-03 | Phase 25 | Pending |
+| API-01 | Phase 27 | Pending |
+| API-02 | Phase 27 | Pending |
+| API-03 | Phase 27 | Pending |
+| SEL-01 | Phase 28 | Pending |
+| SEL-02 | Phase 28 | Pending |
+| DASH-01 | Phase 29 | Pending |
+| DASH-02 | Phase 29 | Pending |
 
 **Coverage:**
 - v1.6 requirements: 12 total
-- Mapped to phases: 0
-- Unmapped: 12 ⚠️
+- Mapped to phases: 12
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-24*
-*Last updated: 2026-07-24 after initial definition*
+*Last updated: 2026-07-24 after roadmap creation*

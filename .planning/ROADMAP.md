@@ -8,6 +8,7 @@
 - ✅ **v1.3 QUADS Integration** — Phases 15-18 (shipped 2026-07-20)
 - ✅ **v1.4 Chatbot Playground** — Phases 19-20 (shipped 2026-07-21)
 - ✅ **v1.5 Node Setup Enhancements** — Phases 21-24 (shipped 2026-07-22)
+- 🚧 **v1.6 LLMFit for Best Fit Models** — Phases 25-29 (in progress)
 
 ## Phases
 
@@ -71,88 +72,74 @@
 
 </details>
 
+### v1.6 LLMFit for Best Fit Models (In Progress)
+
+**Milestone Goal:** Integrate the llmfit CLI to recommend which LLM models best fit a server's hardware before deployment.
+
+- [ ] **Phase 25: Core Models and Runner** - Pydantic models for llmfit JSON output and SSH-based runner service with timeout protection
+- [ ] **Phase 26: llmfit Installation** - Install llmfit binary on target servers during provisioning as a non-fatal step
+- [ ] **Phase 27: Admin API Endpoint** - Expose model recommendations via GET endpoint with structured error handling
+- [ ] **Phase 28: Model Selection** - Wire operator-selected model into provisioning via VLLM_MODEL env var
+- [ ] **Phase 29: Dashboard Recommendations** - Recommendations card on node detail page with ranked model table and hardware summary
+
 ## Phase Details
 
-### Phase 21: Redfish Client & Configuration
-
-**Goal**: The gateway can communicate with server BMCs via Redfish API with secure credential handling and human-readable errors
-**Depends on**: Nothing (foundation for v1.5)
-**Requirements**: DIAG-03
+### Phase 25: Core Models and Runner
+**Goal**: The gateway can execute llmfit on remote hosts and parse the results into typed models
+**Depends on**: Nothing (first phase of v1.6)
+**Requirements**: EXEC-01, EXEC-02, EXEC-03
 **Success Criteria** (what must be TRUE):
+  1. LLMFitRunner can SSH to a remote host, run `llmfit recommend --json`, and return parsed Pydantic models
+  2. Pydantic models capture system hardware info (GPU name, VRAM, backend) and ranked model recommendations (name, score, fit level, estimated tok/s, memory)
+  3. SSH execution times out after a configurable duration instead of hanging indefinitely
+  4. Invalid or missing llmfit JSON output raises a typed error (not an unhandled exception)
+**Plans**: TBD
 
-  1. RedfishClient can query power state from a BMC and return On/Off/PoweringOn/PoweringOff
-  2. RedfishClient can issue power actions (On, ForceOff, GracefulRestart, ForceRestart) to a BMC
-  3. Redfish error responses are translated to human-readable messages (not raw JSON)
-  4. BMC credentials are never exposed in logs, error messages, or API responses
-
-**Plans:** 2/2 plans complete
-Plans:
-**Wave 1**
-
-- [x] 21-01-PLAN.md — Redfish client module (settings, errors, client, tests)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 21-02-PLAN.md — Lifespan wiring (DI, main.py, conftest)
-
-### Phase 22: Power Management Endpoints
-
-**Goal**: Operators can manage server power from the admin API
-**Depends on**: Phase 21
-**Requirements**: PWR-01, PWR-02, PWR-03, PWR-04
+### Phase 26: llmfit Installation
+**Goal**: New nodes have the llmfit binary available after provisioning
+**Depends on**: Nothing (independent of Python-side work)
+**Requirements**: INST-01, INST-02
 **Success Criteria** (what must be TRUE):
+  1. setup.sh downloads and installs the llmfit binary to /usr/local/bin on target servers
+  2. llmfit installation failure does not block or fail the overall provisioning process
+  3. Successful installation is logged; failure is logged as a warning with the reason
+**Plans**: TBD
 
-  1. Admin can power on a node via POST to the admin power endpoint
-  2. Admin can power off a node via POST to the admin power endpoint
-  3. Admin can restart a node via POST to the admin power endpoint
-  4. Admin can query current power state of a node via GET from the admin API
-  5. Power endpoints return 503 when Redfish is not configured
-
-**Plans:** 1/1 plans complete
-Plans:
-- [x] 22-01-PLAN.md — Power models, route handlers, and tests
-
-### Phase 23: Auto-Power-On in Provisioner
-
-**Goal**: Provisioning works even when target servers are powered off
-**Depends on**: Phase 21
-**Requirements**: PWR-05
+### Phase 27: Admin API Endpoint
+**Goal**: Operators can request model recommendations for any node via the admin API
+**Depends on**: Phase 25
+**Requirements**: API-01, API-02, API-03
 **Success Criteria** (what must be TRUE):
+  1. GET /admin/nodes/{hostname}/recommendations returns a ranked list of recommended models with scores, fit levels, and estimated performance
+  2. Response includes detected hardware info (GPU name, VRAM, compute backend) for the queried host
+  3. When llmfit fails (SSH error, timeout, parse error), the endpoint returns a structured error response with a descriptive message (not a raw 500)
+**Plans**: TBD
 
-  1. Setup operation automatically powers on a node that is off before starting SSH provisioning
-  2. Dashboard shows POWERING_ON step while the server boots
-  3. Provisioning waits for SSH availability after power-on before proceeding to preflight
-
-**Plans:** 1/1 plans complete
-Plans:
-- [x] 23-01-PLAN.md — Power-on integration, SSH wait loop, settings, and tests
-
-### Phase 24: Provisioning Error Diagnostics
-
-**Goal**: Operators can see why provisioning failed without checking logs
-**Depends on**: Nothing (independent of Redfish phases)
-**Requirements**: DIAG-01, DIAG-02
+### Phase 28: Model Selection
+**Goal**: Operators can specify which model to deploy when provisioning a node
+**Depends on**: Nothing (independent of llmfit phases)
+**Requirements**: SEL-01, SEL-02
 **Success Criteria** (what must be TRUE):
+  1. SetupRequest accepts an optional model field that operators can set when triggering provisioning
+  2. When a model is specified, the provisioner passes it as the VLLM_MODEL environment variable to start-vllm.sh
+**Plans**: TBD
 
-  1. Failed provisioning captures the specific step name where failure occurred
-  2. Failed provisioning captures error details (stderr/exception message)
-  3. Dashboard displays failure details inline for failed nodes instead of just a status badge
-
-**Plans:** 2/2 plans complete
-
-**Wave 1**
-
-- [x] 24-01-PLAN.md — Backend error capture and API surface (models, provisioner fix, service wiring, tests)
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 24-02-PLAN.md — Dashboard error display (expandable sub-row, CSS styling, human verify)
+### Phase 29: Dashboard Recommendations
+**Goal**: Operators can view model recommendations and hardware details for any node in the dashboard
+**Depends on**: Phase 27
+**Requirements**: DASH-01, DASH-02
+**Success Criteria** (what must be TRUE):
+  1. Node detail page displays a recommendations card with a ranked table showing model name, score, fit level, estimated tok/s, and memory usage
+  2. Recommendations card shows a hardware summary with detected GPU name, VRAM, and compute backend
+  3. Recommendations load on demand when the operator views a node's details
+**Plans**: TBD
+**UI hint**: yes
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 21 -> 22 -> 23 -> 24
-(Phase 24 is independent of 21-23 but ordered last per research rationale)
+Phases execute in numeric order: 25 -> 26 -> 27 -> 28 -> 29
+(Phases 26 and 28 are independent but ordered for logical flow)
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -176,7 +163,12 @@ Phases execute in numeric order: 21 -> 22 -> 23 -> 24
 | 18. Dashboard UI Update | v1.3 | 2/2 | Complete | 2026-07-17 |
 | 19. Chat Page and Streaming | v1.4 | 2/2 | Complete | 2026-07-21 |
 | 20. Chat Configuration | v1.4 | 1/1 | Complete | 2026-07-21 |
-| 21. Redfish Client & Configuration | v1.5 | 2/2 | Complete    | 2026-07-22 |
-| 22. Power Management Endpoints | v1.5 | 1/1 | Complete    | 2026-07-22 |
-| 23. Auto-Power-On in Provisioner | v1.5 | 1/1 | Complete    | 2026-07-22 |
-| 24. Provisioning Error Diagnostics | v1.5 | 2/2 | Complete    | 2026-07-22 |
+| 21. Redfish Client & Configuration | v1.5 | 2/2 | Complete | 2026-07-22 |
+| 22. Power Management Endpoints | v1.5 | 1/1 | Complete | 2026-07-22 |
+| 23. Auto-Power-On in Provisioner | v1.5 | 1/1 | Complete | 2026-07-22 |
+| 24. Provisioning Error Diagnostics | v1.5 | 2/2 | Complete | 2026-07-22 |
+| 25. Core Models and Runner | v1.6 | 0/0 | Not started | - |
+| 26. llmfit Installation | v1.6 | 0/0 | Not started | - |
+| 27. Admin API Endpoint | v1.6 | 0/0 | Not started | - |
+| 28. Model Selection | v1.6 | 0/0 | Not started | - |
+| 29. Dashboard Recommendations | v1.6 | 0/0 | Not started | - |

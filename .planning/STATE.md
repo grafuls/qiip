@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: LLMFit for Best Fit Models
 status: planning
-last_updated: "2026-07-23T14:52:57.899Z"
-last_activity: 2026-07-23
+last_updated: "2026-07-24"
+last_activity: 2026-07-24
 progress:
-  total_phases: 0
+  total_phases: 5
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,17 +17,19 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-21)
+See: .planning/PROJECT.md (updated 2026-07-23)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Milestone complete
+**Current focus:** Phase 25 - Core Models and Runner
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 25 of 29 (Core Models and Runner) — first of 5 in v1.6
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-23 — Milestone v1.6 started
+Status: Ready to plan
+Last activity: 2026-07-24 — Roadmap created for v1.6 (Phases 25-29)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -67,10 +69,10 @@ Last activity: 2026-07-23 — Milestone v1.6 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Zero new dependencies for v1.5 (httpx covers Redfish REST, pydantic-settings for config)
-- RedfishClient mirrors QUADSClient pattern (constructor-injected httpx.AsyncClient, typed errors)
-- Basic auth over Redfish sessions (simpler, sufficient for infrequent internal ops)
-- etcd3gw HTTP gateway (sync calls wrapped with asyncio.to_thread)
+- Zero new Python dependencies for v1.6 (reuses asyncssh, Pydantic, FastAPI, structlog)
+- llmfit is a Rust CLI binary installed on target servers, not on the gateway
+- On-demand execution via admin API, NOT part of provisioning state machine
+- Pydantic models use extra="ignore" for forward compatibility with llmfit version changes
 
 ### Pending Todos
 
@@ -78,9 +80,9 @@ None yet.
 
 ### Blockers/Concerns
 
-- Multi-vendor BMC testing: system ID defaults may vary (Dell iDRAC vs Supermicro vs HPE iLO)
-- BMC hostname convention (`mgmt-{hostname}`) needs validation against actual lab DNS
-- Boot wait timing (300s estimate) needs calibration against real hardware
+- llmfit JSON schema stability across versions (mitigated by pinned version + extra="ignore")
+- Air-gap lab scenarios may need SCP pre-staging instead of GitHub download
+- NFS model availability filtering deferred to future milestone
 
 ## Deferred Items
 
@@ -95,10 +97,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-22T09:36:13.154Z
-Stopped at: Phase 24 context gathered
-Resume file: .planning/phases/24-provisioning-error-diagnostics/24-CONTEXT.md
-
-## Operator Next Steps
-
-- Start the next milestone with /gsd-new-milestone
+Last session: 2026-07-24
+Stopped at: Roadmap created for v1.6 milestone
+Resume file: None
