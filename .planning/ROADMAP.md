@@ -85,69 +85,94 @@
 ## Phase Details
 
 ### Phase 25: Core Models and Runner
+
 **Goal**: The gateway can execute llmfit on remote hosts and parse the results into typed models
 **Depends on**: Nothing (first phase of v1.6)
 **Requirements**: EXEC-01, EXEC-02, EXEC-03
 **Success Criteria** (what must be TRUE):
+
   1. LLMFitRunner can SSH to a remote host, run `llmfit recommend --json`, and return parsed Pydantic models
   2. Pydantic models capture system hardware info (GPU name, VRAM, backend) and ranked model recommendations (name, score, fit level, estimated tok/s, memory)
   3. SSH execution times out after a configurable duration instead of hanging indefinitely
   4. Invalid or missing llmfit JSON output raises a typed error (not an unhandled exception)
+
 **Plans**: 2 plans
 Plans:
+**Wave 1**
+
 - [ ] 25-01-PLAN.md â€” Data contracts: Pydantic models, error hierarchy, SSHClient.run()
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 25-02-PLAN.md â€” Runner and tests: LLMFitRunner + full test suite
 
 ### Phase 26: llmfit Installation
+
 **Goal**: New nodes have the llmfit binary available after provisioning
 **Depends on**: Nothing (independent of Python-side work)
 **Requirements**: INST-01, INST-02
 **Success Criteria** (what must be TRUE):
+
   1. setup.sh downloads and installs the llmfit binary to /usr/local/bin on target servers
   2. llmfit installation failure does not block or fail the overall provisioning process
   3. Successful installation is logged; failure is logged as a warning with the reason
+
 **Plans**: 2 plans
 Plans:
-- [ ] 25-01-PLAN.md — Data contracts: Pydantic models, error hierarchy, SSHClient.run()
-- [ ] 25-02-PLAN.md — Runner and tests: LLMFitRunner + full test suite
+
+- [ ] 25-01-PLAN.md ï¿½ Data contracts: Pydantic models, error hierarchy, SSHClient.run()
+- [ ] 25-02-PLAN.md ï¿½ Runner and tests: LLMFitRunner + full test suite
 
 ### Phase 27: Admin API Endpoint
+
 **Goal**: Operators can request model recommendations for any node via the admin API
 **Depends on**: Phase 25
 **Requirements**: API-01, API-02, API-03
 **Success Criteria** (what must be TRUE):
+
   1. GET /admin/nodes/{hostname}/recommendations returns a ranked list of recommended models with scores, fit levels, and estimated performance
   2. Response includes detected hardware info (GPU name, VRAM, compute backend) for the queried host
   3. When llmfit fails (SSH error, timeout, parse error), the endpoint returns a structured error response with a descriptive message (not a raw 500)
+
 **Plans**: 2 plans
 Plans:
-- [ ] 25-01-PLAN.md — Data contracts: Pydantic models, error hierarchy, SSHClient.run()
-- [ ] 25-02-PLAN.md — Runner and tests: LLMFitRunner + full test suite
+
+- [ ] 25-01-PLAN.md ï¿½ Data contracts: Pydantic models, error hierarchy, SSHClient.run()
+- [ ] 25-02-PLAN.md ï¿½ Runner and tests: LLMFitRunner + full test suite
 
 ### Phase 28: Model Selection
+
 **Goal**: Operators can specify which model to deploy when provisioning a node
 **Depends on**: Nothing (independent of llmfit phases)
 **Requirements**: SEL-01, SEL-02
 **Success Criteria** (what must be TRUE):
+
   1. SetupRequest accepts an optional model field that operators can set when triggering provisioning
   2. When a model is specified, the provisioner passes it as the VLLM_MODEL environment variable to start-vllm.sh
+
 **Plans**: 2 plans
 Plans:
-- [ ] 25-01-PLAN.md — Data contracts: Pydantic models, error hierarchy, SSHClient.run()
-- [ ] 25-02-PLAN.md — Runner and tests: LLMFitRunner + full test suite
+
+- [ ] 25-01-PLAN.md ï¿½ Data contracts: Pydantic models, error hierarchy, SSHClient.run()
+- [ ] 25-02-PLAN.md ï¿½ Runner and tests: LLMFitRunner + full test suite
 
 ### Phase 29: Dashboard Recommendations
+
 **Goal**: Operators can view model recommendations and hardware details for any node in the dashboard
 **Depends on**: Phase 27
 **Requirements**: DASH-01, DASH-02
 **Success Criteria** (what must be TRUE):
+
   1. Node detail page displays a recommendations card with a ranked table showing model name, score, fit level, estimated tok/s, and memory usage
   2. Recommendations card shows a hardware summary with detected GPU name, VRAM, and compute backend
   3. Recommendations load on demand when the operator views a node's details
+
 **Plans**: 2 plans
 Plans:
-- [ ] 25-01-PLAN.md — Data contracts: Pydantic models, error hierarchy, SSHClient.run()
-- [ ] 25-02-PLAN.md — Runner and tests: LLMFitRunner + full test suite
+
+- [ ] 25-01-PLAN.md ï¿½ Data contracts: Pydantic models, error hierarchy, SSHClient.run()
+- [ ] 25-02-PLAN.md ï¿½ Runner and tests: LLMFitRunner + full test suite
+
 **UI hint**: yes
 
 ## Progress
