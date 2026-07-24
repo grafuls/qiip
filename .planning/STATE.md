@@ -3,8 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: LLMFit for Best Fit Models
 status: planning
-last_updated: "2026-07-24"
-last_activity: 2026-07-24
+stopped_at: Phase 25 context gathered
+last_updated: "2026-07-24T13:11:18.236Z"
+last_activity: 2026-07-24 — Roadmap created for v1.6 (Phases 25-29)
 progress:
   total_phases: 5
   completed_phases: 0
@@ -97,6 +98,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-24
-Stopped at: Roadmap created for v1.6 milestone
-Resume file: None
+Last session: 2026-07-24T13:11:18.231Z
+Stopped at: Phase 25 context gathered
+Resume file: .planning/phases/25-core-models-and-runner/25-CONTEXT.md
