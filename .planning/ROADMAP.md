@@ -121,7 +121,7 @@ Plans:
 Plans:
 
 - [x] 25-01-PLAN.md � Data contracts: Pydantic models, error hierarchy, SSHClient.run()
-- [ ] 25-02-PLAN.md � Runner and tests: LLMFitRunner + full test suite
+- [x] 25-02-PLAN.md � Runner and tests: LLMFitRunner + full test suite
 
 ### Phase 27: Admin API Endpoint
 
@@ -137,7 +137,7 @@ Plans:
 **Plans**: 2 plans
 Plans:
 
-- [ ] 25-01-PLAN.md � Data contracts: Pydantic models, error hierarchy, SSHClient.run()
+- [x] 25-01-PLAN.md � Data contracts: Pydantic models, error hierarchy, SSHClient.run()
 - [ ] 25-02-PLAN.md � Runner and tests: LLMFitRunner + full test suite
 
 ### Phase 28: Model Selection
@@ -207,7 +207,7 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28 -> 29
 | 22. Power Management Endpoints | v1.5 | 1/1 | Complete | 2026-07-22 |
 | 23. Auto-Power-On in Provisioner | v1.5 | 1/1 | Complete | 2026-07-22 |
 | 24. Provisioning Error Diagnostics | v1.5 | 2/2 | Complete | 2026-07-22 |
-| 25. Core Models and Runner | v1.6 | 2/2 | Complete   | 2026-07-25 |
+| 25. Core Models and Runner | v1.6 | 2/2 | Complete    | 2026-07-25 |
 | 26. llmfit Installation | v1.6 | 0/0 | Not started | - |
 | 27. Admin API Endpoint | v1.6 | 0/0 | Not started | - |
 | 28. Model Selection | v1.6 | 0/0 | Not started | - |

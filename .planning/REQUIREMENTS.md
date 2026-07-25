@@ -14,9 +14,9 @@ Requirements for v1.6 LLMFit for Best Fit Models. Each maps to roadmap phases.
 
 ### Execution
 
-- [ ] **EXEC-01**: Gateway can run `llmfit recommend --json` on a remote host via SSH and parse the JSON output
-- [ ] **EXEC-02**: SSH command execution has timeout protection to prevent hangs
-- [ ] **EXEC-03**: Pydantic models validate llmfit JSON output (system hardware info + ranked model list)
+- [x] **EXEC-01**: Gateway can run `llmfit recommend --json` on a remote host via SSH and parse the JSON output
+- [x] **EXEC-02**: SSH command execution has timeout protection to prevent hangs
+- [x] **EXEC-03**: Pydantic models validate llmfit JSON output (system hardware info + ranked model list)
 
 ### API
 
@@ -63,9 +63,9 @@ Deferred to future milestone. Tracked but not in current roadmap.
 |-------------|-------|--------|
 | INST-01 | Phase 26 | Pending |
 | INST-02 | Phase 26 | Pending |
-| EXEC-01 | Phase 25 | Pending |
-| EXEC-02 | Phase 25 | Pending |
-| EXEC-03 | Phase 25 | Pending |
+| EXEC-01 | Phase 25 | Complete |
+| EXEC-02 | Phase 25 | Complete |
+| EXEC-03 | Phase 25 | Complete |
 | API-01 | Phase 27 | Pending |
 | API-02 | Phase 27 | Pending |
 | API-03 | Phase 27 | Pending |
