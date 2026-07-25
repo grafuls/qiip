@@ -4,8 +4,8 @@ milestone: v1.6
 milestone_name: LLMFit for Best Fit Models
 status: executing
 stopped_at: Phase 25 context gathered
-last_updated: "2026-07-24T13:29:12.861Z"
-last_activity: 2026-07-24 -- Phase 25 planning complete
+last_updated: "2026-07-25T21:11:18.460Z"
+last_activity: 2026-07-25 -- Phase 25 execution started
 progress:
   total_phases: 5
   completed_phases: 0
@@ -21,14 +21,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-23)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Phase 25 - Core Models and Runner
+**Current focus:** Phase 25 — core-models-and-runner
 
 ## Current Position
 
-Phase: 25 of 29 (Core Models and Runner) — first of 5 in v1.6
-Plan: —
-Status: Ready to execute
-Last activity: 2026-07-24 -- Phase 25 planning complete
+Phase: 25 (core-models-and-runner) — EXECUTING
+Plan: 1 of 2
+Status: Executing Phase 25
+Last activity: 2026-07-25 -- Phase 25 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
