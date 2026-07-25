@@ -7,6 +7,7 @@ error handling, and DIP compliance.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -223,3 +224,93 @@ class _async_cm_raises:
 
     async def __aexit__(self, *args: object) -> None:
         pass
+
+
+def _setup_mock_asyncssh_run(
+    mock_asyncssh: MagicMock,
+    stdout: str = "",
+    stderr: str = "",
+    exit_status: int = 0,
+) -> None:
+    """Wire mock_asyncssh for SSHClient.run() (conn.run, not create_process)."""
+    mock_asyncssh.PermissionDenied = type("PermissionDenied", (Exception,), {})
+    mock_asyncssh.DisconnectError = type(
+        "DisconnectError", (Exception,), {"reason": ""}
+    )
+
+    mock_result = MagicMock()
+    mock_result.stdout = stdout
+    mock_result.stderr = stderr
+    mock_result.exit_status = exit_status
+
+    mock_conn = MagicMock()
+    mock_conn.run = AsyncMock(return_value=mock_result)
+
+    mock_asyncssh.connect = MagicMock(return_value=_async_cm(mock_conn))
+
+
+class TestSSHClientRun:
+    """SSHClient.run() returns (stdout, stderr, exit_status) tuple."""
+
+    @pytest.mark.asyncio
+    @patch("inference_proxy.provisioning.ssh_client.asyncssh")
+    async def test_returns_tuple(self, mock_asyncssh: MagicMock) -> None:
+        _setup_mock_asyncssh_run(mock_asyncssh, stdout="hello", stderr="", exit_status=0)
+        client = SSHClient(_make_settings())
+
+        result = await client.run("host1", "echo hello")
+        assert result == ("hello", "", 0)
+
+
+class TestSSHClientRunNonZeroExit:
+    """SSHClient.run() raises RemoteCommandError on non-zero exit."""
+
+    @pytest.mark.asyncio
+    @patch("inference_proxy.provisioning.ssh_client.asyncssh")
+    async def test_raises_remote_command_error(self, mock_asyncssh: MagicMock) -> None:
+        _setup_mock_asyncssh_run(mock_asyncssh, stderr="error", exit_status=1)
+        client = SSHClient(_make_settings())
+
+        with pytest.raises(RemoteCommandError) as exc_info:
+            await client.run("host1", "fail")
+        assert exc_info.value.exit_status == 1
+
+
+class TestSSHClientRunConnectionError:
+    """SSHClient.run() wraps asyncssh auth errors as SSHConnectionError."""
+
+    @pytest.mark.asyncio
+    @patch("inference_proxy.provisioning.ssh_client.asyncssh")
+    async def test_wraps_permission_denied(self, mock_asyncssh: MagicMock) -> None:
+        mock_asyncssh.PermissionDenied = type("PermissionDenied", (Exception,), {})
+        mock_asyncssh.DisconnectError = type(
+            "DisconnectError", (Exception,), {"reason": "test"}
+        )
+        mock_asyncssh.connect = MagicMock(
+            return_value=_async_cm_raises(mock_asyncssh.PermissionDenied("denied"))
+        )
+        client = SSHClient(_make_settings())
+
+        with pytest.raises(SSHConnectionError) as exc_info:
+            await client.run("host1", "cmd")
+        assert "authentication failed" in exc_info.value.reason
+
+
+class TestSSHClientRunTimeoutBubbles:
+    """asyncio.TimeoutError from run() bubbles to caller."""
+
+    @pytest.mark.asyncio
+    @patch("inference_proxy.provisioning.ssh_client.asyncssh")
+    async def test_timeout_propagates(self, mock_asyncssh: MagicMock) -> None:
+        mock_asyncssh.PermissionDenied = type("PermissionDenied", (Exception,), {})
+        mock_asyncssh.DisconnectError = type(
+            "DisconnectError", (Exception,), {"reason": ""}
+        )
+
+        mock_conn = MagicMock()
+        mock_conn.run = AsyncMock(side_effect=asyncio.TimeoutError())
+        mock_asyncssh.connect = MagicMock(return_value=_async_cm(mock_conn))
+        client = SSHClient(_make_settings())
+
+        with pytest.raises(asyncio.TimeoutError):
+            await client.run("host1", "slow-cmd")

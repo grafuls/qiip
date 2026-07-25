@@ -158,6 +158,8 @@ class SSHClient:
             raise SSHConnectionError(
                 host, f"disconnected: {exc.reason}"
             ) from exc
+        except TimeoutError:
+            raise  # asyncio.TimeoutError is TimeoutError is OSError in 3.11+
         except OSError as exc:
             raise SSHConnectionError(host, str(exc)) from exc
 
