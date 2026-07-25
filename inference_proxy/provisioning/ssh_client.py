@@ -9,6 +9,7 @@ Per D-14: Mirrors the EtcdClient wrapper pattern.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -104,6 +105,51 @@ class SSHClient:
                             host, command, process.exit_status,
                             stderr=stderr_output or "",
                         )
+        except asyncssh.PermissionDenied as exc:
+            raise SSHConnectionError(
+                host, f"authentication failed: {exc}"
+            ) from exc
+        except asyncssh.DisconnectError as exc:
+            raise SSHConnectionError(
+                host, f"disconnected: {exc.reason}"
+            ) from exc
+        except OSError as exc:
+            raise SSHConnectionError(host, str(exc)) from exc
+
+    async def run(
+        self, host: str, command: str, timeout: float = 60.0,
+    ) -> tuple[str, str, int]:
+        """Run *command* on *host*, return ``(stdout, stderr, exit_status)``.
+
+        Timeout via ``asyncio.wait_for`` (D-02).  Raises
+        ``SSHConnectionError`` on auth/disconnect/OS errors.  Raises
+        ``RemoteCommandError`` on non-zero exit.
+        ``asyncio.TimeoutError`` bubbles to caller.
+        """
+        log = logger.bind(host=host, command=command)
+        log.debug("ssh_run_start")
+        try:
+            async with asyncssh.connect(
+                host,
+                username=self._username,
+                client_keys=[str(self._key_path)],
+                known_hosts=None,
+                connect_timeout=self._connect_timeout,
+            ) as conn:
+                result = await asyncio.wait_for(
+                    conn.run(command), timeout=timeout,
+                )
+                exit_status = result.exit_status if result.exit_status is not None else 0
+                stdout = result.stdout or ""
+                stderr = result.stderr or ""
+
+                if exit_status != 0:
+                    raise RemoteCommandError(
+                        host, command, exit_status, stderr=stderr,
+                    )
+
+                log.debug("ssh_run_complete", exit_status=exit_status)
+                return (stdout, stderr, exit_status)
         except asyncssh.PermissionDenied as exc:
             raise SSHConnectionError(
                 host, f"authentication failed: {exc}"
