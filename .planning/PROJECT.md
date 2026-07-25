@@ -168,4 +168,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-23 after starting v1.6 (LLMFit for Best Fit Models) milestone*
+*Last updated: 2026-07-25 — Phase 25 complete: Pydantic models for llmfit JSON, error hierarchy, SSHClient.run(), and LLMFitRunner with timeout protection*
