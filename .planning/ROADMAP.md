@@ -79,7 +79,7 @@
 - [x] **Phase 25: Core Models and Runner** - Pydantic models for llmfit JSON output and SSH-based runner service with timeout protection (completed 2026-07-25)
 - [x] **Phase 26: llmfit Installation** - Install llmfit binary on target servers during provisioning as a non-fatal step (completed 2026-07-26)
 - [x] **Phase 27: Admin API Endpoint** - Expose model recommendations via GET endpoint with structured error handling (completed 2026-07-26)
-- [ ] **Phase 28: Model Selection** - Wire operator-selected model into provisioning via VLLM_MODEL env var
+- [x] **Phase 28: Model Selection** - Wire operator-selected model into provisioning via VLLM_MODEL env var (completed 2026-07-26)
 - [ ] **Phase 29: Dashboard Recommendations** - Recommendations card on node detail page with ranked model table and hardware summary
 
 ## Phase Details
@@ -156,7 +156,7 @@ Plans:
 **Plans**: 1 plan
 Plans:
 
-- [ ] 28-01-PLAN.md — Model field on SetupRequest, VLLM_MODEL injection in provisioner, tests
+- [x] 28-01-PLAN.md — Model field on SetupRequest, VLLM_MODEL injection in provisioner, tests
 
 ### Phase 29: Dashboard Recommendations
 
@@ -212,5 +212,5 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28 -> 29
 | 25. Core Models and Runner | v1.6 | 2/2 | Complete    | 2026-07-25 |
 | 26. llmfit Installation | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 27. Admin API Endpoint | v1.6 | 2/2 | Complete    | 2026-07-26 |
-| 28. Model Selection | v1.6 | 0/0 | Not started | - |
+| 28. Model Selection | v1.6 | 1/1 | Complete   | 2026-07-26 |
 | 29. Dashboard Recommendations | v1.6 | 0/0 | Not started | - |
