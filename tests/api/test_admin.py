@@ -277,6 +277,43 @@ class TestSetupEndpoint:
         mock_provisioner.fire_background.assert_called_once()
 
 
+class TestSetupModelPassthrough:
+    """POST /admin/nodes/setup passes model to provisioner.provision()."""
+
+    def test_passes_model_to_provisioner(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        mock_provisioner.provision = AsyncMock()
+        response = client.post(
+            "/admin/nodes/setup", json={"hostname": "gpu01", "model": "org/model"}
+        )
+        assert response.status_code == 202
+        # fire_background receives a coroutine; await it to trigger provision
+        coro = mock_provisioner.fire_background.call_args[0][0]
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(coro)
+        mock_provisioner.provision.assert_awaited_once_with(
+            "gpu01", managed=True, model="org/model"
+        )
+
+    def test_setup_without_model_defaults_none(
+        self,
+        client: TestClient,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        mock_provisioner.provision = AsyncMock()
+        response = client.post("/admin/nodes/setup", json={"hostname": "gpu01"})
+        assert response.status_code == 202
+        coro = mock_provisioner.fire_background.call_args[0][0]
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(coro)
+        mock_provisioner.provision.assert_awaited_once_with(
+            "gpu01", managed=True, model=None
+        )
+
+
 class TestTasksEndpoint:
     """GET /admin/provisioning/tasks returns task status from etcd."""
 

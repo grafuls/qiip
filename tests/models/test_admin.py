@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from inference_proxy.models.admin import AdminMetricsResponse, AdminNodeResponse
+from inference_proxy.models.admin import AdminMetricsResponse, AdminNodeResponse, SetupRequest
 
 
 class TestAdminNodeResponse:
@@ -98,3 +98,24 @@ class TestAdminMetricsResponse:
         )
         with pytest.raises(ValidationError):
             response.total_requests = 1  # type: ignore[misc]
+
+
+class TestSetupRequest:
+    """SetupRequest model validation for the model field."""
+
+    def test_model_defaults_to_none(self) -> None:
+        req = SetupRequest(hostname="gpu01")
+        assert req.model is None
+
+    def test_model_accepts_string(self) -> None:
+        req = SetupRequest(hostname="gpu01", model="Qwen/Qwen2.5-72B-Instruct")
+        assert req.model == "Qwen/Qwen2.5-72B-Instruct"
+
+    def test_model_rejects_oversized(self) -> None:
+        with pytest.raises(ValidationError):
+            SetupRequest(hostname="gpu01", model="x" * 257)
+
+    def test_frozen_rejects_mutation(self) -> None:
+        req = SetupRequest(hostname="gpu01", model="org/model")
+        with pytest.raises(ValidationError):
+            req.model = "other"  # type: ignore[misc]
