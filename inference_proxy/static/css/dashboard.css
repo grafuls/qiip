@@ -396,15 +396,12 @@ td button:focus-visible {
 
 .action-menu {
   display: none;
-  position: absolute;
-  top: 100%;
-  right: 0;
-  margin-top: 0.25rem;
+  position: fixed;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 0.25rem;
-  z-index: 10;
+  z-index: 100;
   min-width: 9rem;
   box-shadow: var(--shadow-md);
 }

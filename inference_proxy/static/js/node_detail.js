@@ -112,7 +112,14 @@ function createActionsDropdown(nodeId, enabledActions) {
 
   trigger.addEventListener("click", function (e) {
     e.stopPropagation();
-    menu.classList.toggle("open");
+    var wasOpen = menu.classList.contains("open");
+    document.querySelectorAll(".action-menu.open").forEach(function (m) { m.classList.remove("open"); });
+    if (!wasOpen) {
+      menu.classList.add("open");
+      var rect = trigger.getBoundingClientRect();
+      menu.style.top = (rect.top - menu.offsetHeight) + "px";
+      menu.style.left = (rect.right - menu.offsetWidth) + "px";
+    }
   });
 
   group.appendChild(trigger);
