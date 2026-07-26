@@ -157,6 +157,7 @@ Plans:
 Plans:
 
 - [ ] 28-01-PLAN.md — Model field on SetupRequest, VLLM_MODEL injection in provisioner, tests
+
 ### Phase 29: Dashboard Recommendations
 
 **Goal**: Operators can view model recommendations and hardware details for any node in the dashboard
