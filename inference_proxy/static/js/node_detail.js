@@ -62,7 +62,10 @@ async function handleAction(action, nodeId) {
     var resp = await fetch(config.url(nodeId), options);
     if (resp.ok) {
       showToast(config.successMsg(nodeId), "success");
-      if (action === "setup" || action === "retry") { logReceivedAny = false; logStreamDone = false; }
+      if (action === "setup" || action === "retry" || action === "teardown" || action === "cancel" || action === "force_teardown") {
+        logReceivedAny = false; logStreamDone = false;
+        if (logSource) { logSource.close(); logSource = null; }
+      }
     } else {
       var data = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
       showToast(data.detail || "HTTP " + resp.status, "error");
@@ -72,17 +75,49 @@ async function handleAction(action, nodeId) {
   }
 }
 
-function createActionButton(action, nodeId) {
-  var config = ACTION_CONFIG[action];
-  var btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = config.css;
-  btn.textContent = config.label;
-  btn.addEventListener("click", async function () {
-    btn.disabled = true;
-    try { await handleAction(action, nodeId); } finally { btn.disabled = false; }
+var ALL_ACTIONS = ["setup", "teardown", "retry", "cancel", "force_teardown"];
+
+function createActionsDropdown(nodeId, enabledActions) {
+  var group = document.createElement("div");
+  group.className = "action-group";
+
+  var trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "btn-action-trigger";
+  trigger.textContent = "Actions ▾";
+  if (enabledActions.length === 0) trigger.disabled = true;
+
+  var menu = document.createElement("div");
+  menu.className = "action-menu";
+
+  for (var i = 0; i < ALL_ACTIONS.length; i++) {
+    (function (action) {
+      var config = ACTION_CONFIG[action];
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = config.label;
+      btn.className = config.css;
+      var enabled = enabledActions.indexOf(action) !== -1;
+      btn.disabled = !enabled;
+      if (enabled) {
+        btn.addEventListener("click", async function () {
+          btn.disabled = true;
+          menu.classList.remove("open");
+          try { await handleAction(action, nodeId); } finally { btn.disabled = false; }
+        });
+      }
+      menu.appendChild(btn);
+    })(ALL_ACTIONS[i]);
+  }
+
+  trigger.addEventListener("click", function (e) {
+    e.stopPropagation();
+    menu.classList.toggle("open");
   });
-  return btn;
+
+  group.appendChild(trigger);
+  group.appendChild(menu);
+  return group;
 }
 
 function stepBadgeClass(step) {
@@ -138,13 +173,7 @@ async function refreshDetail() {
       var tdRq = document.createElement("td"); tdRq.textContent = node.state === "available" ? "—" : (perNode[node.node_id] || 0); tr.appendChild(tdRq);
 
       var tdAc = document.createElement("td");
-      var actions = node.actions || [];
-      for (var i = 0; i < actions.length; i++) {
-        var btn = createActionButton(actions[i], node.node_id);
-        if (actions[i] === "setup" && node.state === "provisioning") btn.disabled = true;
-        tdAc.appendChild(btn);
-        if (i < actions.length - 1) tdAc.appendChild(document.createTextNode(" "));
-      }
+      tdAc.appendChild(createActionsDropdown(node.node_id, node.actions || []));
       tr.appendChild(tdAc);
 
       infoBody.appendChild(tr);
@@ -331,6 +360,11 @@ async function loadRecommendations() {
 }
 
 document.getElementById("load-recs-btn").addEventListener("click", loadRecommendations);
+
+document.addEventListener("click", function () {
+  var open = document.querySelectorAll(".action-menu.open");
+  for (var i = 0; i < open.length; i++) open[i].classList.remove("open");
+});
 
 document.addEventListener("DOMContentLoaded", function () {
   refreshDetail();

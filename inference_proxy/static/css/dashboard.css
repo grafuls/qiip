@@ -426,7 +426,20 @@ td button:focus-visible {
   cursor: pointer;
 }
 
-.action-menu button:hover { background: var(--bg); }
+.action-menu button:hover:not(:disabled) { background: var(--bg); }
+.action-menu button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.btn-action-trigger {
+  font-size: 0.75rem;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.btn-action-trigger:hover:not(:disabled) { background: var(--surface); }
+.btn-action-trigger:disabled { opacity: 0.35; cursor: not-allowed; }
 
 /* --- Toast notifications --- */
 #toast-container {

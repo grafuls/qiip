@@ -452,15 +452,20 @@ class NodeProvisioner:
         """
         teardown_started_at = datetime.now(timezone.utc)
         logger.info("teardown_start", hostname=hostname, force=force)
+        self._log_buffer.create(hostname)
+        self._log(hostname, "info", f"Teardown started (force={force})")
 
         try:
             if not force:
                 await self._update_state(hostname, ProvisioningStep.DRAINING, started_at=teardown_started_at)
+                self._log(hostname, "info", "Draining active connections")
                 if self._registry is not None:
                     self._registry.drain(hostname)
                 await self._drain_wait(hostname)
+                self._log(hostname, "info", "Drain complete")
 
             await self._update_state(hostname, ProvisioningStep.STOPPING_VLLM, started_at=teardown_started_at)
+            self._log(hostname, "info", "Stopping vLLM process")
             if force:
                 await self._ssh_run_command(
                     hostname,
@@ -473,17 +478,22 @@ class NodeProvisioner:
                 )
 
             await self._update_state(hostname, ProvisioningStep.DEREGISTERING, started_at=teardown_started_at)
+            self._log(hostname, "info", "Deregistering node from etcd")
             await asyncio.to_thread(
                 self._etcd_client.delete, f"{self._etcd_client.prefix}{hostname}"
             )
 
             await self._update_state(hostname, ProvisioningStep.TEARDOWN_COMPLETE, started_at=teardown_started_at)
+            self._log(hostname, "info", "Teardown complete")
         except (RemoteCommandError, SSHConnectionError) as exc:
+            self._log(hostname, "error", f"Teardown failed: {exc}")
             await self._update_state(
                 hostname, ProvisioningStep.FAILED,
                 failed_step="teardown", error=str(exc),
                 started_at=teardown_started_at,
             )
             raise ProvisioningError(str(exc)) from exc
+        finally:
+            self._log_buffer.mark_complete(hostname)
 
         logger.info("teardown_complete", hostname=hostname)
