@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import shlex
 from collections.abc import Coroutine
 from datetime import datetime, timezone
 
@@ -226,7 +227,7 @@ class NodeProvisioner:
         if failures:
             raise PreflightError(hostname, failures)
 
-    async def provision(self, hostname: str, *, managed: bool = True) -> None:
+    async def provision(self, hostname: str, *, managed: bool = True, model: str | None = None) -> None:
         """Run full provisioning sequence on *hostname*.
 
         Sequence: preflight -> register PROVISIONING -> setup.sh ->
@@ -283,15 +284,15 @@ class NodeProvisioner:
             current_step = "starting_vllm"
             await self._update_state(hostname, ProvisioningStep.STARTING_VLLM, started_at=provision_started_at)
             self._log(hostname, "info", "Running start-vllm.sh")
-            model = await self._run_start_vllm(hostname)
+            model_name = await self._run_start_vllm(hostname, model=model)
             current_step = "health_poll"
             await self._update_state(hostname, ProvisioningStep.HEALTH_POLL, started_at=provision_started_at)
             self._log(hostname, "info", "Waiting for vLLM health endpoint")
             await self._poll_health(hostname)
             current_step = "registering"
             await self._update_state(hostname, ProvisioningStep.REGISTERING, started_at=provision_started_at)
-            self._log(hostname, "info", f"Registering node (model={model})")
-            await self._register_node(hostname, model, managed=managed)
+            self._log(hostname, "info", f"Registering node (model={model_name})")
+            await self._register_node(hostname, model_name, managed=managed)
             await self._update_state(hostname, ProvisioningStep.COMPLETE, started_at=provision_started_at)
             self._log(hostname, "info", "Provisioning complete")
         except (RemoteCommandError, SSHConnectionError, ProvisioningError) as exc:
@@ -362,25 +363,28 @@ class NodeProvisioner:
             raise ProvisioningError(f"No GPUs detected on {hostname} after setup")
         self._log(hostname, "info", f"Detected {len(gpu_lines)} GPU(s)")
 
-    async def _run_start_vllm(self, hostname: str) -> str:
+    async def _run_start_vllm(self, hostname: str, *, model: str | None = None) -> str:
         """Run start-vllm.sh and extract model name from stdout."""
-        model: str | None = None
+        command = "bash auto-vllm/start-vllm.sh"
+        if model:
+            command = f"VLLM_MODEL={shlex.quote(model)} {command}"
+        model_name: str | None = None
         async for stream, line in self._ssh_client.run_streaming(
-            hostname, "bash auto-vllm/start-vllm.sh"
+            hostname, command
         ):
             logger.debug("start_vllm_output", stream=stream, line=line, hostname=hostname)
             self._log(hostname, "debug", line, stream=stream)
             if stream == "stdout":
                 match = MODEL_PATTERN.search(line)
                 if match:
-                    model = match.group(1).strip()
-                    self._log(hostname, "info", f"Detected model: {model}")
+                    model_name = match.group(1).strip()
+                    self._log(hostname, "info", f"Detected model: {model_name}")
 
-        if model is None:
+        if model_name is None:
             raise ProvisioningError(
                 f"model name not found in start-vllm.sh output on {hostname}"
             )
-        return model
+        return model_name
 
     async def _poll_health(self, hostname: str) -> None:
         """Poll /health endpoint until 200 OK or timeout (D-10, D-09)."""

@@ -150,7 +150,7 @@ async def setup_node(
 
     async def _provision_and_cleanup() -> None:
         try:
-            await provisioner.provision(hostname, managed=body.managed)
+            await provisioner.provision(hostname, managed=body.managed, model=body.model)
         finally:
             pending_hosts.discard(hostname)
 
