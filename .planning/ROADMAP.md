@@ -212,6 +212,6 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28 -> 29
 | 24. Provisioning Error Diagnostics | v1.5 | 2/2 | Complete | 2026-07-22 |
 | 25. Core Models and Runner | v1.6 | 2/2 | Complete    | 2026-07-25 |
 | 26. llmfit Installation | v1.6 | 1/1 | Complete | 2026-07-26 |
-| 27. Admin API Endpoint | v1.6 | 2/2 | Complete   | 2026-07-26 |
+| 27. Admin API Endpoint | v1.6 | 2/2 | Complete    | 2026-07-26 |
 | 28. Model Selection | v1.6 | 0/0 | Not started | - |
 | 29. Dashboard Recommendations | v1.6 | 0/0 | Not started | - |

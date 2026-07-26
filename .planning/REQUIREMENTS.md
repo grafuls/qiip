@@ -20,9 +20,9 @@ Requirements for v1.6 LLMFit for Best Fit Models. Each maps to roadmap phases.
 
 ### API
 
-- [ ] **API-01**: Admin API endpoint `GET /admin/nodes/{hostname}/recommendations` returns ranked model recommendations
-- [ ] **API-02**: Endpoint returns detected hardware info (GPU VRAM, GPU name, backend) alongside recommendations
-- [ ] **API-03**: llmfit failures return structured error response (not 500)
+- [x] **API-01**: Admin API endpoint `GET /admin/nodes/{hostname}/recommendations` returns ranked model recommendations
+- [x] **API-02**: Endpoint returns detected hardware info (GPU VRAM, GPU name, backend) alongside recommendations
+- [x] **API-03**: llmfit failures return structured error response (not 500)
 
 ### Model Selection
 
@@ -66,9 +66,9 @@ Deferred to future milestone. Tracked but not in current roadmap.
 | EXEC-01 | Phase 25 | Complete |
 | EXEC-02 | Phase 25 | Complete |
 | EXEC-03 | Phase 25 | Complete |
-| API-01 | Phase 27 | Pending |
-| API-02 | Phase 27 | Pending |
-| API-03 | Phase 27 | Pending |
+| API-01 | Phase 27 | Complete |
+| API-02 | Phase 27 | Complete |
+| API-03 | Phase 27 | Complete |
 | SEL-01 | Phase 28 | Pending |
 | SEL-02 | Phase 28 | Pending |
 | DASH-01 | Phase 29 | Pending |
