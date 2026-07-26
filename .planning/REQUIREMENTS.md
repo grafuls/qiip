@@ -26,8 +26,8 @@ Requirements for v1.6 LLMFit for Best Fit Models. Each maps to roadmap phases.
 
 ### Model Selection
 
-- [ ] **SEL-01**: SetupRequest accepts optional model field for operator-selected model
-- [ ] **SEL-02**: Provisioner passes `VLLM_MODEL` env var to `start-vllm.sh` when model is specified
+- [x] **SEL-01**: SetupRequest accepts optional model field for operator-selected model
+- [x] **SEL-02**: Provisioner passes `VLLM_MODEL` env var to `start-vllm.sh` when model is specified
 
 ### Dashboard
 
@@ -69,8 +69,8 @@ Deferred to future milestone. Tracked but not in current roadmap.
 | API-01 | Phase 27 | Complete |
 | API-02 | Phase 27 | Complete |
 | API-03 | Phase 27 | Complete |
-| SEL-01 | Phase 28 | Pending |
-| SEL-02 | Phase 28 | Pending |
+| SEL-01 | Phase 28 | Complete |
+| SEL-02 | Phase 28 | Complete |
 | DASH-01 | Phase 29 | Pending |
 | DASH-02 | Phase 29 | Pending |
 
