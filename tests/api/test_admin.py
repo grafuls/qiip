@@ -850,3 +850,90 @@ class TestRecommendations:
             "/admin/nodes/host@evil/recommendations"
         )
         assert response.status_code == 400
+
+
+class TestRecommendationErrors:
+    """Error scenarios for GET /admin/nodes/{hostname}/recommendations (API-03, D-01)."""
+
+    def test_timeout_returns_502(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.side_effect = LLMFitTimeoutError("gpu01", 60.0)
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        data = response.json()
+        assert data["error_type"] == "timeout"
+        assert isinstance(data["detail"], str)
+        assert len(data["detail"]) > 0
+
+    def test_parse_error_returns_502(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.side_effect = LLMFitParseError(
+            "invalid JSON", raw_output="not-json-garbage"
+        )
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        data = response.json()
+        assert data["error_type"] == "parse_error"
+        assert "parse" in data["detail"].lower()
+
+    def test_ssh_connection_error_returns_502(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.side_effect = SSHConnectionError(
+            "gpu01", "connection refused"
+        )
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        data = response.json()
+        assert data["error_type"] == "connection_error"
+        assert "connection" in data["detail"].lower()
+
+    def test_command_error_returns_502(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.side_effect = RemoteCommandError(
+            "gpu01", "llmfit recommend", exit_status=127, stderr="not found"
+        )
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        data = response.json()
+        assert data["error_type"] == "ssh_error"
+        assert "127" in data["detail"]
+
+    def test_raw_output_not_exposed(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        """D-01: raw_output must never appear in the API response body."""
+        mock_llmfit_runner.recommend.side_effect = LLMFitParseError(
+            "bad json", raw_output="SECRET_RAW_CONTENT_MARKER"
+        )
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        assert "SECRET_RAW_CONTENT_MARKER" not in response.text
