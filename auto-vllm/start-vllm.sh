@@ -54,7 +54,9 @@ configure_vllm_params() {
             EXTRA_ARGS="--enforce-eager --dtype float16"
 
             if [ $GPU_VRAM_GB -le 16 ]; then
-                MODEL="Qwen/Qwen2.5-3B-Instruct"
+                MODEL="Qwen/Qwen3-14B-AWQ"
+                MAX_MODEL_LEN=16384
+                MAX_BATCHED_TOKENS=16384
             else
                 MODEL="Qwen/Qwen2.5-7B-Instruct"
             fi
