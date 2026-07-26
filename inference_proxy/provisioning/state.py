@@ -28,6 +28,7 @@ class ProvisioningStep(StrEnum):
     VLLM_INSTALL = "vllm_install"
     NFS_MOUNT = "nfs_mount"
     FIREWALL = "firewall"
+    LLMFIT_INSTALL = "llmfit_install"
     STARTING_VLLM = "starting_vllm"
     HEALTH_POLL = "health_poll"
     REGISTERING = "registering"
