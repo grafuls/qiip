@@ -9,8 +9,8 @@ Requirements for v1.6 LLMFit for Best Fit Models. Each maps to roadmap phases.
 
 ### Installation
 
-- [ ] **INST-01**: llmfit binary is installed on target servers during provisioning via prebuilt binary download
-- [ ] **INST-02**: llmfit installation is a non-fatal provisioning step (failure doesn't block setup)
+- [x] **INST-01**: llmfit binary is installed on target servers during provisioning via prebuilt binary download
+- [x] **INST-02**: llmfit installation is a non-fatal provisioning step (failure doesn't block setup)
 
 ### Execution
 
@@ -61,8 +61,8 @@ Deferred to future milestone. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INST-01 | Phase 26 | Pending |
-| INST-02 | Phase 26 | Pending |
+| INST-01 | Phase 26 | Complete |
+| INST-02 | Phase 26 | Complete |
 | EXEC-01 | Phase 25 | Complete |
 | EXEC-02 | Phase 25 | Complete |
 | EXEC-03 | Phase 25 | Complete |
