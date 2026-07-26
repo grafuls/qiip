@@ -21,14 +21,21 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from inference_proxy.config.dependencies import (
+    get_llmfit_runner,
     get_quads_client,
     get_quads_poller,
     get_redfish_client,
     get_unified_node_service,
 )
 from inference_proxy.discovery.registry import NodeRegistry
+from inference_proxy.llmfit.errors import LLMFitParseError, LLMFitTimeoutError
+from inference_proxy.models.llmfit import LLMFitResult, ModelRecommendation, SystemInfo
 from inference_proxy.models.node import Node, NodeStatus
 from inference_proxy.models.quads import QUADSHost
+from inference_proxy.provisioning.ssh_client import (
+    RemoteCommandError,
+    SSHConnectionError,
+)
 from inference_proxy.quads.client import QUADSConnectionError
 from inference_proxy.redfish.errors import RedfishError
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
@@ -736,3 +743,197 @@ class TestExecutePowerAction:
         )
         assert response.status_code == 502
         assert "Poll timeout" in response.json()["detail"]
+
+
+# -- Recommendation endpoint tests (API-01, API-02, API-03) --
+
+
+SAMPLE_RESULT = LLMFitResult(
+    system=SystemInfo(
+        has_gpu=True,
+        gpu_vram_gb=80.0,
+        gpu_name="NVIDIA A100",
+        cpu_name="AMD EPYC 7742",
+        total_ram_gb=64.0,
+        available_ram_gb=58.24,
+        cpu_cores=16,
+        backend="CUDA",
+    ),
+    models=[
+        ModelRecommendation(
+            name="llama-3.3-70b",
+            score=95.2,
+            fit_level="perfect",
+            estimated_tps=42.5,
+            memory_required_gb=43.68,
+            provider="Meta",
+            best_quant="4bit",
+            run_mode="gpu",
+            params_b=70.0,
+            context_length=131072,
+            utilization_pct=68.2,
+            category="General",
+            runtime="vLLM",
+        ),
+        ModelRecommendation(
+            name="qwen-2.5-72b-instruct",
+            score=88.7,
+            fit_level="good",
+            estimated_tps=38.1,
+            memory_required_gb=45.2,
+            provider="Alibaba",
+            best_quant="4bit",
+            run_mode="gpu",
+            params_b=72.0,
+            context_length=131072,
+            utilization_pct=72.5,
+            category="General",
+            runtime="vLLM",
+        ),
+    ],
+)
+
+
+class TestRecommendations:
+    """GET /admin/nodes/{hostname}/recommendations happy path (API-01, API-02)."""
+
+    def test_returns_200_with_models(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.return_value = SAMPLE_RESULT
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["hostname"] == "gpu01"
+        assert "system" in data
+        assert data["system"]["gpu_name"] == "NVIDIA A100"
+        assert len(data["models"]) == 2
+
+    def test_response_includes_hostname(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.return_value = SAMPLE_RESULT
+
+        response = client.get("/admin/nodes/node42.example.com/recommendations")
+
+        assert response.json()["hostname"] == "node42.example.com"
+
+    def test_response_includes_hardware(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.return_value = SAMPLE_RESULT
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+        system = response.json()["system"]
+
+        assert system["gpu_name"] == "NVIDIA A100"
+        assert system["gpu_vram_gb"] == 80.0
+        assert system["backend"] == "CUDA"
+
+    def test_invalid_hostname_returns_400(
+        self,
+        client: TestClient,
+    ) -> None:
+        # '@' is not in the allowed hostname regex, triggers _validated_hostname 400
+        response = client.get(
+            "/admin/nodes/host@evil/recommendations"
+        )
+        assert response.status_code == 400
+
+
+class TestRecommendationErrors:
+    """Error scenarios for GET /admin/nodes/{hostname}/recommendations (API-03, D-01)."""
+
+    def test_timeout_returns_502(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.side_effect = LLMFitTimeoutError("gpu01", 60.0)
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        data = response.json()
+        assert data["error_type"] == "timeout"
+        assert isinstance(data["detail"], str)
+        assert len(data["detail"]) > 0
+
+    def test_parse_error_returns_502(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.side_effect = LLMFitParseError(
+            "invalid JSON", raw_output="not-json-garbage"
+        )
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        data = response.json()
+        assert data["error_type"] == "parse_error"
+        assert "parse" in data["detail"].lower()
+
+    def test_ssh_connection_error_returns_502(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.side_effect = SSHConnectionError(
+            "gpu01", "connection refused"
+        )
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        data = response.json()
+        assert data["error_type"] == "connection_error"
+        assert "connection" in data["detail"].lower()
+
+    def test_command_error_returns_502(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        mock_llmfit_runner.recommend.side_effect = RemoteCommandError(
+            "gpu01", "llmfit recommend", exit_status=127, stderr="not found"
+        )
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        data = response.json()
+        assert data["error_type"] == "ssh_error"
+        assert "127" in data["detail"]
+
+    def test_raw_output_not_exposed(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        mock_llmfit_runner: MagicMock,
+    ) -> None:
+        """D-01: raw_output must never appear in the API response body."""
+        mock_llmfit_runner.recommend.side_effect = LLMFitParseError(
+            "bad json", raw_output="SECRET_RAW_CONTENT_MARKER"
+        )
+
+        response = client.get("/admin/nodes/gpu01/recommendations")
+
+        assert response.status_code == 502
+        assert "SECRET_RAW_CONTENT_MARKER" not in response.text
