@@ -168,4 +168,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-26 — Phase 26 complete: llmfit binary installation as non-fatal provisioning step via soft_step() wrapper*
+*Last updated: 2026-07-26 — Phase 27 complete: admin API endpoint GET /admin/nodes/{hostname}/recommendations with structured error handling*
