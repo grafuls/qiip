@@ -153,12 +153,10 @@ Plans:
   1. SetupRequest accepts an optional model field that operators can set when triggering provisioning
   2. When a model is specified, the provisioner passes it as the VLLM_MODEL environment variable to start-vllm.sh
 
-**Plans**: 2 plans
+**Plans**: 1 plan
 Plans:
 
-- [ ] 25-01-PLAN.md — Data contracts: Pydantic models, error hierarchy, SSHClient.run()
-- [ ] 25-02-PLAN.md — Runner and tests: LLMFitRunner + full test suite
-
+- [ ] 28-01-PLAN.md — Model field on SetupRequest, VLLM_MODEL injection in provisioner, tests
 ### Phase 29: Dashboard Recommendations
 
 **Goal**: Operators can view model recommendations and hardware details for any node in the dashboard
