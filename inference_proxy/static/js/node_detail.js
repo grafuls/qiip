@@ -257,6 +257,81 @@ function connectLogStream() {
   });
 }
 
+// ponytail: on-demand fetch, not polled — each call triggers SSH+llmfit on remote host
+async function loadRecommendations() {
+  var btn = document.getElementById("load-recs-btn");
+  var content = document.getElementById("recs-content");
+  var hwSummary = document.getElementById("recs-hw-summary");
+
+  btn.disabled = true;
+  btn.textContent = "Loading...";
+  content.innerHTML = '<span style="color:var(--muted);font-size:0.875rem">Fetching recommendations...</span>';
+
+  try {
+    var resp = await fetch("/admin/nodes/" + encodeURIComponent(NODE_ID) + "/recommendations");
+    if (!resp.ok) {
+      var err = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
+      var msgs = {
+        timeout: "llmfit timed out on " + NODE_ID + ". The node may be under heavy load.",
+        parse_error: "Failed to parse llmfit output. The tool may need updating.",
+        connection_error: "Cannot reach " + NODE_ID + " via SSH. Check connectivity.",
+        ssh_error: "llmfit command failed on " + NODE_ID + ".",
+      };
+      showToast(msgs[err.error_type] || err.detail || "Failed to load recommendations", "error");
+      content.innerHTML = '<span class="error-text">' + (err.detail || "Failed to load") + '</span>';
+      btn.textContent = "Retry";
+      btn.disabled = false;
+      return;
+    }
+
+    var data = await resp.json();
+
+    // Hardware summary
+    var sys = data.system;
+    hwSummary.style.display = "";
+    hwSummary.innerHTML = "<strong>GPU:</strong> " + (sys.gpu_name || "Unknown") +
+      " &nbsp;&middot;&nbsp; <strong>VRAM:</strong> " + sys.gpu_vram_gb.toFixed(1) + " GB" +
+      " &nbsp;&middot;&nbsp; <strong>Backend:</strong> " + (sys.backend || "Unknown");
+
+    // Model table
+    if (data.models.length === 0) {
+      content.innerHTML = '<span style="color:var(--muted);font-size:0.875rem">No model recommendations available for this hardware.</span>';
+    } else {
+      var FIT_BADGE = { perfect: "badge-complete", good: "badge-in-progress", marginal: "badge-failed" };
+      var table = document.createElement("div");
+      table.className = "table-wrap";
+      var html = "<table><thead><tr>" +
+        "<th>Model</th><th>Score</th><th>Fit</th><th>Est. tok/s</th><th>Memory</th>" +
+        "</tr></thead><tbody>";
+      for (var i = 0; i < data.models.length; i++) {
+        var m = data.models[i];
+        var badgeCls = FIT_BADGE[m.fit_level] || "badge-in-progress";
+        html += "<tr>" +
+          "<td>" + m.name + "</td>" +
+          "<td>" + Math.round(m.score * 100) + "%</td>" +
+          "<td><span class=\"badge " + badgeCls + "\">" + m.fit_level + "</span></td>" +
+          "<td>" + m.estimated_tps.toFixed(1) + "</td>" +
+          "<td>" + m.memory_required_gb.toFixed(1) + " GB</td>" +
+          "</tr>";
+      }
+      html += "</tbody></table>";
+      table.innerHTML = html;
+      content.textContent = "";
+      content.appendChild(table);
+    }
+
+    btn.textContent = "Reload";
+    btn.disabled = false;
+  } catch (e) {
+    showToast("Network error loading recommendations", "error");
+    content.innerHTML = '<span class="error-text">Network error</span>';
+    btn.textContent = "Retry";
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("load-recs-btn").addEventListener("click", loadRecommendations);
+
 document.addEventListener("DOMContentLoaded", function () {
   refreshDetail();
   setInterval(refreshDetail, POLL_INTERVAL_MS);
