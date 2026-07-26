@@ -7,6 +7,8 @@ NFS_MOUNT_POINT="${NFS_MOUNT_POINT:-/srv/hf-cache}"
 NVIDIA_DRIVER_VERSION="${NVIDIA_DRIVER_VERSION:-580.126.09}"
 NVIDIA_DRIVER_URL="${NVIDIA_DRIVER_URL:-https://us.download.nvidia.com/tesla/${NVIDIA_DRIVER_VERSION}/NVIDIA-Linux-x86_64-${NVIDIA_DRIVER_VERSION}.run}"
 VLLM_PORT="${VLLM_PORT:-8000}"
+LLMFIT_VERSION="${LLMFIT_VERSION:-1.1.6}"
+LLMFIT_URL="${LLMFIT_URL:-https://github.com/AlexsJones/llmfit/releases/download/v${LLMFIT_VERSION}/llmfit-v${LLMFIT_VERSION}-x86_64-unknown-linux-musl.tar.gz}"
 
 # --- Step wrapper ---
 step() {
@@ -17,6 +19,17 @@ step() {
     else
         echo "[STEP:${name}:FAIL]"
         exit 1
+    fi
+}
+
+# --- Soft step wrapper (non-fatal) ---
+soft_step() {
+    local name="$1"; shift
+    echo "[STEP:${name}:START]"
+    if "$@"; then
+        echo "[STEP:${name}:OK]"
+    else
+        echo "[STEP:${name}:WARN] (non-fatal, continuing)"
     fi
 }
 
@@ -97,11 +110,23 @@ configure_firewall() {
     fi
 }
 
+install_llmfit() {
+    if [ -x /usr/local/bin/llmfit ]; then
+        echo "llmfit already installed, skipping"
+        return 0
+    fi
+    wget -q "${LLMFIT_URL}" -O /tmp/llmfit.tar.gz
+    tar -xzf /tmp/llmfit.tar.gz -C /tmp/
+    sudo install -m 755 "$(find /tmp/ -name llmfit -type f -print -quit)" /usr/local/bin/llmfit
+    rm -rf /tmp/llmfit.tar.gz /tmp/llmfit-*
+}
+
 # --- Main ---
 step system_update run_system_update
 step nvidia_driver install_nvidia_driver
 step vllm_install install_vllm
 step nfs_mount mount_nfs_cache
 step firewall configure_firewall
+soft_step llmfit_install install_llmfit
 
 echo "Setup complete"
