@@ -31,8 +31,8 @@ Requirements for v1.6 LLMFit for Best Fit Models. Each maps to roadmap phases.
 
 ### Dashboard
 
-- [ ] **DASH-01**: Node detail page shows a recommendations card with ranked model table (name, score, fit level, estimated tok/s, memory)
-- [ ] **DASH-02**: Recommendations card includes hardware summary (detected GPU, VRAM, backend)
+- [x] **DASH-01**: Node detail page shows a recommendations card with ranked model table (name, score, fit level, estimated tok/s, memory)
+- [x] **DASH-02**: Recommendations card includes hardware summary (detected GPU, VRAM, backend)
 
 ## Future Requirements
 
@@ -71,8 +71,8 @@ Deferred to future milestone. Tracked but not in current roadmap.
 | API-03 | Phase 27 | Complete |
 | SEL-01 | Phase 28 | Complete |
 | SEL-02 | Phase 28 | Complete |
-| DASH-01 | Phase 29 | Pending |
-| DASH-02 | Phase 29 | Pending |
+| DASH-01 | Phase 29 | Complete |
+| DASH-02 | Phase 29 | Complete |
 
 **Coverage:**
 - v1.6 requirements: 12 total

@@ -80,7 +80,7 @@
 - [x] **Phase 26: llmfit Installation** - Install llmfit binary on target servers during provisioning as a non-fatal step (completed 2026-07-26)
 - [x] **Phase 27: Admin API Endpoint** - Expose model recommendations via GET endpoint with structured error handling (completed 2026-07-26)
 - [x] **Phase 28: Model Selection** - Wire operator-selected model into provisioning via VLLM_MODEL env var (completed 2026-07-26)
-- [ ] **Phase 29: Dashboard Recommendations** - Recommendations card on node detail page with ranked model table and hardware summary
+- [x] **Phase 29: Dashboard Recommendations** - Recommendations card on node detail page with ranked model table and hardware summary (completed 2026-07-26)
 
 ## Phase Details
 
@@ -169,11 +169,10 @@ Plans:
   2. Recommendations card shows a hardware summary with detected GPU name, VRAM, and compute backend
   3. Recommendations load on demand when the operator views a node's details
 
-**Plans**: 2 plans
+**Plans**: 1 plan
 Plans:
 
-- [ ] 25-01-PLAN.md — Data contracts: Pydantic models, error hierarchy, SSHClient.run()
-- [ ] 25-02-PLAN.md — Runner and tests: LLMFitRunner + full test suite
+- [x] 29-01-PLAN.md — Recommendations card: HTML section + JS fetch/render with hardware summary and ranked model table
 
 **UI hint**: yes
 
@@ -213,4 +212,4 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28 -> 29
 | 26. llmfit Installation | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 27. Admin API Endpoint | v1.6 | 2/2 | Complete    | 2026-07-26 |
 | 28. Model Selection | v1.6 | 1/1 | Complete    | 2026-07-26 |
-| 29. Dashboard Recommendations | v1.6 | 0/0 | Not started | - |
+| 29. Dashboard Recommendations | v1.6 | 1/1 | Complete   | 2026-07-26 |
