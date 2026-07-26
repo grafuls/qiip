@@ -482,6 +482,8 @@ class NodeProvisioner:
             await asyncio.to_thread(
                 self._etcd_client.delete, f"{self._etcd_client.prefix}{hostname}"
             )
+            if self._registry is not None:
+                self._registry.remove(hostname)
 
             await self._update_state(hostname, ProvisioningStep.TEARDOWN_COMPLETE, started_at=teardown_started_at)
             self._log(hostname, "info", "Teardown complete")
