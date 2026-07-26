@@ -77,7 +77,7 @@
 **Milestone Goal:** Integrate the llmfit CLI to recommend which LLM models best fit a server's hardware before deployment.
 
 - [x] **Phase 25: Core Models and Runner** - Pydantic models for llmfit JSON output and SSH-based runner service with timeout protection (completed 2026-07-25)
-- [ ] **Phase 26: llmfit Installation** - Install llmfit binary on target servers during provisioning as a non-fatal step
+- [x] **Phase 26: llmfit Installation** - Install llmfit binary on target servers during provisioning as a non-fatal step (completed 2026-07-26)
 - [ ] **Phase 27: Admin API Endpoint** - Expose model recommendations via GET endpoint with structured error handling
 - [ ] **Phase 28: Model Selection** - Wire operator-selected model into provisioning via VLLM_MODEL env var
 - [ ] **Phase 29: Dashboard Recommendations** - Recommendations card on node detail page with ranked model table and hardware summary

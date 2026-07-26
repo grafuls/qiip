@@ -70,7 +70,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ### Active
 
-- [ ] Install llmfit CLI on target GPU servers during provisioning setup
+- [x] Install llmfit CLI on target GPU servers during provisioning setup — v1.6 (Phase 26)
 - [ ] Run llmfit via SSH to detect hardware and produce ranked model recommendations
 - [ ] Admin API endpoint returning model fit recommendations for a given server
 - [ ] Operator reviews recommendations and selects which model to deploy
@@ -168,4 +168,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-25 — Phase 25 complete: Pydantic models for llmfit JSON, error hierarchy, SSHClient.run(), and LLMFitRunner with timeout protection*
+*Last updated: 2026-07-26 — Phase 26 complete: llmfit binary installation as non-fatal provisioning step via soft_step() wrapper*

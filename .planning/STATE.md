@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-23)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Phase 26 — llmfit installation
+**Current focus:** Phase 27 — Admin API Endpoint
 
 ## Current Position
 
-Phase: 26
-Plan: 1 plan in 1 wave
-Status: Ready to execute
+Phase: 27
+Plan: Not started
+Status: Ready to discuss
 Last activity: 2026-07-26
 
 Progress: [████░░░░░░] 40%
