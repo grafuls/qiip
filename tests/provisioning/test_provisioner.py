@@ -230,6 +230,62 @@ class TestModelExtraction:
         with pytest.raises(ProvisioningError, match="model name not found"):
             await provisioner._run_start_vllm("host1")
 
+    @pytest.mark.asyncio
+    async def test_prepends_vllm_model_env_var(self) -> None:
+        """When model is provided, VLLM_MODEL=<quoted> is prepended to the command."""
+        ssh = MagicMock()
+        captured_commands: list[str] = []
+
+        async def mock_streaming(host: str, command: str):
+            captured_commands.append(command)
+            for item in [("stdout", "# Model:              org/model")]:
+                yield item
+
+        ssh.run_streaming = mock_streaming
+        provisioner = _make_provisioner(ssh_client=ssh)
+
+        await provisioner._run_start_vllm("host1", model="org/model")
+        assert len(captured_commands) == 1
+        assert captured_commands[0].startswith("VLLM_MODEL=")
+        assert "org/model" in captured_commands[0]
+        assert "bash auto-vllm/start-vllm.sh" in captured_commands[0]
+
+    @pytest.mark.asyncio
+    async def test_omits_env_var_when_model_none(self) -> None:
+        """When model is None, command is plain start-vllm.sh."""
+        ssh = MagicMock()
+        captured_commands: list[str] = []
+
+        async def mock_streaming(host: str, command: str):
+            captured_commands.append(command)
+            for item in [("stdout", "# Model:              auto-detected")]:
+                yield item
+
+        ssh.run_streaming = mock_streaming
+        provisioner = _make_provisioner(ssh_client=ssh)
+
+        await provisioner._run_start_vllm("host1")
+        assert captured_commands[0] == "bash auto-vllm/start-vllm.sh"
+
+    @pytest.mark.asyncio
+    async def test_quotes_model_with_special_chars(self) -> None:
+        """Shell-unsafe characters in model name are quoted via shlex.quote()."""
+        ssh = MagicMock()
+        captured_commands: list[str] = []
+
+        async def mock_streaming(host: str, command: str):
+            captured_commands.append(command)
+            for item in [("stdout", "# Model:              safe")]:
+                yield item
+
+        ssh.run_streaming = mock_streaming
+        provisioner = _make_provisioner(ssh_client=ssh)
+
+        await provisioner._run_start_vllm("host1", model="model; rm -rf /")
+        cmd = captured_commands[0]
+        # shlex.quote wraps in single quotes so the shell treats it as one token
+        assert cmd.startswith("VLLM_MODEL='model; rm -rf /' bash auto-vllm/start-vllm.sh")
+
 
 class TestHealthPoll:
     """D-10, D-09: Health polling via httpx."""
