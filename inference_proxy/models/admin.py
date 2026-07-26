@@ -13,6 +13,8 @@ import re
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from inference_proxy.models.llmfit import ModelRecommendation, SystemInfo
+
 
 class AdminNodeResponse(BaseModel):
     """Admin API response for a single registered node.
@@ -137,3 +139,13 @@ class PowerStateResponse(BaseModel):
 
     hostname: str
     power_state: str
+
+
+class RecommendationResponse(BaseModel):
+    """Response body for GET /admin/nodes/{hostname}/recommendations."""
+
+    model_config = ConfigDict(frozen=True)
+
+    hostname: str
+    system: SystemInfo
+    models: list[ModelRecommendation]

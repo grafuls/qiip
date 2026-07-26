@@ -135,6 +135,13 @@ class QUADSSettings(BaseModel):
     schedule_lookahead_hours: int = 24
 
 
+class LLMFitSettings(BaseModel):
+    """LLMFit remote execution configuration."""
+
+    binary_path: str = "/usr/local/bin/llmfit"
+    timeout: float = 60.0
+
+
 class RedfishSettings(BaseModel):
     """Redfish BMC configuration.
 
@@ -181,3 +188,4 @@ class Settings(BaseSettings):
     provisioning: ProvisioningSettings = ProvisioningSettings()
     quads: QUADSSettings = QUADSSettings()
     redfish: RedfishSettings = RedfishSettings()
+    llmfit: LLMFitSettings = LLMFitSettings()

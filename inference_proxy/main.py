@@ -32,6 +32,7 @@ from inference_proxy.api.middleware import RequestLoggingMiddleware
 from inference_proxy.api.routes import router
 from inference_proxy.config.dependencies import get_settings
 from inference_proxy.config.logging import configure_logging
+from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.config.settings import Settings
 from inference_proxy.discovery.etcd_client import EtcdClient
 from inference_proxy.discovery.registry import NodeRegistry
@@ -162,6 +163,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.request_metrics = request_metrics
 
         ssh_client = SSHClient(resolved_settings.ssh)
+
+        llmfit_runner = LLMFitRunner(
+            ssh_client=ssh_client, settings=resolved_settings.llmfit
+        )
+        app.state.llmfit_runner = llmfit_runner
 
         if resolved_settings.redfish.bmc_username is not None:
             redfish_http = httpx.AsyncClient(
