@@ -13,6 +13,7 @@ import json
 import structlog
 from pydantic import ValidationError
 
+from inference_proxy.config.settings import LLMFitSettings
 from inference_proxy.llmfit.errors import LLMFitParseError, LLMFitTimeoutError
 from inference_proxy.models.llmfit import LLMFitResult
 from inference_proxy.provisioning.ssh_client import SSHClient
@@ -24,21 +25,20 @@ class LLMFitRunner:
     """Run llmfit on a remote host and parse the result.
 
     Constructor-injected ``SSHClient`` keeps this testable without SSH.
+    Settings are optional for backward compatibility.
     """
 
-    # ponytail: hardcoded per D-05/D-06, Phase 27 adds LLMFitSettings
-    _BINARY = "/usr/local/bin/llmfit"
-    _COMMAND = f"{_BINARY} recommend --json --force-runtime vllm"
-    _TIMEOUT = 60.0
-
-    def __init__(self, ssh_client: SSHClient) -> None:
+    def __init__(
+        self, ssh_client: SSHClient, settings: LLMFitSettings | None = None
+    ) -> None:
         self._ssh = ssh_client
+        self._settings = settings or LLMFitSettings()
 
     async def recommend(self, hostname: str) -> LLMFitResult:
         """Run llmfit on *hostname* and return parsed recommendations.
 
         Raises:
-            LLMFitTimeoutError: When execution exceeds ``_TIMEOUT``.
+            LLMFitTimeoutError: When execution exceeds the configured timeout.
             LLMFitParseError: When stdout is empty, not valid JSON,
                 or fails Pydantic validation.  Stores raw stdout.
             SSHConnectionError: Bubbles unchanged from SSHClient (D-03).
@@ -47,12 +47,15 @@ class LLMFitRunner:
         log = logger.bind(host=hostname)
         log.debug("llmfit_recommend_start")
 
+        command = f"{self._settings.binary_path} recommend --json --force-runtime vllm"
+        timeout = self._settings.timeout
+
         try:
             stdout, _stderr, _exit = await self._ssh.run(
-                hostname, self._COMMAND, timeout=self._TIMEOUT,
+                hostname, command, timeout=timeout,
             )
         except asyncio.TimeoutError:
-            raise LLMFitTimeoutError(hostname, self._TIMEOUT)
+            raise LLMFitTimeoutError(hostname, timeout)
 
         if not stdout.strip():
             raise LLMFitParseError("empty output", raw_output=stdout)
