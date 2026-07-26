@@ -133,11 +133,15 @@ Plans:
   2. Response includes detected hardware info (GPU name, VRAM, compute backend) for the queried host
   3. When llmfit fails (SSH error, timeout, parse error), the endpoint returns a structured error response with a descriptive message (not a raw 500)
 
-**Plans**: 2 plans
+**Plans:** 2 plans
 Plans:
+**Wave 1**
 
-- [x] 25-01-PLAN.md — Data contracts: Pydantic models, error hierarchy, SSHClient.run()
-- [ ] 25-02-PLAN.md — Runner and tests: LLMFitRunner + full test suite
+- [ ] 27-01-PLAN.md — LLMFitSettings, response model, DI wiring, endpoint handler
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 27-02-PLAN.md — Integration tests for happy path and all error scenarios
 
 ### Phase 28: Model Selection
 
@@ -208,6 +212,6 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28 -> 29
 | 24. Provisioning Error Diagnostics | v1.5 | 2/2 | Complete | 2026-07-22 |
 | 25. Core Models and Runner | v1.6 | 2/2 | Complete    | 2026-07-25 |
 | 26. llmfit Installation | v1.6 | 1/1 | Complete | 2026-07-26 |
-| 27. Admin API Endpoint | v1.6 | 0/0 | Not started | - |
+| 27. Admin API Endpoint | v1.6 | 0/2 | Not started | - |
 | 28. Model Selection | v1.6 | 0/0 | Not started | - |
 | 29. Dashboard Recommendations | v1.6 | 0/0 | Not started | - |
