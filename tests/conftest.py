@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from inference_proxy.config.dependencies import (
     get_circuit_breaker_registry,
+    get_llmfit_runner,
     get_node_selector,
     get_provisioner,
     get_proxy_client,
@@ -30,6 +31,7 @@ from inference_proxy.config.settings import (
     Settings,
 )
 from inference_proxy.discovery.registry import NodeRegistry
+from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.main import create_app
 from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
@@ -141,6 +143,10 @@ def app(
     mock_provisioner.list_tasks_raw = AsyncMock(return_value=[])
     application.state.provisioner = mock_provisioner
     application.dependency_overrides[get_provisioner] = lambda: mock_provisioner
+    mock_runner = MagicMock(spec=LLMFitRunner)
+    mock_runner.recommend = AsyncMock()
+    application.state.llmfit_runner = mock_runner
+    application.dependency_overrides[get_llmfit_runner] = lambda: mock_runner
     yield application
     application.dependency_overrides.clear()
     get_settings.cache_clear()
@@ -150,6 +156,12 @@ def app(
 def mock_provisioner(app: FastAPI) -> MagicMock:
     """Return the mock provisioner from the test app."""
     return app.state.provisioner  # type: ignore[no-any-return]
+
+
+@pytest.fixture
+def mock_llmfit_runner(app: FastAPI) -> MagicMock:
+    """Return the mock LLMFitRunner from the test app."""
+    return app.state.llmfit_runner  # type: ignore[no-any-return]
 
 
 @pytest.fixture
