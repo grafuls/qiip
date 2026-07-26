@@ -14,10 +14,11 @@ from collections.abc import AsyncIterator
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
 from inference_proxy.config.dependencies import (
+    get_llmfit_runner,
     get_provisioner,
     get_quads_client,
     get_quads_poller,
@@ -27,18 +28,25 @@ from inference_proxy.config.dependencies import (
     get_unified_node_service,
 )
 from inference_proxy.discovery.registry import NodeRegistry
+from inference_proxy.llmfit.errors import LLMFitParseError, LLMFitTimeoutError
+from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.models.admin import (
     AdminMetricsResponse,
     AdminNodeResponse,
     PowerActionRequest,
     PowerStateResponse,
     QUADSStatusResponse,
+    RecommendationResponse,
     SetupRequest,
     SetupResponse,
     TaskStatusResponse,
     TeardownResponse,
 )
 from inference_proxy.provisioning.provisioner import NodeProvisioner
+from inference_proxy.provisioning.ssh_client import (
+    RemoteCommandError,
+    SSHConnectionError,
+)
 from inference_proxy.quads.client import (
     QUADSClient,
     QUADSConnectionError,
@@ -265,3 +273,61 @@ async def execute_power_action(
     except RedfishError as exc:
         raise HTTPException(status_code=502, detail=exc.human_message) from exc
     return PowerStateResponse(hostname=hostname, power_state=final_state)
+
+
+@admin_router.get(
+    "/nodes/{hostname}/recommendations",
+    response_model=RecommendationResponse,
+    responses={502: {"description": "LLMFit or SSH failure"}},
+)
+async def get_recommendations(
+    hostname: str,
+    runner: LLMFitRunner = Depends(get_llmfit_runner),
+) -> RecommendationResponse | JSONResponse:
+    """Return ranked model recommendations for a node's hardware."""
+    hostname = _validated_hostname(hostname)
+    try:
+        result = await runner.recommend(hostname)
+    except LLMFitTimeoutError as exc:
+        logger.warning("llmfit_timeout", host=exc.host, timeout=exc.timeout)
+        return JSONResponse(
+            status_code=502,
+            content={"error_type": "timeout", "detail": str(exc)},
+        )
+    except LLMFitParseError as exc:
+        logger.warning(
+            "llmfit_parse_error",
+            host=hostname,
+            reason=exc.reason,
+            raw_output=exc.raw_output,
+        )
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error_type": "parse_error",
+                "detail": f"Failed to parse llmfit output: {exc.reason}",
+            },
+        )
+    except SSHConnectionError as exc:
+        logger.warning("llmfit_ssh_connection_error", host=exc.host, reason=exc.reason)
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error_type": "connection_error",
+                "detail": f"SSH connection failed: {exc.reason}",
+            },
+        )
+    except RemoteCommandError as exc:
+        logger.warning(
+            "llmfit_remote_command_error", host=exc.host, exit_status=exc.exit_status
+        )
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error_type": "ssh_error",
+                "detail": f"llmfit exited with status {exc.exit_status}",
+            },
+        )
+    return RecommendationResponse(
+        hostname=hostname, system=result.system, models=result.models
+    )
