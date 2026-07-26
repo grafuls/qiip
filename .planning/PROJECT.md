@@ -73,7 +73,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - [x] Install llmfit CLI on target GPU servers during provisioning setup — v1.6 (Phase 26)
 - [ ] Run llmfit via SSH to detect hardware and produce ranked model recommendations
 - [ ] Admin API endpoint returning model fit recommendations for a given server
-- [ ] Operator reviews recommendations and selects which model to deploy
+- [x] Operator selects which model to deploy via SetupRequest.model field — v1.6 (Phase 28)
 
 ### Out of Scope
 
@@ -168,4 +168,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-26 — Phase 27 complete: admin API endpoint GET /admin/nodes/{hostname}/recommendations with structured error handling*
+*Last updated: 2026-07-26 — Phase 28 complete: model selection via SetupRequest.model field with VLLM_MODEL env var injection*
