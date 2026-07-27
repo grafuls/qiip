@@ -7,28 +7,6 @@
   height: calc(100vh - 56px);
 }
 
-/* --- Nav links --- */
-.nav-links {
-  display: flex;
-  gap: 0.5rem;
-  margin-left: 1.5rem;
-}
-
-.nav-link {
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: var(--text-light);
-  text-decoration: none;
-  padding: 0.25rem 0.5rem;
-  border-radius: var(--radius);
-  transition: color 0.15s, background 0.15s;
-}
-
-.nav-link:hover {
-  color: var(--text);
-  background: var(--bg);
-  text-decoration: none;
-}
 
 /* --- Model selector bar --- */
 .model-selector-bar {
@@ -343,9 +321,6 @@
     transition: none;
   }
 
-  .nav-link {
-    transition: none;
-  }
 
   .system-prompt-panel {
     transition: none;

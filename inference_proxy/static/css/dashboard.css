@@ -113,6 +113,29 @@ main { padding: 0; }
   color: var(--text-light);
 }
 
+/* --- Nav links --- */
+.nav-links {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: 1.5rem;
+}
+
+.nav-link {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-light);
+  text-decoration: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: var(--radius);
+  transition: color 0.15s, background 0.15s;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--bg);
+  text-decoration: none;
+}
+
 /* --- Theme toggle --- */
 .theme-toggle {
   margin-left: auto;
@@ -531,6 +554,7 @@ footer p { margin: 0; }
 @media (prefers-reduced-motion: reduce) {
   .toast { transition: none; }
   td button { transition: none; }
+  .nav-link { transition: none; }
   .setup-form input[type="text"] { transition: none; }
   .setup-form button { transition: none; }
 }
