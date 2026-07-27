@@ -343,7 +343,7 @@ async function loadRecommendations() {
         var badgeCls = FIT_BADGE[m.fit_level] || "badge-in-progress";
         html += "<tr>" +
           "<td>" + m.name + "</td>" +
-          "<td>" + Math.round(m.score * 100) + "%</td>" +
+          "<td>" + m.score.toFixed(1) + "%</td>" +
           "<td><span class=\"badge " + badgeCls + "\">" + m.fit_level + "</span></td>" +
           "<td>" + m.estimated_tps.toFixed(1) + "</td>" +
           "<td>" + m.memory_required_gb.toFixed(1) + " GB</td>" +
