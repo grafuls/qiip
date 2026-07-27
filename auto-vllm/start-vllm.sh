@@ -48,15 +48,14 @@ configure_vllm_params() {
         *"T4"*)
             echo "Tesla T4 detected: optimizing for memory efficiency"
             TENSOR_PARALLEL=1
-            # GPU_MEM_UTIL=0.75
             MAX_MODEL_LEN=2048
             MAX_BATCHED_TOKENS=2048
-            EXTRA_ARGS="--enforce-eager --dtype float16"
+            EXTRA_ARGS="--dtype float16"
 
             if [ $GPU_VRAM_GB -le 16 ]; then
                 MODEL="Qwen/Qwen3-14B-AWQ"
-                MAX_MODEL_LEN=16384
-                MAX_BATCHED_TOKENS=16384
+                MAX_MODEL_LEN=8192
+                MAX_BATCHED_TOKENS=8192
             else
                 MODEL="Qwen/Qwen2.5-7B-Instruct"
             fi
