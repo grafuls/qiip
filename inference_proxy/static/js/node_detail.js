@@ -65,7 +65,6 @@ async function handleAction(action, nodeId) {
       if (action === "setup" || action === "retry" || action === "teardown" || action === "cancel" || action === "force_teardown") {
         logReceivedAny = false; logStreamDone = false;
         if (logSource) { logSource.close(); logSource = null; }
-        disconnectVllmLogs();
       }
     } else {
       var data = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
@@ -185,8 +184,6 @@ async function refreshDetail() {
       tr.appendChild(tdAc);
 
       infoBody.appendChild(tr);
-
-      maybeConnectVllmLogs(node.state);
     }
 
     // ponytail: filter tasks by hostname — matching against node_id (which is the hostname)
@@ -232,38 +229,10 @@ async function refreshDetail() {
   }
 }
 
-// ponytail: unified SSE log viewer — provisioning logs, then vLLM output in the same pane
+// ponytail: SSE live log viewer — poll loop triggers connection when tasks exist
 var logSource = null;
-var vllmLogSource = null;
 var logReceivedAny = false;
 var logStreamDone = false;
-var vllmConnected = false;
-var lastNodeState = null;
-
-var VLLM_RUNNING_STATES = { healthy: 1, unhealthy: 1, draining: 1 };
-
-function appendLogLine(output, entry) {
-  var line = document.createElement("div");
-  line.className = "log-line";
-  if (entry.level) line.dataset.level = entry.level;
-  if (entry.stream) line.dataset.stream = entry.stream;
-
-  if (entry.ts) {
-    var ts = document.createElement("span");
-    ts.className = "log-ts";
-    ts.textContent = new Date(entry.ts).toLocaleTimeString();
-    line.appendChild(ts);
-  }
-
-  var msg = document.createElement("span");
-  msg.className = "log-msg";
-  msg.textContent = entry.msg;
-  line.appendChild(msg);
-
-  output.appendChild(line);
-  var nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 60;
-  if (nearBottom) output.scrollTop = output.scrollHeight;
-}
 
 function connectLogStream() {
   if (logSource || logStreamDone) return;
@@ -284,7 +253,27 @@ function connectLogStream() {
 
   es.addEventListener("message", function (ev) {
     logReceivedAny = true;
-    try { appendLogLine(output, JSON.parse(ev.data)); } catch (_) {}
+    try {
+      var entry = JSON.parse(ev.data);
+      var line = document.createElement("div");
+      line.className = "log-line";
+      if (entry.level) line.dataset.level = entry.level;
+      if (entry.stream) line.dataset.stream = entry.stream;
+
+      var ts = document.createElement("span");
+      ts.className = "log-ts";
+      ts.textContent = new Date(entry.ts).toLocaleTimeString();
+      line.appendChild(ts);
+
+      var msg = document.createElement("span");
+      msg.className = "log-msg";
+      msg.textContent = entry.msg;
+      line.appendChild(msg);
+
+      output.appendChild(line);
+      var nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 60;
+      if (nearBottom) output.scrollTop = output.scrollHeight;
+    } catch (_) {}
   });
 
   es.addEventListener("error", function () {
@@ -292,70 +281,15 @@ function connectLogStream() {
     logSource = null;
     if (logReceivedAny) {
       logStreamDone = true;
-      // ponytail: don't show "ended" yet — vLLM logs may connect next
-      if (lastNodeState in VLLM_RUNNING_STATES) {
-        connectVllmLogs();
-      } else {
-        status.textContent = "ended";
-        status.className = "badge badge-complete";
-      }
+      status.textContent = "ended";
+      status.className = "badge badge-complete";
     } else {
+      // ponytail: 404 or premature close — show placeholder, retry on next poll
       status.textContent = "waiting";
       status.className = "badge";
       output.innerHTML = '<span class="log-placeholder">Logs will appear here when provisioning starts.</span>';
     }
   });
-}
-
-function connectVllmLogs() {
-  if (vllmLogSource) return;
-
-  var output = document.getElementById("logs-output");
-  var status = document.getElementById("logs-status");
-
-  // ponytail: separator so user knows where provisioning ended and vLLM output begins
-  var sep = document.createElement("div");
-  sep.className = "log-line";
-  sep.dataset.level = "info";
-  var sepMsg = document.createElement("span");
-  sepMsg.className = "log-msg";
-  sepMsg.style.color = "var(--muted)";
-  sepMsg.textContent = "--- vLLM process output ---";
-  sep.appendChild(sepMsg);
-  output.appendChild(sep);
-
-  status.textContent = "vllm streaming";
-  status.className = "badge badge-in-progress";
-  vllmConnected = true;
-
-  var es = new EventSource("/admin/nodes/" + encodeURIComponent(NODE_ID) + "/vllm-logs");
-  vllmLogSource = es;
-
-  es.addEventListener("message", function (ev) {
-    try { appendLogLine(output, JSON.parse(ev.data)); } catch (_) {}
-  });
-
-  es.addEventListener("error", function () {
-    es.close();
-    vllmLogSource = null;
-    vllmConnected = false;
-    status.textContent = "ended";
-    status.className = "badge badge-complete";
-  });
-}
-
-function disconnectVllmLogs() {
-  if (vllmLogSource) { vllmLogSource.close(); vllmLogSource = null; }
-  vllmConnected = false;
-}
-
-function maybeConnectVllmLogs(nodeState) {
-  lastNodeState = nodeState;
-  if (nodeState in VLLM_RUNNING_STATES && !vllmConnected && !logSource) {
-    connectVllmLogs();
-  } else if (!(nodeState in VLLM_RUNNING_STATES) && vllmConnected) {
-    disconnectVllmLogs();
-  }
 }
 
 // ponytail: on-demand fetch, not polled — each call triggers SSH+llmfit on remote host

@@ -386,27 +386,59 @@ class NodeProvisioner:
             )
         return model_name
 
+    async def _tail_vllm_log(self, hostname: str) -> None:
+        """Tail vLLM log and feed lines into the provisioning log buffer."""
+        try:
+            async for _stream, line in self._ssh_client.run_streaming(
+                hostname, "tail -n +1 -f /var/log/vllm-serve.log"
+            ):
+                self._log(hostname, "info", line, stream="vllm")
+        except (SSHConnectionError, RemoteCommandError, asyncio.CancelledError):
+            pass
+
     async def _poll_health(self, hostname: str) -> None:
-        """Poll /health endpoint until 200 OK or timeout (D-10, D-09)."""
+        """Poll /health endpoint until 200 OK or timeout (D-10, D-09).
+
+        Tails /var/log/vllm-serve.log concurrently so vLLM startup output
+        appears in the live log pane while waiting.
+        """
+        tail_task = asyncio.create_task(self._tail_vllm_log(hostname))
+
         url = f"http://{hostname}:{self._settings.vllm_port}/health"
         deadline = asyncio.get_running_loop().time() + self._settings.health_poll_timeout
 
-        async with httpx.AsyncClient() as client:
-            while True:
-                try:
-                    response = await client.get(url)
-                    if response.status_code == 200:
-                        logger.info("health_poll_success", hostname=hostname)
-                        return
-                    logger.debug("health_poll_non_200", status=response.status_code, hostname=hostname)
-                except httpx.HTTPError as exc:
-                    logger.debug("health_poll_retry", hostname=hostname, error=str(exc))
+        try:
+            async with httpx.AsyncClient() as client:
+                while True:
+                    try:
+                        response = await client.get(url)
+                        if response.status_code == 200:
+                            logger.info("health_poll_success", hostname=hostname)
+                            return
+                        logger.debug(
+                            "health_poll_non_200",
+                            status=response.status_code,
+                            hostname=hostname,
+                        )
+                    except httpx.HTTPError as exc:
+                        logger.debug(
+                            "health_poll_retry",
+                            hostname=hostname,
+                            error=str(exc),
+                        )
 
-                if asyncio.get_running_loop().time() >= deadline:
-                    raise ProvisioningError(
-                        f"health poll timed out after {self._settings.health_poll_timeout}s for {hostname}"
-                    )
-                await asyncio.sleep(self._settings.health_poll_interval)
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise ProvisioningError(
+                            f"health poll timed out after "
+                            f"{self._settings.health_poll_timeout}s for {hostname}"
+                        )
+                    await asyncio.sleep(self._settings.health_poll_interval)
+        finally:
+            tail_task.cancel()
+            try:
+                await tail_task
+            except asyncio.CancelledError:
+                pass
 
     async def _register_node(self, hostname: str, model: str, *, managed: bool = True) -> None:
         """Register node in etcd with correct fields (D-11, D-12)."""

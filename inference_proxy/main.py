@@ -163,7 +163,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.request_metrics = request_metrics
 
         ssh_client = SSHClient(resolved_settings.ssh)
-        app.state.ssh_client = ssh_client
 
         llmfit_runner = LLMFitRunner(
             ssh_client=ssh_client, settings=resolved_settings.llmfit
