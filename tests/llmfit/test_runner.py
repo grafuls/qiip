@@ -147,6 +147,45 @@ class TestRecommendValidationError:
             await runner.recommend("gpu-host-01")
 
 
+class TestRecommendProviderFilter:
+    @pytest.mark.asyncio
+    async def test_filters_by_allowed_providers(
+        self, mock_ssh_client: MagicMock
+    ) -> None:
+        from inference_proxy.config.settings import LLMFitSettings
+
+        settings = LLMFitSettings(allowed_providers=["Meta"])
+        runner = LLMFitRunner(ssh_client=mock_ssh_client, settings=settings)
+        mock_ssh_client.run.return_value = (FIXTURE_JSON, "", 0)
+        result = await runner.recommend("gpu-host-01")
+
+        assert len(result.models) == 1
+        assert result.models[0].provider == "Meta"
+
+    @pytest.mark.asyncio
+    async def test_filter_is_case_insensitive(
+        self, mock_ssh_client: MagicMock
+    ) -> None:
+        from inference_proxy.config.settings import LLMFitSettings
+
+        settings = LLMFitSettings(allowed_providers=["alibaba"])
+        runner = LLMFitRunner(ssh_client=mock_ssh_client, settings=settings)
+        mock_ssh_client.run.return_value = (FIXTURE_JSON, "", 0)
+        result = await runner.recommend("gpu-host-01")
+
+        assert len(result.models) == 1
+        assert result.models[0].provider == "Alibaba"
+
+    @pytest.mark.asyncio
+    async def test_empty_allowed_providers_returns_all(
+        self, runner: LLMFitRunner, mock_ssh_client: MagicMock
+    ) -> None:
+        mock_ssh_client.run.return_value = (FIXTURE_JSON, "", 0)
+        result = await runner.recommend("gpu-host-01")
+
+        assert len(result.models) == 2
+
+
 class TestRecommendSSHErrorBubbles:
     @pytest.mark.asyncio
     async def test_ssh_connection_error_not_caught(

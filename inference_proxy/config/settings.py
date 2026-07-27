@@ -140,6 +140,7 @@ class LLMFitSettings(BaseModel):
 
     binary_path: str = "/usr/local/bin/llmfit"
     timeout: float = 60.0
+    allowed_providers: list[str] = []
 
 
 class RedfishSettings(BaseModel):

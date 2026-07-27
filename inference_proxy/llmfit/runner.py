@@ -70,5 +70,12 @@ class LLMFitRunner:
         except ValidationError as exc:
             raise LLMFitParseError(str(exc), raw_output=stdout) from exc
 
+        if self._settings.allowed_providers:
+            allowed = {p.lower() for p in self._settings.allowed_providers}
+            result = LLMFitResult(
+                system=result.system,
+                models=[m for m in result.models if m.provider.lower() in allowed],
+            )
+
         log.debug("llmfit_recommend_complete", model_count=len(result.models))
         return result
