@@ -47,7 +47,7 @@ class LLMFitRunner:
         log = logger.bind(host=hostname)
         log.debug("llmfit_recommend_start")
 
-        command = f"{self._settings.binary_path} recommend --json --force-runtime vllm"
+        command = f"{self._settings.binary_path} recommend --json --runtime vllm -n 30"
         timeout = self._settings.timeout
 
         try:
@@ -74,7 +74,7 @@ class LLMFitRunner:
             allowed = {p.lower() for p in self._settings.allowed_providers}
             result = LLMFitResult(
                 system=result.system,
-                models=[m for m in result.models if m.provider.lower() in allowed],
+                models=[m for m in result.models if m.provider.lower() in allowed][:10],
             )
 
         log.debug("llmfit_recommend_complete", model_count=len(result.models))
