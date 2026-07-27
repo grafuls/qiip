@@ -293,6 +293,68 @@ function connectLogStream() {
   });
 }
 
+// ponytail: SSE vLLM log viewer — manual connect, stays open until disconnect or error
+var vllmLogSource = null;
+
+function connectVllmLogs() {
+  if (vllmLogSource) { vllmLogSource.close(); vllmLogSource = null; }
+
+  var output = document.getElementById("vllm-logs-output");
+  var status = document.getElementById("vllm-logs-status");
+  var btn = document.getElementById("vllm-logs-btn");
+
+  output.textContent = "";
+  status.textContent = "connecting";
+  status.className = "badge badge-in-progress";
+  btn.textContent = "Disconnect";
+
+  var es = new EventSource("/admin/nodes/" + encodeURIComponent(NODE_ID) + "/vllm-logs");
+  vllmLogSource = es;
+
+  es.addEventListener("open", function () {
+    status.textContent = "streaming";
+  });
+
+  es.addEventListener("message", function (ev) {
+    try {
+      var entry = JSON.parse(ev.data);
+      var line = document.createElement("div");
+      line.className = "log-line";
+      if (entry.stream) line.dataset.stream = entry.stream;
+
+      var msg = document.createElement("span");
+      msg.className = "log-msg";
+      msg.textContent = entry.msg;
+      line.appendChild(msg);
+
+      output.appendChild(line);
+      var nearBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 60;
+      if (nearBottom) output.scrollTop = output.scrollHeight;
+    } catch (_) {}
+  });
+
+  es.addEventListener("error", function () {
+    es.close();
+    vllmLogSource = null;
+    status.textContent = "disconnected";
+    status.className = "badge";
+    btn.textContent = "Connect";
+  });
+}
+
+function disconnectVllmLogs() {
+  if (vllmLogSource) { vllmLogSource.close(); vllmLogSource = null; }
+  var status = document.getElementById("vllm-logs-status");
+  var btn = document.getElementById("vllm-logs-btn");
+  status.textContent = "disconnected";
+  status.className = "badge";
+  btn.textContent = "Connect";
+}
+
+document.getElementById("vllm-logs-btn").addEventListener("click", function () {
+  if (vllmLogSource) disconnectVllmLogs(); else connectVllmLogs();
+});
+
 // ponytail: on-demand fetch, not polled — each call triggers SSH+llmfit on remote host
 async function loadRecommendations() {
   var btn = document.getElementById("load-recs-btn");

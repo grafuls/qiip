@@ -19,6 +19,7 @@ from fastapi import Request
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.provisioning.provisioner import NodeProvisioner
+from inference_proxy.provisioning.ssh_client import SSHClient
 from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.quads.client import QUADSClient
 from inference_proxy.quads.poller import QUADSPoller
@@ -26,7 +27,6 @@ from inference_proxy.redfish.client import RedfishClient
 from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.routing.node_selector import NodeSelector
 from inference_proxy.routing.request_metrics import RequestMetrics
-
 from inference_proxy.services.unified_nodes import UnifiedNodeService
 
 from .settings import Settings
@@ -115,6 +115,11 @@ def get_quads_poller(request: Request) -> QUADSPoller | None:
     Phase 17 consumes this to merge QUADS hosts with etcd nodes.
     """
     return request.app.state.quads_poller  # type: ignore[no-any-return]
+
+
+def get_ssh_client(request: Request) -> SSHClient:
+    """Return the SSH client from the current application state."""
+    return request.app.state.ssh_client  # type: ignore[no-any-return]
 
 
 def get_unified_node_service(request: Request) -> UnifiedNodeService:

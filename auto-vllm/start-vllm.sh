@@ -48,7 +48,7 @@ configure_vllm_params() {
         *"T4"*)
             echo "Tesla T4 detected: optimizing for memory efficiency"
             TENSOR_PARALLEL=1
-            GPU_MEM_UTIL=0.75
+            # GPU_MEM_UTIL=0.75
             MAX_MODEL_LEN=2048
             MAX_BATCHED_TOKENS=2048
             EXTRA_ARGS="--enforce-eager --dtype float16"

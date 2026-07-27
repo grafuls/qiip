@@ -25,6 +25,7 @@ from inference_proxy.config.dependencies import (
     get_redfish_client,
     get_registry,
     get_request_metrics,
+    get_ssh_client,
     get_unified_node_service,
 )
 from inference_proxy.discovery.registry import NodeRegistry
@@ -45,6 +46,7 @@ from inference_proxy.models.admin import (
 from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.provisioning.ssh_client import (
     RemoteCommandError,
+    SSHClient,
     SSHConnectionError,
 )
 from inference_proxy.quads.client import (
@@ -200,6 +202,32 @@ async def stream_provisioning_logs(
     async def _generate() -> AsyncIterator[str]:
         async for _pos, entry in buf.iter_from(hostname):
             data = json.dumps(entry)
+            yield f"data: {data}\n\n"
+
+    return StreamingResponse(_generate(), media_type="text/event-stream")
+
+
+@admin_router.get("/nodes/{hostname}/vllm-logs")
+async def stream_vllm_logs(
+    hostname: str,
+    ssh_client: SSHClient = Depends(get_ssh_client),
+) -> StreamingResponse:
+    """Stream vLLM process output from the remote host as SSE events.
+
+    Tails /var/log/vllm-serve.log via SSH.  Connection stays open until
+    the client disconnects or the SSH session drops.
+    """
+    hostname = _validated_hostname(hostname)
+
+    async def _generate() -> AsyncIterator[str]:
+        try:
+            async for stream, line in ssh_client.run_streaming(
+                hostname, "tail -n 200 -f /var/log/vllm-serve.log"
+            ):
+                data = json.dumps({"msg": line, "stream": stream})
+                yield f"data: {data}\n\n"
+        except (SSHConnectionError, RemoteCommandError) as exc:
+            data = json.dumps({"msg": str(exc), "stream": "error"})
             yield f"data: {data}\n\n"
 
     return StreamingResponse(_generate(), media_type="text/event-stream")

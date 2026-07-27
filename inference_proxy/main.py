@@ -32,21 +32,21 @@ from inference_proxy.api.middleware import RequestLoggingMiddleware
 from inference_proxy.api.routes import router
 from inference_proxy.config.dependencies import get_settings
 from inference_proxy.config.logging import configure_logging
-from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.config.settings import Settings
 from inference_proxy.discovery.etcd_client import EtcdClient
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.discovery.serializer import node_from_etcd
 from inference_proxy.discovery.watcher import run_watcher
-from inference_proxy.proxy.client import ProxyClient
-from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
+from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.provisioning.log_buffer import ProvisioningLogBuffer
 from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.provisioning.ssh_client import SSHClient
+from inference_proxy.proxy.client import ProxyClient
 from inference_proxy.quads.client import QUADSClient
 from inference_proxy.quads.poller import QUADSPoller
 from inference_proxy.quads.schedule_enforcer import ScheduleEnforcer
 from inference_proxy.redfish.client import RedfishClient
+from inference_proxy.resilience.circuit_breaker import CircuitBreakerRegistry
 from inference_proxy.resilience.health_checker import run_health_checker
 from inference_proxy.resilience.shutdown import ShutdownMiddleware
 from inference_proxy.routing.connection_tracker import ConnectionTracker
@@ -163,6 +163,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.request_metrics = request_metrics
 
         ssh_client = SSHClient(resolved_settings.ssh)
+        app.state.ssh_client = ssh_client
 
         llmfit_runner = LLMFitRunner(
             ssh_client=ssh_client, settings=resolved_settings.llmfit
