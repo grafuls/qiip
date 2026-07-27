@@ -336,13 +336,14 @@ async function loadRecommendations() {
       var table = document.createElement("div");
       table.className = "table-wrap";
       var html = "<table><thead><tr>" +
-        "<th>Model</th><th>Score</th><th>Fit</th><th>Est. tok/s</th><th>Memory</th>" +
+        "<th>Model</th><th>Category</th><th>Score</th><th>Fit</th><th>Est. tok/s</th><th>Memory</th>" +
         "</tr></thead><tbody>";
       for (var i = 0; i < data.models.length; i++) {
         var m = data.models[i];
         var badgeCls = FIT_BADGE[m.fit_level] || "badge-in-progress";
         html += "<tr>" +
           "<td>" + m.name + "</td>" +
+          "<td>" + (m.category || "—") + "</td>" +
           "<td>" + m.score.toFixed(1) + "%</td>" +
           "<td><span class=\"badge " + badgeCls + "\">" + m.fit_level + "</span></td>" +
           "<td>" + m.estimated_tps.toFixed(1) + "</td>" +
