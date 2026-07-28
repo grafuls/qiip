@@ -143,6 +143,13 @@ class LLMFitSettings(BaseModel):
     allowed_providers: list[str] = []
 
 
+class HuggingFaceSettings(BaseModel):
+    """HuggingFace cache and authentication configuration."""
+
+    cache_dir: str  # Required -- gateway won't start without it
+    api_token: SecretStr | None = None
+
+
 class RedfishSettings(BaseModel):
     """Redfish BMC configuration.
 
@@ -190,3 +197,4 @@ class Settings(BaseSettings):
     quads: QUADSSettings = QUADSSettings()
     redfish: RedfishSettings = RedfishSettings()
     llmfit: LLMFitSettings = LLMFitSettings()
+    huggingface: HuggingFaceSettings

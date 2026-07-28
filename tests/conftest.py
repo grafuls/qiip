@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import os
+
+# Set required env vars before any app imports trigger Settings() at module level.
+os.environ.setdefault("INFERENCE_PROXY_HUGGINGFACE__CACHE_DIR", "/tmp/test-hf-cache")
+
 from collections.abc import AsyncIterator, Generator
 
 import httpx
@@ -27,6 +32,7 @@ from inference_proxy.config.dependencies import (
 from inference_proxy.config.settings import (
     EtcdSettings,
     GatewaySettings,
+    HuggingFaceSettings,
     RoutingSettings,
     Settings,
 )
@@ -48,6 +54,7 @@ def test_settings() -> Settings:
         gateway=GatewaySettings(host="127.0.0.1", port=9999),
         etcd=EtcdSettings(endpoints=["http://localhost:2379"], node_prefix="/test-nodes/"),
         routing=RoutingSettings(strategy="least_connections", max_retries=3, timeout=5),
+        huggingface=HuggingFaceSettings(cache_dir="/tmp/test-hf-cache"),
     )
 
 
