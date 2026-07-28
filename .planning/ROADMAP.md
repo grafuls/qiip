@@ -128,7 +128,15 @@ Plans:
   4. GET /admin/models/downloads returns current download statuses for all active and recently completed downloads
   5. Concurrent downloads do not block the event loop or starve other background services
 
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+**Wave 1**
+
+- [ ] 31-01-PLAN.md — DownloadService, Pydantic models, and unit tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 31-02-PLAN.md — DI provider, admin endpoints, lifespan wiring, integration tests
 
 ### Phase 32: Dashboard Download Integration
 
@@ -141,7 +149,15 @@ Plans:
   2. Recommendations table shows an "Already downloaded" badge when a recommended model exists on NFS
   3. Download status (downloading/complete/failed) is visible in the recommendations table and updates without page refresh
 
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+**Wave 1**
+
+- [ ] 31-01-PLAN.md — DownloadService, Pydantic models, and unit tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 31-02-PLAN.md — DI provider, admin endpoints, lifespan wiring, integration tests
 **UI hint**: yes
 
 ## Progress
@@ -181,5 +197,5 @@ Phases execute in numeric order: 30 -> 31 -> 32
 | 28. Model Selection | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 29. Dashboard Recommendations | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 30. Foundation & Model Catalog | v1.7 | 2/2 | Complete    | 2026-07-28 |
-| 31. Download Service & API | v1.7 | 0/0 | Not started | - |
+| 31. Download Service & API | v1.7 | 0/2 | In progress | - |
 | 32. Dashboard Download Integration | v1.7 | 0/0 | Not started | - |
