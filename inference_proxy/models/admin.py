@@ -142,6 +142,34 @@ class PowerStateResponse(BaseModel):
     power_state: str
 
 
+class DownloadState(str, Enum):
+    """State of a background model download."""
+
+    DOWNLOADING = "downloading"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
+class DownloadRequest(BaseModel):
+    """Request body for POST /admin/models/download."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_id: str
+
+
+class DownloadStatusResponse(BaseModel):
+    """Status of a background model download."""
+
+    model_config = ConfigDict(frozen=True)
+
+    repo_id: str
+    status: DownloadState
+    started_at: datetime
+    completed_at: datetime | None = None
+    error: str | None = None
+
+
 class RecommendationResponse(BaseModel):
     """Response body for GET /admin/nodes/{hostname}/recommendations."""
 
