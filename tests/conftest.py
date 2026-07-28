@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 from unittest.mock import AsyncMock, MagicMock
 
 from inference_proxy.config.dependencies import (
+    get_catalog_service,
     get_circuit_breaker_registry,
     get_llmfit_runner,
     get_node_selector,
@@ -154,6 +155,10 @@ def app(
     mock_runner.recommend = AsyncMock()
     application.state.llmfit_runner = mock_runner
     application.dependency_overrides[get_llmfit_runner] = lambda: mock_runner
+    mock_catalog = MagicMock()
+    mock_catalog.list_models = AsyncMock(return_value=[])
+    application.state.catalog_service = mock_catalog
+    application.dependency_overrides[get_catalog_service] = lambda: mock_catalog
     yield application
     application.dependency_overrides.clear()
     get_settings.cache_clear()
