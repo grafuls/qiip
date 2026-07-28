@@ -9,13 +9,13 @@ Requirements for v1.7 HuggingFace Integration. Each maps to roadmap phases.
 
 ### Configuration
 
-- [ ] **CFG-01**: Operator can configure HuggingFace API token via environment variable for gated model access
-- [ ] **CFG-02**: Operator can configure the NFS cache directory path where models are stored
+- [x] **CFG-01**: Operator can configure HuggingFace API token via environment variable for gated model access
+- [x] **CFG-02**: Operator can configure the NFS cache directory path where models are stored
 
 ### Catalog
 
-- [ ] **CAT-01**: Gateway scans NFS cache directory and returns a list of downloaded models with repo IDs
-- [ ] **CAT-02**: Admin API exposes GET /admin/models/catalog returning all models currently on NFS
+- [x] **CAT-01**: Gateway scans NFS cache directory and returns a list of downloaded models with repo IDs
+- [x] **CAT-02**: Admin API exposes GET /admin/models/catalog returning all models currently on NFS
 
 ### Downloads
 
@@ -65,10 +65,10 @@ Deferred to future milestone. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CFG-01 | Phase 30 | Pending |
-| CFG-02 | Phase 30 | Pending |
-| CAT-01 | Phase 30 | Pending |
-| CAT-02 | Phase 30 | Pending |
+| CFG-01 | Phase 30 | Complete |
+| CFG-02 | Phase 30 | Complete |
+| CAT-01 | Phase 30 | Complete |
+| CAT-02 | Phase 30 | Complete |
 | DL-01 | Phase 31 | Pending |
 | DL-02 | Phase 31 | Pending |
 | DL-03 | Phase 31 | Pending |
