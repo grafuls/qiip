@@ -35,6 +35,7 @@ from inference_proxy.config.logging import configure_logging
 from inference_proxy.config.settings import Settings
 from inference_proxy.discovery.etcd_client import EtcdClient
 from inference_proxy.huggingface.catalog import ModelCatalogService
+from inference_proxy.huggingface.downloader import DownloadService
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.discovery.serializer import node_from_etcd
 from inference_proxy.discovery.watcher import run_watcher
@@ -188,6 +189,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             cache_dir=resolved_settings.huggingface.cache_dir
         )
         app.state.catalog_service = catalog_service
+
+        # Download service — token extracted via get_secret_value() per D-04
+        token = (
+            resolved_settings.huggingface.api_token.get_secret_value()
+            if resolved_settings.huggingface.api_token
+            else None
+        )
+        download_service = DownloadService(
+            cache_dir=resolved_settings.huggingface.cache_dir, token=token
+        )
+        app.state.download_service = download_service
 
         if resolved_settings.redfish.bmc_username is not None:
             redfish_http = httpx.AsyncClient(

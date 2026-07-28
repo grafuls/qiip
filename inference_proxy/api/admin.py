@@ -19,6 +19,7 @@ from pydantic import ValidationError
 
 from inference_proxy.config.dependencies import (
     get_catalog_service,
+    get_download_service,
     get_llmfit_runner,
     get_provisioner,
     get_quads_client,
@@ -30,11 +31,14 @@ from inference_proxy.config.dependencies import (
 )
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.huggingface.catalog import ModelCatalogResponse, ModelCatalogService
+from inference_proxy.huggingface.downloader import DownloadService
 from inference_proxy.llmfit.errors import LLMFitParseError, LLMFitTimeoutError
 from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.models.admin import (
     AdminMetricsResponse,
     AdminNodeResponse,
+    DownloadRequest,
+    DownloadStatusResponse,
     PowerActionRequest,
     PowerStateResponse,
     QUADSStatusResponse,
@@ -117,6 +121,27 @@ async def list_catalog(
     """Return the list of models available in the HuggingFace NFS cache."""
     models = await catalog.list_models()
     return ModelCatalogResponse(models=models)
+
+
+@admin_router.post("/models/download", status_code=202)
+async def trigger_download(
+    body: DownloadRequest,
+    svc: DownloadService = Depends(get_download_service),
+) -> DownloadStatusResponse:
+    """Trigger a background model download (DL-01).
+
+    Returns 202 for new downloads. Duplicate POSTs for an in-progress
+    download return 200 with the existing status (D-10).
+    """
+    return await svc.trigger_download(body.repo_id)
+
+
+@admin_router.get("/models/downloads")
+async def list_downloads(
+    svc: DownloadService = Depends(get_download_service),
+) -> list[DownloadStatusResponse]:
+    """Return status of all tracked downloads (DL-03)."""
+    return svc.get_all_statuses()
 
 
 @admin_router.post("/nodes/setup", status_code=202)

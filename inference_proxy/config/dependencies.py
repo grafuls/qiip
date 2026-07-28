@@ -18,6 +18,7 @@ from fastapi import Request
 
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.huggingface.catalog import ModelCatalogService
+from inference_proxy.huggingface.downloader import DownloadService
 from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.proxy.client import ProxyClient
@@ -102,6 +103,11 @@ def get_quads_client(request: Request) -> QUADSClient | None:
 def get_catalog_service(request: Request) -> ModelCatalogService:
     """Return the model catalog service from the current application state."""
     return request.app.state.catalog_service  # type: ignore[no-any-return]
+
+
+def get_download_service(request: Request) -> DownloadService:
+    """Return the download service from the current application state."""
+    return request.app.state.download_service  # type: ignore[no-any-return]
 
 
 def get_llmfit_runner(request: Request) -> LLMFitRunner:
