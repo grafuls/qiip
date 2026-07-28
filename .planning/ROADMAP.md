@@ -95,38 +95,52 @@
 ## Phase Details
 
 ### Phase 30: Foundation & Model Catalog
+
 **Goal**: Gateway can discover which models are already downloaded on NFS storage
 **Depends on**: Nothing (first phase of v1.7)
 **Requirements**: CFG-01, CFG-02, CAT-01, CAT-02
 **Success Criteria** (what must be TRUE):
+
   1. Operator can configure HuggingFace API token and NFS cache directory path via environment variables
   2. Gateway scans the NFS cache directory and returns a list of downloaded model repo IDs
   3. GET /admin/models/catalog returns all models currently available on NFS with their repo IDs
+
 **Plans**: 2 plans
 Plans:
+**Wave 1**
+
 - [ ] 30-01-PLAN.md — HuggingFace settings, catalog service, and unit tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 30-02-PLAN.md — Admin endpoint wiring, lifespan startup, integration tests
 
 ### Phase 31: Download Service & API
+
 **Goal**: Operators can download models from HuggingFace Hub to NFS and monitor download status
 **Depends on**: Phase 30
 **Requirements**: DL-01, DL-02, DL-03, DL-04
 **Success Criteria** (what must be TRUE):
+
   1. POST /admin/models/download triggers a background download of a specified model from HuggingFace Hub to NFS
   2. Downloads use the configured HF token to access gated models (Llama, Mistral, etc.)
   3. Gateway tracks per-model download status (downloading/complete/failed) in memory
   4. GET /admin/models/downloads returns current download statuses for all active and recently completed downloads
   5. Concurrent downloads do not block the event loop or starve other background services
+
 **Plans**: TBD
 
 ### Phase 32: Dashboard Download Integration
+
 **Goal**: Operators can trigger and monitor model downloads directly from the recommendations table
 **Depends on**: Phase 31
 **Requirements**: DASH-01, DASH-02, DASH-03
 **Success Criteria** (what must be TRUE):
+
   1. Node detail recommendations table shows a "Download" button for each recommended model
   2. Recommendations table shows an "Already downloaded" badge when a recommended model exists on NFS
   3. Download status (downloading/complete/failed) is visible in the recommendations table and updates without page refresh
+
 **Plans**: TBD
 **UI hint**: yes
 
