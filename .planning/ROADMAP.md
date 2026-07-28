@@ -89,7 +89,7 @@
 **Milestone Goal:** Download models from HuggingFace Hub to NFS storage, integrated with llmfit recommendations in the dashboard.
 
 - [x] **Phase 30: Foundation & Model Catalog** - HuggingFace settings, NFS model catalog service, and catalog API endpoint (completed 2026-07-28)
-- [ ] **Phase 31: Download Service & API** - Background model downloads with dedicated thread pool, status tracking, and admin endpoints
+- [x] **Phase 31: Download Service & API** - Background model downloads with dedicated thread pool, status tracking, and admin endpoints (completed 2026-07-28)
 - [ ] **Phase 32: Dashboard Download Integration** - Download buttons, "already downloaded" badges, and status display in recommendations table
 
 ## Phase Details
@@ -136,7 +136,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 31-02-PLAN.md — DI provider, admin endpoints, lifespan wiring, integration tests
+- [x] 31-02-PLAN.md — DI provider, admin endpoints, lifespan wiring, integration tests
 
 ### Phase 32: Dashboard Download Integration
 
@@ -153,7 +153,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 31-01-PLAN.md — DownloadService, Pydantic models, and unit tests
+- [x] 31-01-PLAN.md — DownloadService, Pydantic models, and unit tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -197,5 +197,5 @@ Phases execute in numeric order: 30 -> 31 -> 32
 | 28. Model Selection | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 29. Dashboard Recommendations | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 30. Foundation & Model Catalog | v1.7 | 2/2 | Complete    | 2026-07-28 |
-| 31. Download Service & API | v1.7 | 1/2 | In Progress|  |
+| 31. Download Service & API | v1.7 | 2/2 | Complete   | 2026-07-28 |
 | 32. Dashboard Download Integration | v1.7 | 0/0 | Not started | - |
