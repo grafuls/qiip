@@ -102,7 +102,10 @@
   1. Operator can configure HuggingFace API token and NFS cache directory path via environment variables
   2. Gateway scans the NFS cache directory and returns a list of downloaded model repo IDs
   3. GET /admin/models/catalog returns all models currently available on NFS with their repo IDs
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [ ] 30-01-PLAN.md — HuggingFace settings, catalog service, and unit tests
+- [ ] 30-02-PLAN.md — Admin endpoint wiring, lifespan startup, integration tests
 
 ### Phase 31: Download Service & API
 **Goal**: Operators can download models from HuggingFace Hub to NFS and monitor download status
@@ -163,6 +166,6 @@ Phases execute in numeric order: 30 -> 31 -> 32
 | 27. Admin API Endpoint | v1.6 | 2/2 | Complete | 2026-07-26 |
 | 28. Model Selection | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 29. Dashboard Recommendations | v1.6 | 1/1 | Complete | 2026-07-26 |
-| 30. Foundation & Model Catalog | v1.7 | 0/0 | Not started | - |
+| 30. Foundation & Model Catalog | v1.7 | 0/2 | Not started | - |
 | 31. Download Service & API | v1.7 | 0/0 | Not started | - |
 | 32. Dashboard Download Integration | v1.7 | 0/0 | Not started | - |
