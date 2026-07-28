@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from inference_proxy.config.dependencies import (
+    get_catalog_service,
     get_llmfit_runner,
     get_quads_client,
     get_quads_poller,
@@ -974,3 +975,52 @@ class TestRecommendationErrors:
 
         assert response.status_code == 502
         assert "SECRET_RAW_CONTENT_MARKER" not in response.text
+
+
+# -- Model catalog endpoint tests (CAT-02) --
+
+
+class TestModelCatalog:
+    """GET /admin/models/catalog returns NFS model catalog."""
+
+    def test_catalog_returns_models(
+        self,
+        app: FastAPI,
+        client: TestClient,
+    ) -> None:
+        from inference_proxy.huggingface.catalog import CatalogEntry
+
+        mock_catalog = MagicMock()
+        mock_catalog.list_models = AsyncMock(
+            return_value=[
+                CatalogEntry(repo_id="meta-llama/Llama-3.1-8B-Instruct"),
+                CatalogEntry(repo_id="mistralai/Mistral-7B-v0.1"),
+            ]
+        )
+        app.dependency_overrides[get_catalog_service] = lambda: mock_catalog
+
+        response = client.get("/admin/models/catalog")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "models" in data
+        assert len(data["models"]) == 2
+        repo_ids = {m["repo_id"] for m in data["models"]}
+        assert repo_ids == {
+            "meta-llama/Llama-3.1-8B-Instruct",
+            "mistralai/Mistral-7B-v0.1",
+        }
+
+    def test_catalog_empty(
+        self,
+        app: FastAPI,
+        client: TestClient,
+    ) -> None:
+        mock_catalog = MagicMock()
+        mock_catalog.list_models = AsyncMock(return_value=[])
+        app.dependency_overrides[get_catalog_service] = lambda: mock_catalog
+
+        response = client.get("/admin/models/catalog")
+
+        assert response.status_code == 200
+        assert response.json() == {"models": []}
