@@ -8,7 +8,8 @@
 - ✅ **v1.3 QUADS Integration** — Phases 15-18 (shipped 2026-07-20)
 - ✅ **v1.4 Chatbot Playground** — Phases 19-20 (shipped 2026-07-21)
 - ✅ **v1.5 Node Setup Enhancements** — Phases 21-24 (shipped 2026-07-22)
-- 🚧 **v1.6 LLMFit for Best Fit Models** — Phases 25-29 (in progress)
+- ✅ **v1.6 LLMFit for Best Fit Models** — Phases 25-29 (shipped 2026-07-26)
+- 🚧 **v1.7 HuggingFace Integration** — Phases 30-32 (in progress)
 
 ## Phases
 
@@ -72,115 +73,64 @@
 
 </details>
 
-### v1.6 LLMFit for Best Fit Models (In Progress)
+<details>
+<summary>v1.6 LLMFit for Best Fit Models (Phases 25-29) — SHIPPED 2026-07-26</summary>
 
-**Milestone Goal:** Integrate the llmfit CLI to recommend which LLM models best fit a server's hardware before deployment.
+- [x] Phase 25: Core Models and Runner (2/2 plans) — completed 2026-07-25
+- [x] Phase 26: llmfit Installation (1/1 plan) — completed 2026-07-26
+- [x] Phase 27: Admin API Endpoint (2/2 plans) — completed 2026-07-26
+- [x] Phase 28: Model Selection (1/1 plan) — completed 2026-07-26
+- [x] Phase 29: Dashboard Recommendations (1/1 plan) — completed 2026-07-26
 
-- [x] **Phase 25: Core Models and Runner** - Pydantic models for llmfit JSON output and SSH-based runner service with timeout protection (completed 2026-07-25)
-- [x] **Phase 26: llmfit Installation** - Install llmfit binary on target servers during provisioning as a non-fatal step (completed 2026-07-26)
-- [x] **Phase 27: Admin API Endpoint** - Expose model recommendations via GET endpoint with structured error handling (completed 2026-07-26)
-- [x] **Phase 28: Model Selection** - Wire operator-selected model into provisioning via VLLM_MODEL env var (completed 2026-07-26)
-- [x] **Phase 29: Dashboard Recommendations** - Recommendations card on node detail page with ranked model table and hardware summary (completed 2026-07-26)
+</details>
+
+### v1.7 HuggingFace Integration (In Progress)
+
+**Milestone Goal:** Download models from HuggingFace Hub to NFS storage, integrated with llmfit recommendations in the dashboard.
+
+- [ ] **Phase 30: Foundation & Model Catalog** - HuggingFace settings, NFS model catalog service, and catalog API endpoint
+- [ ] **Phase 31: Download Service & API** - Background model downloads with dedicated thread pool, status tracking, and admin endpoints
+- [ ] **Phase 32: Dashboard Download Integration** - Download buttons, "already downloaded" badges, and status display in recommendations table
 
 ## Phase Details
 
-### Phase 25: Core Models and Runner
-
-**Goal**: The gateway can execute llmfit on remote hosts and parse the results into typed models
-**Depends on**: Nothing (first phase of v1.6)
-**Requirements**: EXEC-01, EXEC-02, EXEC-03
+### Phase 30: Foundation & Model Catalog
+**Goal**: Gateway can discover which models are already downloaded on NFS storage
+**Depends on**: Nothing (first phase of v1.7)
+**Requirements**: CFG-01, CFG-02, CAT-01, CAT-02
 **Success Criteria** (what must be TRUE):
+  1. Operator can configure HuggingFace API token and NFS cache directory path via environment variables
+  2. Gateway scans the NFS cache directory and returns a list of downloaded model repo IDs
+  3. GET /admin/models/catalog returns all models currently available on NFS with their repo IDs
+**Plans**: TBD
 
-  1. LLMFitRunner can SSH to a remote host, run `llmfit recommend --json`, and return parsed Pydantic models
-  2. Pydantic models capture system hardware info (GPU name, VRAM, backend) and ranked model recommendations (name, score, fit level, estimated tok/s, memory)
-  3. SSH execution times out after a configurable duration instead of hanging indefinitely
-  4. Invalid or missing llmfit JSON output raises a typed error (not an unhandled exception)
-
-**Plans**: 2 plans
-Plans:
-**Wave 1**
-
-- [x] 25-01-PLAN.md — Data contracts: Pydantic models, error hierarchy, SSHClient.run()
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 25-02-PLAN.md — Runner and tests: LLMFitRunner + full test suite
-
-### Phase 26: llmfit Installation
-
-**Goal**: New nodes have the llmfit binary available after provisioning
-**Depends on**: Nothing (independent of Python-side work)
-**Requirements**: INST-01, INST-02
+### Phase 31: Download Service & API
+**Goal**: Operators can download models from HuggingFace Hub to NFS and monitor download status
+**Depends on**: Phase 30
+**Requirements**: DL-01, DL-02, DL-03, DL-04
 **Success Criteria** (what must be TRUE):
+  1. POST /admin/models/download triggers a background download of a specified model from HuggingFace Hub to NFS
+  2. Downloads use the configured HF token to access gated models (Llama, Mistral, etc.)
+  3. Gateway tracks per-model download status (downloading/complete/failed) in memory
+  4. GET /admin/models/downloads returns current download statuses for all active and recently completed downloads
+  5. Concurrent downloads do not block the event loop or starve other background services
+**Plans**: TBD
 
-  1. setup.sh downloads and installs the llmfit binary to /usr/local/bin on target servers
-  2. llmfit installation failure does not block or fail the overall provisioning process
-  3. Successful installation is logged; failure is logged as a warning with the reason
-
-**Plans:** 1 plan
-Plans:
-
-- [x] 26-01-PLAN.md — setup.sh soft_step + install_llmfit, ProvisioningStep enum update
-
-### Phase 27: Admin API Endpoint
-
-**Goal**: Operators can request model recommendations for any node via the admin API
-**Depends on**: Phase 25
-**Requirements**: API-01, API-02, API-03
+### Phase 32: Dashboard Download Integration
+**Goal**: Operators can trigger and monitor model downloads directly from the recommendations table
+**Depends on**: Phase 31
+**Requirements**: DASH-01, DASH-02, DASH-03
 **Success Criteria** (what must be TRUE):
-
-  1. GET /admin/nodes/{hostname}/recommendations returns a ranked list of recommended models with scores, fit levels, and estimated performance
-  2. Response includes detected hardware info (GPU name, VRAM, compute backend) for the queried host
-  3. When llmfit fails (SSH error, timeout, parse error), the endpoint returns a structured error response with a descriptive message (not a raw 500)
-
-**Plans:** 2/2 plans complete
-Plans:
-**Wave 1**
-
-- [x] 27-01-PLAN.md — LLMFitSettings, response model, DI wiring, endpoint handler
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 27-02-PLAN.md — Integration tests for happy path and all error scenarios
-
-### Phase 28: Model Selection
-
-**Goal**: Operators can specify which model to deploy when provisioning a node
-**Depends on**: Nothing (independent of llmfit phases)
-**Requirements**: SEL-01, SEL-02
-**Success Criteria** (what must be TRUE):
-
-  1. SetupRequest accepts an optional model field that operators can set when triggering provisioning
-  2. When a model is specified, the provisioner passes it as the VLLM_MODEL environment variable to start-vllm.sh
-
-**Plans**: 1 plan
-Plans:
-
-- [x] 28-01-PLAN.md — Model field on SetupRequest, VLLM_MODEL injection in provisioner, tests
-
-### Phase 29: Dashboard Recommendations
-
-**Goal**: Operators can view model recommendations and hardware details for any node in the dashboard
-**Depends on**: Phase 27
-**Requirements**: DASH-01, DASH-02
-**Success Criteria** (what must be TRUE):
-
-  1. Node detail page displays a recommendations card with a ranked table showing model name, score, fit level, estimated tok/s, and memory usage
-  2. Recommendations card shows a hardware summary with detected GPU name, VRAM, and compute backend
-  3. Recommendations load on demand when the operator views a node's details
-
-**Plans**: 1 plan
-Plans:
-
-- [x] 29-01-PLAN.md — Recommendations card: HTML section + JS fetch/render with hardware summary and ranked model table
-
+  1. Node detail recommendations table shows a "Download" button for each recommended model
+  2. Recommendations table shows an "Already downloaded" badge when a recommended model exists on NFS
+  3. Download status (downloading/complete/failed) is visible in the recommendations table and updates without page refresh
+**Plans**: TBD
 **UI hint**: yes
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 25 -> 26 -> 27 -> 28 -> 29
-(Phases 26 and 28 are independent but ordered for logical flow)
+Phases execute in numeric order: 30 -> 31 -> 32
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -208,8 +158,11 @@ Phases execute in numeric order: 25 -> 26 -> 27 -> 28 -> 29
 | 22. Power Management Endpoints | v1.5 | 1/1 | Complete | 2026-07-22 |
 | 23. Auto-Power-On in Provisioner | v1.5 | 1/1 | Complete | 2026-07-22 |
 | 24. Provisioning Error Diagnostics | v1.5 | 2/2 | Complete | 2026-07-22 |
-| 25. Core Models and Runner | v1.6 | 2/2 | Complete    | 2026-07-25 |
+| 25. Core Models and Runner | v1.6 | 2/2 | Complete | 2026-07-25 |
 | 26. llmfit Installation | v1.6 | 1/1 | Complete | 2026-07-26 |
-| 27. Admin API Endpoint | v1.6 | 2/2 | Complete    | 2026-07-26 |
-| 28. Model Selection | v1.6 | 1/1 | Complete    | 2026-07-26 |
-| 29. Dashboard Recommendations | v1.6 | 1/1 | Complete   | 2026-07-26 |
+| 27. Admin API Endpoint | v1.6 | 2/2 | Complete | 2026-07-26 |
+| 28. Model Selection | v1.6 | 1/1 | Complete | 2026-07-26 |
+| 29. Dashboard Recommendations | v1.6 | 1/1 | Complete | 2026-07-26 |
+| 30. Foundation & Model Catalog | v1.7 | 0/0 | Not started | - |
+| 31. Download Service & API | v1.7 | 0/0 | Not started | - |
+| 32. Dashboard Download Integration | v1.7 | 0/0 | Not started | - |

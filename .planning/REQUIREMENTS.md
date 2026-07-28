@@ -65,23 +65,23 @@ Deferred to future milestone. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CFG-01 | — | Pending |
-| CFG-02 | — | Pending |
-| CAT-01 | — | Pending |
-| CAT-02 | — | Pending |
-| DL-01 | — | Pending |
-| DL-02 | — | Pending |
-| DL-03 | — | Pending |
-| DL-04 | — | Pending |
-| DASH-01 | — | Pending |
-| DASH-02 | — | Pending |
-| DASH-03 | — | Pending |
+| CFG-01 | Phase 30 | Pending |
+| CFG-02 | Phase 30 | Pending |
+| CAT-01 | Phase 30 | Pending |
+| CAT-02 | Phase 30 | Pending |
+| DL-01 | Phase 31 | Pending |
+| DL-02 | Phase 31 | Pending |
+| DL-03 | Phase 31 | Pending |
+| DL-04 | Phase 31 | Pending |
+| DASH-01 | Phase 32 | Pending |
+| DASH-02 | Phase 32 | Pending |
+| DASH-03 | Phase 32 | Pending |
 
 **Coverage:**
 - v1.7 requirements: 11 total
-- Mapped to phases: 0
-- Unmapped: 11 ⚠️
+- Mapped to phases: 11
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-28*
-*Last updated: 2026-07-28 after initial definition*
+*Last updated: 2026-07-28 after roadmap creation*

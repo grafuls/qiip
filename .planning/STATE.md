@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.7
 milestone_name: HuggingFace Integration
 status: planning
-last_updated: "2026-07-28T14:04:27.411Z"
+last_updated: "2026-07-28"
 last_activity: 2026-07-28
 progress:
-  total_phases: 0
+  total_phases: 3
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
@@ -17,17 +17,19 @@ progress:
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-23)
+See: .planning/PROJECT.md (updated 2026-07-28)
 
 **Core value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
-**Current focus:** Phase 29 — dashboard recommendations
+**Current focus:** v1.7 HuggingFace Integration — Phase 30 Foundation & Model Catalog
 
 ## Current Position
 
-Phase: Not started (defining requirements)
+Phase: 30 of 32 (Foundation & Model Catalog)
 Plan: —
-Status: Defining requirements
-Last activity: 2026-07-28 — Milestone v1.7 started
+Status: Ready to plan
+Last activity: 2026-07-28 — Roadmap created for v1.7
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -71,10 +73,13 @@ Last activity: 2026-07-28 — Milestone v1.7 started
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Zero new Python dependencies for v1.6 (reuses asyncssh, Pydantic, FastAPI, structlog)
-- llmfit is a Rust CLI binary installed on target servers, not on the gateway
-- On-demand execution via admin API, NOT part of provisioning state machine
-- Pydantic models use extra="ignore" for forward compatibility with llmfit version changes
+- Single new dependency: huggingface-hub >=1.25, <2.0
+- Must use cache_dir= (not local_dir=) for HF cache layout compatibility with vLLM
+- Downloads are sync — need dedicated ThreadPoolExecutor (2-3 workers)
+- disable_progress_bars() at startup for thread safety
+- HF_HUB_DISABLE_XET=1 env var to avoid hang issues
+- llmfit model name IS the HF repo_id — zero mapping needed
+- GatedRepoError derives from RepositoryNotFoundError (exception ordering matters)
 
 ### Pending Todos
 
@@ -82,9 +87,8 @@ None yet.
 
 ### Blockers/Concerns
 
-- llmfit JSON schema stability across versions (mitigated by pinned version + extra="ignore")
-- Air-gap lab scenarios may need SCP pre-staging instead of GitHub download
-- NFS model availability filtering deferred to future milestone
+- NFS write access from gateway host (verify mount permissions)
+- scan_cache_dir() performance with 20+ models on NFS (profile if slow)
 
 ## Deferred Items
 
@@ -99,6 +103,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-26T16:48:26Z
-Stopped at: Phase 29 complete
+Last session: 2026-07-28
+Stopped at: Roadmap created for v1.7 HuggingFace Integration
 Resume file: None
