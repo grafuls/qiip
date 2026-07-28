@@ -109,7 +109,7 @@
 Plans:
 **Wave 1**
 
-- [ ] 30-01-PLAN.md — HuggingFace settings, catalog service, and unit tests
+- [x] 30-01-PLAN.md — HuggingFace settings, catalog service, and unit tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -180,6 +180,6 @@ Phases execute in numeric order: 30 -> 31 -> 32
 | 27. Admin API Endpoint | v1.6 | 2/2 | Complete | 2026-07-26 |
 | 28. Model Selection | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 29. Dashboard Recommendations | v1.6 | 1/1 | Complete | 2026-07-26 |
-| 30. Foundation & Model Catalog | v1.7 | 0/2 | Not started | - |
+| 30. Foundation & Model Catalog | v1.7 | 1/2 | In Progress|  |
 | 31. Download Service & API | v1.7 | 0/0 | Not started | - |
 | 32. Dashboard Download Integration | v1.7 | 0/0 | Not started | - |
