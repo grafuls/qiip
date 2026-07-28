@@ -85,19 +85,21 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - Geographic distribution — future work
 - Model caching/optimization — future work
 
-## Current Milestone: v1.6 LLMFit for Best Fit Models
+## Current Milestone: v1.7 HuggingFace Integration
 
-**Goal:** Integrate the llmfit CLI into node provisioning to recommend which LLM models best fit a server's hardware before deployment.
+**Goal:** Download models from HuggingFace Hub to NFS storage, integrated with llmfit recommendations in the dashboard.
 
 **Target features:**
-- Install llmfit on target GPU servers during the provisioning setup process
-- Run llmfit via SSH to detect hardware and produce ranked model recommendations
-- Admin API endpoint returning model fit recommendations for a given server
-- Operator reviews recommendations and selects which model to deploy
+- Download models from HuggingFace Hub to the gateway's NFS mount
+- HuggingFace API token support for gated models (Llama, Mistral, etc.)
+- NFS model catalog — gateway scans NFS to know what's already downloaded
+- Download button on llmfit recommendations pane (per recommended model)
+- Simple download status (downloading/complete/failed) in the dashboard
+- "Already downloaded" indicator when a recommended model exists on NFS
 
 ## Context
 
-Shipped v1.5 across 24 phases. All milestones complete: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements. The gateway proxies OpenAI-compatible requests to vLLM nodes with service discovery, load balancing, circuit breakers, SSH provisioning, QUADS host discovery, Redfish power management, operations dashboard, and chatbot playground with system prompt configuration.
+Shipped v1.6 across 29 phases. All milestones complete: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements, v1.6 LLMFit for Best Fit Models. The gateway proxies OpenAI-compatible requests to vLLM nodes with service discovery, load balancing, circuit breakers, SSH provisioning, QUADS host discovery, Redfish power management, llmfit model recommendations, operations dashboard, and chatbot playground with system prompt configuration.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
@@ -168,4 +170,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-26 — Phase 28 complete: model selection via SetupRequest.model field with VLLM_MODEL env var injection*
+*Last updated: 2026-07-28 — Milestone v1.7 started: HuggingFace Integration*
