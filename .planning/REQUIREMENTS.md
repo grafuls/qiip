@@ -1,44 +1,40 @@
 # Requirements: QUADS LLM Inference Proxy
 
-**Defined:** 2026-07-24
+**Defined:** 2026-07-28
 **Core Value:** Route inference requests to healthy vLLM nodes with automatic failover — the gateway must reliably proxy requests and handle node failures transparently.
 
-## v1.6 Requirements
+## v1.7 Requirements
 
-Requirements for v1.6 LLMFit for Best Fit Models. Each maps to roadmap phases.
+Requirements for v1.7 HuggingFace Integration. Each maps to roadmap phases.
 
-### Installation
+### Configuration
 
-- [x] **INST-01**: llmfit binary is installed on target servers during provisioning via prebuilt binary download
-- [x] **INST-02**: llmfit installation is a non-fatal provisioning step (failure doesn't block setup)
+- [ ] **CFG-01**: Operator can configure HuggingFace API token via environment variable for gated model access
+- [ ] **CFG-02**: Operator can configure the NFS cache directory path where models are stored
 
-### Execution
+### Catalog
 
-- [x] **EXEC-01**: Gateway can run `llmfit recommend --json` on a remote host via SSH and parse the JSON output
-- [x] **EXEC-02**: SSH command execution has timeout protection to prevent hangs
-- [x] **EXEC-03**: Pydantic models validate llmfit JSON output (system hardware info + ranked model list)
+- [ ] **CAT-01**: Gateway scans NFS cache directory and returns a list of downloaded models with repo IDs
+- [ ] **CAT-02**: Admin API exposes GET /admin/models/catalog returning all models currently on NFS
 
-### API
+### Downloads
 
-- [x] **API-01**: Admin API endpoint `GET /admin/nodes/{hostname}/recommendations` returns ranked model recommendations
-- [x] **API-02**: Endpoint returns detected hardware info (GPU VRAM, GPU name, backend) alongside recommendations
-- [x] **API-03**: llmfit failures return structured error response (not 500)
-
-### Model Selection
-
-- [x] **SEL-01**: SetupRequest accepts optional model field for operator-selected model
-- [x] **SEL-02**: Provisioner passes `VLLM_MODEL` env var to `start-vllm.sh` when model is specified
+- [ ] **DL-01**: Operator can trigger a model download from HuggingFace Hub to NFS via POST /admin/models/download
+- [ ] **DL-02**: Gateway tracks download status (downloading/complete/failed) per model in memory
+- [ ] **DL-03**: Admin API exposes GET /admin/models/downloads returning current download statuses
+- [ ] **DL-04**: Downloads use the configured HF token to access gated models (Llama, Mistral, etc.)
 
 ### Dashboard
 
-- [x] **DASH-01**: Node detail page shows a recommendations card with ranked model table (name, score, fit level, estimated tok/s, memory)
-- [x] **DASH-02**: Recommendations card includes hardware summary (detected GPU, VRAM, backend)
+- [ ] **DASH-01**: Node detail recommendations table shows a download button per recommended model
+- [ ] **DASH-02**: Recommendations table shows "already downloaded" badge when a model exists on NFS
+- [ ] **DASH-03**: Download status (downloading/complete/failed) is visible in the recommendations table
 
 ## Future Requirements
 
 Deferred to future milestone. Tracked but not in current roadmap.
 
-### Filtering & Caching
+### Filtering & Caching (from v1.6)
 
 - **FILT-01**: Use-case filtering query parameter (coding/chat/reasoning) adjusts scoring weights
 - **FILT-02**: Minimum fit level filter (perfect/good/marginal)
@@ -46,39 +42,46 @@ Deferred to future milestone. Tracked but not in current roadmap.
 - **CACHE-01**: Cached recommendations per-host with staleness indicator
 - **FLEET-01**: Fleet-wide model compatibility matrix across all nodes
 
+### Download Enhancements
+
+- **DLE-01**: Token validation on startup (warn if invalid/missing)
+- **DLE-02**: Model size and file count in catalog entries
+- **DLE-03**: Pre-flight auth check for gated models before queuing download
+- **DLE-04**: Size estimate displayed before triggering download
+- **DLE-05**: Download resumption tracking across gateway restarts
+
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Auto-deploy best model without confirmation | Operators must validate model choice against team needs, licensing, org policy |
-| Custom scoring engine replacing llmfit | llmfit implements 157+ models, dynamic quantization, MoE support — reimplementing is months of work |
-| Persistent recommendation history database | Adds storage dependency for ephemeral data — hardware is constant per server |
-| llmfit REST API server on each node | Process management burden; on-demand SSH is simpler |
-| Model downloading/pulling from gateway | Models live on NFS shared storage; weight management is separate |
-| Non-vLLM runtime support | Gateway exclusively manages vLLM nodes |
+| Granular download progress (percentage/bytes) | Added complexity; simple status sufficient for v1.7 |
+| Model deletion from NFS via UI | Risky operation; manual NFS management for now |
+| Fleet-wide model availability matrix | Requires cached catalog across all nodes |
+| Custom model sources (non-HuggingFace) | HuggingFace only for v1.7 |
+| Auto-deploy best model without confirmation | Operators must validate model choice |
+| Custom scoring engine replacing llmfit | llmfit implements 157+ models — reimplementing is months of work |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| INST-01 | Phase 26 | Complete |
-| INST-02 | Phase 26 | Complete |
-| EXEC-01 | Phase 25 | Complete |
-| EXEC-02 | Phase 25 | Complete |
-| EXEC-03 | Phase 25 | Complete |
-| API-01 | Phase 27 | Complete |
-| API-02 | Phase 27 | Complete |
-| API-03 | Phase 27 | Complete |
-| SEL-01 | Phase 28 | Complete |
-| SEL-02 | Phase 28 | Complete |
-| DASH-01 | Phase 29 | Complete |
-| DASH-02 | Phase 29 | Complete |
+| CFG-01 | — | Pending |
+| CFG-02 | — | Pending |
+| CAT-01 | — | Pending |
+| CAT-02 | — | Pending |
+| DL-01 | — | Pending |
+| DL-02 | — | Pending |
+| DL-03 | — | Pending |
+| DL-04 | — | Pending |
+| DASH-01 | — | Pending |
+| DASH-02 | — | Pending |
+| DASH-03 | — | Pending |
 
 **Coverage:**
-- v1.6 requirements: 12 total
-- Mapped to phases: 12
-- Unmapped: 0
+- v1.7 requirements: 11 total
+- Mapped to phases: 0
+- Unmapped: 11 ⚠️
 
 ---
-*Requirements defined: 2026-07-24*
-*Last updated: 2026-07-24 after roadmap creation*
+*Requirements defined: 2026-07-28*
+*Last updated: 2026-07-28 after initial definition*
