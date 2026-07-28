@@ -19,6 +19,7 @@ from unittest.mock import AsyncMock, MagicMock
 from inference_proxy.config.dependencies import (
     get_catalog_service,
     get_circuit_breaker_registry,
+    get_download_service,
     get_llmfit_runner,
     get_node_selector,
     get_provisioner,
@@ -159,6 +160,12 @@ def app(
     mock_catalog.list_models = AsyncMock(return_value=[])
     application.state.catalog_service = mock_catalog
     application.dependency_overrides[get_catalog_service] = lambda: mock_catalog
+    mock_download_service = MagicMock()
+    mock_download_service.trigger_download = AsyncMock()
+    mock_download_service.get_status = MagicMock(return_value=None)
+    mock_download_service.get_all_statuses = MagicMock(return_value=[])
+    application.state.download_service = mock_download_service
+    application.dependency_overrides[get_download_service] = lambda: mock_download_service
     yield application
     application.dependency_overrides.clear()
     get_settings.cache_clear()
