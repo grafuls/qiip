@@ -1,37 +1,35 @@
-# Feature Landscape
+# Feature Landscape: HuggingFace Hub Integration (v1.7)
 
-**Domain:** LLM model recommendation integration (llmfit CLI) into GPU server provisioning gateway
-**Researched:** 2026-07-23
+**Domain:** Model download + NFS catalog for LLM inference gateway
+**Researched:** 2026-07-28
 
 ## Existing Infrastructure (Already Built)
 
-The provisioning system provides the foundation these features plug into:
-
 | Component | What It Does | New Features Build On |
 |-----------|-------------|----------------------|
-| `NodeProvisioner` | 16-step state machine with SSH orchestration, step markers, background tasks | llmfit runs as new SSH command; new provisioning step for install |
-| `SSHClient` | asyncssh wrapper with `run_streaming()` and `upload()` | Executes `llmfit recommend --json` on remote hosts |
-| `setup.sh` | Provisioning script with `[STEP:name:START/OK/FAIL]` markers | New `llmfit_install` step added at end |
-| `start-vllm.sh` | GPU detection + hardcoded model selection via case/switch | `VLLM_MODEL` env var override already exists (line 100); llmfit replaces the heuristic |
-| Admin API (`/admin/`) | Operational endpoints with FastAPI dependency injection | New recommendation endpoint follows same pattern |
-| Node detail page | Shows provisioning tasks, live logs, node info table | Gains "Model Recommendations" card |
-| `AdminNodeResponse` | Frozen Pydantic model with GPU info, state, actions | Extended with recommendation data or served separately |
-| `ProvisioningStep` enum | StrEnum covering setup + teardown lifecycle | New `LLMFIT_INSTALL` step |
-| `QUADSHost` model | GPU vendor/model/count from QUADS inventory | llmfit `system` object provides richer hardware detail (VRAM GB, bandwidth, backend) |
+| NFS mount at `/srv/hf-cache` | Shared HF cache across all vLLM nodes (NFS server: `rdu-storage02.scalelab.redhat.com:/mnt/SATA/scratch/grafuls/hf-cache`) | Gateway downloads to same NFS share; catalog scans it |
+| `start-vllm.sh` symlink | Links `/root/.cache/huggingface` -> NFS mount. vLLM resolves HF repo_ids (e.g. `Qwen/Qwen2.5-7B-Instruct`) through this symlink to the HF cache structure | Downloaded models immediately available to vLLM -- no config change on nodes |
+| `setup.sh` NFS step | Mounts NFS on target servers via `mount -t nfs -o vers=3,soft,timeo=100,retrans=2` | No change needed; mount already exists |
+| llmfit recommendations | Ranked model suggestions per server hardware. The `name` field uses HuggingFace repo_id format (e.g. `meta-llama/Llama-3.1-8B-Instruct`) -- confirmed via llmfit source (model DB scraped from HF API) | Download button per recommendation; `name` maps directly to `snapshot_download(repo_id=)` |
+| Node detail page | Per-node dashboard with recommendations panel, hardware summary, action buttons | Download status integrated into recommendations table |
+| Admin API (`/admin/`) | Operational endpoints with FastAPI DI, Pydantic response models, structlog | New download/catalog routes follow same pattern |
+| `ModelRecommendation` Pydantic model | Parsed llmfit output: `name`, `provider`, `score`, `fit_level`, `estimated_tps`, `memory_required_gb`, `category` | `name` field is the HuggingFace repo_id -- the download key |
+| In-memory state tracking | `ProvisioningState` / `DownloadStatus` pattern with frozen Pydantic models and StrEnums | Download task tracking reuses same patterns |
+| `asyncio.to_thread()` wrapping | etcd3gw sync calls wrapped for FastAPI async handlers | Same pattern for `snapshot_download()` (sync with internal thread pool) |
 
 ## Table Stakes
 
-Features operators expect. Missing = the llmfit integration feels incomplete.
+Features operators expect. Missing = the integration feels incomplete.
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Install llmfit on target servers during provisioning | Can't recommend models without the tool on the hardware | Low | `curl -fsSL https://llmfit.axjns.dev/install.sh \| sh` -- single line in setup.sh, new `[STEP:llmfit_install:START/OK/FAIL]` marker. Add `LLMFIT_INSTALL` to `ProvisioningStep` enum. Prebuilt binary, no Rust toolchain needed on targets. |
-| Run llmfit via SSH and capture JSON output | Core value -- hardware-aware model scoring on actual server hardware | Med | `llmfit recommend --json --use-case general -n 10` via `SSHClient.run_streaming()`. Collect stdout lines, join, parse as JSON. The `--json` flag is the default for `recommend` but explicit is safer. Expect 5-15s execution time (hardware detection + scoring). |
-| Parse llmfit JSON into typed Pydantic models | Gateway needs structured data for API responses and dashboard rendering | Med | Two models: `LLMFitSystemInfo` (hardware: `gpu_vram_gb`, `gpu_name`, `cpu_name`, `total_ram_gb`, `backend`, `has_gpu`) and `LLMFitModelRecommendation` (per-model: `name`, `provider`, `score`, `estimated_tps`, `best_quant`, `memory_required_gb`, `utilization_pct`, `fit_level`, `run_mode`, `context_length`, `params_b`, `category`). Schema is stable at v1.1.6. |
-| Admin API endpoint for model recommendations | Operators need to query recommendations without SSH terminal access | Med | `GET /admin/nodes/{hostname}/recommendations` -- runs llmfit via SSH on the target, returns parsed JSON. Response includes both `system` (hardware) and `models` (recommendations). Depends on SSHClient (exists), Pydantic models (new). |
-| Operator selects model before vLLM deployment | The whole point -- informed model choice replaces hardcoded heuristic | Med | `start-vllm.sh` already supports `VLLM_MODEL` env var override. `SetupRequest` gains optional `model: str \| None` field. When set, provisioner passes `VLLM_MODEL={model}` as env var to the remote `start-vllm.sh`. |
-| Dashboard shows recommendations for a node | Operators work from the dashboard -- model selection must live there | Med | Node detail page (`node_detail.html`) gains a "Model Recommendations" card. Fetches from admin API. Shows ranked table: model name, score, tok/s est, memory%, fit level, quantization. Select button per row. |
-| Error handling for llmfit failures | llmfit may fail (no GPU detected, binary install failed, SSH timeout) -- must not block provisioning | Low | Treat llmfit as best-effort. If `recommend` fails, log warning, fall back to existing GPU-based heuristic in start-vllm.sh. Recommendations are advisory, not blocking. The install step in setup.sh should not `exit 1` on failure -- use a non-fatal step wrapper. |
+| Feature | Why Expected | Complexity | Dependencies | Notes |
+|---------|--------------|------------|--------------|-------|
+| Download a model from HuggingFace to NFS | Core value -- operators want to pre-stage models before deploying to vLLM nodes | Med | Settings, huggingface-hub | `POST /admin/models/download` with `repo_id`. Background `snapshot_download(cache_dir=)` to NFS. Uses HF cache layout so vLLM finds models via the existing symlink. |
+| HF API token support for gated models | Llama 4 (Meta), Mistral, Gemma (Google) are gated. Without a valid token with gated-repo read permission, downloads fail with `GatedRepoError`. Most llmfit-recommended models are gated. | Low | Settings (SecretStr) | `HuggingFaceSettings.token: SecretStr`. Passed as `token=` param. Two-step process for operators: (1) request access on HF model page, (2) create read token with "public gated repos" permission enabled. |
+| NFS model catalog | "What's already downloaded?" -- operators need to see available models before downloading or provisioning | Med | Settings (models_dir path) | `GET /admin/models/catalog`. Uses `scan_cache_dir(cache_dir=)` which returns `HFCacheInfo` with per-repo `CachedRepoInfo` (repo_id, size_on_disk, nb_files, revisions). |
+| Download status tracking | "Is it downloading? Did it finish? Did it fail?" -- operators need feedback on multi-GB downloads that take minutes to hours | Med | Download service | In-memory dict: `{repo_id: DownloadTask}`. Status enum: pending/downloading/complete/failed. `GET /admin/models/downloads`. Completed downloads also visible via catalog scan. |
+| "Already downloaded" indicator on recommendations | When viewing llmfit results, operator needs to know which models exist on NFS without checking separately | Low | Catalog API, JS | Dashboard JS cross-references catalog response against recommendation `name` fields. Badge = "downloaded" / "not downloaded". |
+| Download button on recommendation rows | One-click download from the recommendations panel -- the primary workflow entry point | Low | Download API, JS | Button in recommendations table calls `POST /admin/models/download`. Disabled + "downloading" text when in progress. |
+| Feature disabled when NFS not configured | Gateway may run without NFS (dev, test, CI). Download features must degrade gracefully, not crash. | Low | Settings | `HuggingFaceSettings.models_dir: Path | None`. When None, endpoints return 503. Same pattern as QUADS (`base_url: str | None`) and Redfish (`bmc_username: str | None`). |
 
 ## Differentiators
 
@@ -39,12 +37,11 @@ Features that add operational polish. Not expected, but valued.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Use-case filtering in recommendation request | Different workloads need different models (coding vs chat vs reasoning) | Low | Pass through to CLI: `--use-case coding\|reasoning\|chat\|general\|multimodal\|embedding`. Add optional `use_case` query param to admin API endpoint. llmfit adjusts composite score weights per use case (e.g., Chat=35% speed vs Reasoning=55% quality). |
-| Minimum fit level filtering | Operators only want "perfect" or "good" fits, not marginal | Low | Pass `--min-fit perfect\|good\|marginal` to llmfit CLI. Add optional `min_fit` query param to admin endpoint. |
-| Hardware detection display | Operators want to see detected VRAM, GPU name, CPU, backend before choosing a model | Low | The `system` object in llmfit JSON output already contains `gpu_vram_gb`, `cpu_name`, `total_ram_gb`, `backend`, `has_gpu`. Display as hardware summary card in dashboard alongside recommendations. Richer than current QUADS `gpu_vendor`/`gpu_model`/`gpu_count`. |
-| Cached recommendations with staleness indicator | Avoid re-running llmfit on every page load -- hardware doesn't change between reboots | Med | Store last llmfit result per hostname in memory (dict keyed by hostname). Show "refreshed 5m ago" badge. "Refresh" button re-runs via SSH. No persistence needed -- gateway restart clears cache, acceptable since hardware is static. |
-| Fleet-wide model compatibility matrix | Operators managing 10+ servers want "which servers can run Model X?" | Med | New endpoint: `GET /admin/recommendations/summary` -- aggregates cached recommendations across all nodes with llmfit data. Groups by model name, shows which hosts can run it and at what fit level. Requires cached per-host recommendations. |
-| Recommendation count limit control | Control how many models to show (top 5 vs top 20) | Low | Pass `-n {limit}` to llmfit CLI. Add optional `limit` query param to admin endpoint. Default 10. |
+| Download size estimate before starting | Operator knows "this will download 140GB" before clicking. Prevents surprise disk fills. | Low | `snapshot_download(repo_id, dry_run=True)` returns `list[DryRunFileInfo]` with file sizes and cached status. Sums to total bytes-to-download. Simpler than `model_info(files_metadata=True)` -- already filters cached files. Show in a confirmation dialog or as text next to button. |
+| Pre-download auth validation | Catch "you need to accept the license agreement" before starting a multi-hour download that will fail at the end | Low | `HfApi.auth_check(repo_id, token=)` raises `GatedRepoError` or `RepositoryNotFoundError` immediately. Call before queuing download. Fast (single HTTP HEAD). |
+| Retry failed downloads | Downloads fail (network, disk, HF outage). Retry without re-downloading completed blobs. | Low | `snapshot_download()` is resumable by design -- HF cache uses content-addressed blobs with integrity checks. Re-trigger same repo_id, it picks up where it left off. Clear failed status on retry. |
+| Multiple concurrent downloads | Download several models at once for initial cluster setup | Low | Each download runs in its own `asyncio.to_thread()`. Natural concurrency. Track all in the tasks dict. Consider limiting to 2-3 concurrent to avoid NFS throughput saturation. |
+| Catalog disk usage summary | "NFS has 1.2TB of models across 8 repos" at a glance | Low | `scan_cache_dir()` returns `size_on_disk` per repo and total. Sum and display in dashboard header or catalog panel. |
 
 ## Anti-Features
 
@@ -52,157 +49,69 @@ Features to explicitly NOT build.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| Auto-deploy best model without operator confirmation | Operators need to validate model choice against team needs (specific model versions, licensing, org policy). Automated selection removes human judgment from a critical decision. | Show ranked recommendations, let operator click "Deploy with this model". The operator is the decision-maker. |
-| Custom scoring engine replacing llmfit | llmfit implements bandwidth-based speed estimation, dynamic quantization selection (Q8_0 down to Q2_K), MoE-aware memory calculation, 157+ model catalog, community benchmark data. Reimplementing this is months of work for worse results. | Use llmfit as-is. Parse its JSON output. Trust its scoring. |
-| Persistent recommendation history database | Adds storage dependency (SQLite/PostgreSQL) for data that's ephemeral -- hardware profile is constant per server, model catalog changes with llmfit version updates. | In-memory cache per hostname. Cleared on gateway restart. |
-| llmfit REST API server (`llmfit serve`) on each node | Running a long-lived llmfit HTTP server on every GPU node adds process management, port conflicts (8787 default), monitoring burden, firewall rules. | Run `llmfit recommend --json` on demand via SSH. One command, one result, no daemon to manage. |
-| Model downloading/pulling from gateway | Pulling model weights (10-100GB) through the gateway is wrong -- models live on NFS shared storage (`/srv/hf-cache`). | Ensure selected model exists on NFS. If not, show error "model not available on NFS storage". Model weight management is a separate concern. |
-| Support for non-vLLM runtimes from llmfit output | The gateway exclusively manages vLLM nodes. llmfit supports Ollama, llama.cpp, MLX, LM Studio runtimes but only vLLM matters here. | Ignore `runtime` field in llmfit output. The model `name` and fit analysis are what matter -- vLLM serves HuggingFace model IDs regardless. |
-| Building a web TUI mirroring llmfit's interactive mode | The TUI is for humans at a terminal. The gateway is a programmatic consumer. | Use `recommend --json` only. The dashboard provides the visual interface. |
-| llmfit version pinning or update management | llmfit is installed once during setup.sh. Version updates across fleet nodes is ops tooling, not gateway responsibility. | Install latest via curl script. If version matters later, pin in setup.sh URL. |
+| Download progress percentage streaming | `snapshot_download()` uses internal tqdm with per-file progress bars. Intercepting progress requires custom `tqdm_class` subclass that pipes updates to shared state, SSE endpoint for streaming, JS polling or EventSource -- significant complexity for marginal UX gain. Scope says "simple status." | Three states: downloading / complete / failed. Poll on dashboard refresh interval (10s default). The download either finishes or it does not. |
+| Model deletion from dashboard | Deleting models from shared NFS is destructive and affects all vLLM nodes currently serving that model. One wrong click = production outage. | Omit delete button. Document `huggingface-cli delete-cache` or manual `rm` for cleanup. Require SSH access for destructive ops. |
+| Auto-download on provisioning | Automatically downloading missing models during node setup ties provisioning success to HuggingFace availability and network speed. Models are 5-140GB. Setup would block for hours. | Download models separately via dashboard. Provisioning picks from what is available on NFS. Operator controls when downloads happen. |
+| Custom HuggingFace mirror/endpoint support | Internal mirror/proxy for HF Hub adds config complexity. Internal network has direct internet access. | Use standard HuggingFace endpoint. If mirror needed later, `HF_ENDPOINT` env var is handled by `huggingface_hub` library natively -- no code changes needed. |
+| Model format conversion (GGUF, AWQ, GPTQ) | Conversion is compute-intensive and requires model loading. Gateway is a CPU-only FastAPI process, no GPU. | Download models in their native safetensors format. vLLM handles quantization at serve time via `--quantization` flag. |
+| Model version/revision management | Tracking multiple revisions of the same model adds catalog complexity, UI complexity, and NFS space consumption. | Download latest (main branch). HF cache deduplicates unchanged blobs between revisions. If specific revision needed later, add optional `revision` param to download endpoint. |
+| WebSocket/SSE for real-time download updates | Adds transport complexity for marginal benefit. Existing dashboard uses polling for everything (node status, metrics, provisioning). | Stick with existing polling pattern. 10-second refresh is responsive enough for downloads that take 5-60 minutes. |
 
 ## Feature Dependencies
 
 ```
-Install llmfit (setup.sh step)
+HuggingFaceSettings (config)
         |
-        v
-Run llmfit via SSH (SSHClient.run_streaming)
-        |
-        v
-Parse JSON into Pydantic models (LLMFitSystemInfo, LLMFitModelRecommendation)
-        |
-        v
-Admin API endpoint (GET /admin/nodes/{hostname}/recommendations)
-        |
-        v
-Dashboard recommendations card (node_detail.html)
-        |
-        v
-Operator selects model --> SetupRequest.model field --> VLLM_MODEL env var --> start-vllm.sh
+        +---> NFSModelCatalog (scan NFS)
+        |         |
+        +---> ModelDownloadService (download models)
+        |         |  (uses catalog for "already downloaded" check)
+        v         v
+    Admin API endpoints (catalog, download, status)
+              |
+              v
+    Dashboard JS (download button + status in recommendations table)
 ```
 
-Orthogonal (no ordering dependency on each other, but all depend on admin API existing):
-- Use-case filtering: additive `--use-case` flag and query param
-- Min-fit filtering: additive `--min-fit` flag and query param
-- Limit control: additive `-n` flag and query param
-- Hardware detection display: comes free with llmfit JSON `system` object
-- Cached recommendations: wraps around the SSH execution layer
-- Fleet summary: depends on cached per-host data existing
+Orthogonal (no ordering dependency on each other, but all depend on settings):
+- Catalog scan: independent of download service
+- Download service: uses catalog for "already downloaded" check (optional optimization)
+- Dashboard: consumes both catalog and download APIs
+
+Specific dependency chains:
+- Download button requires download API + catalog API (to show "already downloaded")
+- "Already downloaded" indicator requires catalog API only
+- Download status display requires download API only
+- All API endpoints require settings + Pydantic models
 
 ## MVP Recommendation
 
-Prioritize in this order -- each step is independently testable:
+Prioritize in this order:
 
-1. **Pydantic models for llmfit JSON output** -- `LLMFitSystemInfo` and `LLMFitModelRecommendation` matching the documented schema. These are pure data models, no dependencies.
-2. **Install llmfit during setup.sh** -- new step in provisioning script, new `LLMFIT_INSTALL` value in `ProvisioningStep` enum.
-3. **SSH-based llmfit execution** -- new method (on NodeProvisioner or a dedicated service class) that runs `llmfit recommend --json` via SSH and returns parsed Pydantic models.
-4. **Admin API endpoint** -- `GET /admin/nodes/{hostname}/recommendations` returning typed response with system info + model list.
-5. **Dashboard recommendations card** -- table in node_detail.html with ranked models, hardware summary, select button.
-6. **Wire selected model into provisioning** -- `SetupRequest` gains optional `model` field, provisioner passes as `VLLM_MODEL` env var to `start-vllm.sh`.
+1. **Settings + Pydantic models** -- `HuggingFaceSettings`, download status/catalog data contracts. Foundation everything else depends on.
+2. **NFS catalog scanner** -- `scan_cache_dir()` wrapper with `has_model()` fast-path. Independent, immediately testable.
+3. **Dependency wiring** -- DI providers, lifespan init, `disable_progress_bars()` at startup.
+4. **Catalog API** -- `GET /admin/models/catalog`. Operators can see what is downloaded before any download features exist.
+5. **Download service + API** -- `POST /admin/models/download`, `GET /admin/models/downloads`. Core download flow with error mapping (`GatedRepoError` -> 403, `RepositoryNotFoundError` -> 404).
+6. **Dashboard integration** -- Download column in recommendations table. "Already downloaded" badges. Download button per row.
 
 Defer:
-- **Fleet-wide matrix**: useful but not v1.6 core -- requires all nodes to have cached recommendations.
-- **Cached recommendations**: start without caching (run llmfit per request). Add if 5-15s SSH round-trip becomes a UX problem.
-- **Use-case / min-fit / limit filtering**: trivial extensions after core flow works. One query param each.
-
-## llmfit JSON Schema Reference
-
-The `recommend --json` output (v1.1.6, HIGH confidence -- verified via official docs at alexsjones-llmfit.mintlify.app):
-
-```json
-{
-  "system": {
-    "total_ram_gb": 64.0,
-    "available_ram_gb": 58.24,
-    "cpu_cores": 16,
-    "cpu_name": "AMD EPYC 7742",
-    "has_gpu": true,
-    "gpu_vram_gb": 80.0,
-    "unified_memory": false,
-    "backend": "CUDA"
-  },
-  "models": [
-    {
-      "name": "llama-3.3-70b",
-      "provider": "Meta",
-      "parameter_count": "70B",
-      "params_b": 70.0,
-      "context_length": 131072,
-      "use_case": "general",
-      "category": "General",
-      "release_date": "2024-12-06",
-      "fit_level": "perfect",
-      "run_mode": "gpu",
-      "score": 95.2,
-      "estimated_tps": 42.5,
-      "runtime": "vLLM",
-      "best_quant": "4bit",
-      "memory_required_gb": 43.68,
-      "utilization_pct": 68.2
-    }
-  ]
-}
-```
-
-### Scoring Dimensions (composite 0-100)
-
-| Dimension | What It Measures | General | Coding | Reasoning | Chat | Embedding |
-|-----------|-----------------|---------|--------|-----------|------|-----------|
-| Quality | Parameter count + quantization precision | 45% | 50% | 55% | 40% | 30% |
-| Speed | Memory-bandwidth tok/s estimate (55% efficiency factor) | 30% | 20% | 15% | 35% | 40% |
-| Fit | Memory budget vs model size at best quantization | 15% | 15% | 15% | 15% | 20% |
-| Context | Context window capacity given hardware | 10% | 15% | 15% | 10% | 10% |
-
-### Fit Levels
-
-| Level | Meaning | Default included |
-|-------|---------|-----------------|
-| perfect | Fits with headroom | Yes |
-| good | Fits, limited headroom | Yes |
-| marginal | Barely fits, may swap | Yes (default floor) |
-| too_tight | Does not fit | No (excluded by default) |
-
-### Dynamic Quantization
-
-llmfit walks Q8_0 -> Q6_K -> Q5_K_M -> Q5_0 -> Q4_K_M -> Q4_0 -> Q3_K_M -> Q2_K, picking the highest quality that fits available VRAM. If nothing fits at full context, retries at half context.
-
-### Installation on Target Servers
-
-Recommended: `curl -fsSL https://llmfit.axjns.dev/install.sh | sh` -- downloads prebuilt x86_64 binary to `/usr/local/bin/llmfit`. No Rust toolchain needed. Works on headless RHEL/Fedora servers.
-
-Alternative: `pip install llmfit` / `uv tool install llmfit` (Python wrapper on PyPI, v0.9.28).
-
-### What This Replaces
-
-The current `start-vllm.sh` `configure_vllm_params()` function uses a `case "$GPU_MODEL"` switch with 5 branches:
-
-| GPU Match | Hardcoded Model | VRAM Logic |
-|-----------|----------------|------------|
-| H100/A100 | Qwen2.5-72B or 32B | Total VRAM thresholds (240GB, 160GB) |
-| T4 | Qwen2.5-3B or 7B | Single GPU VRAM <= 16GB check |
-| V100 | Qwen2.5-32B or 14B | Total VRAM >= 64GB check |
-| RTX/GeForce | Qwen2.5-14B or 7B | Single GPU VRAM >= 24GB check |
-| Default | Qwen2.5-7B | Conservative fallback |
-
-Problems with current approach:
-- Only covers 4 GPU families (misses A10, L40, MI250, etc.)
-- Only recommends Qwen2.5 models (no Llama, Mistral, DeepSeek, etc.)
-- No memory-fit analysis beyond raw VRAM thresholds
-- No quantization awareness (always serves full precision)
-- No speed estimation
-- No composite scoring
-
-llmfit provides: 157+ models, 30+ providers, dynamic quantization, bandwidth-based speed estimation, MoE support, multi-GPU awareness, composite score across 4 dimensions.
+- **Download size estimate (`dry_run=True`)**: Nice-to-have. Add when operators ask. Single function call to integrate.
+- **Pre-download auth validation (`auth_check`)**: Nice-to-have. Saves time but not blocking.
+- **Catalog disk usage summary**: Trivial to add once catalog exists (sum `size_on_disk` fields). Not blocking.
+- **Concurrent download limit**: Start unlimited, add semaphore when NFS throughput becomes an issue.
 
 ## Sources
 
-- [llmfit GitHub](https://github.com/AlexsJones/llmfit) -- v1.1.6, 30.5k stars, MIT license
-- [llmfit Documentation](https://alexsjones-llmfit.mintlify.app/) -- official docs
-- [llmfit recommend command reference](https://alexsjones-llmfit.mintlify.app/api/commands/recommend) -- JSON schema, all flags
-- [llmfit scoring system](https://alexsjones-llmfit.mintlify.app/concepts/how-it-works) -- dimension weights, quantization algorithm
-- [llmfit REST API guide](https://alexsjones-llmfit.mintlify.app/guides/rest-api) -- serve endpoints (not used, but documented)
-- [llmfit installation](https://alexsjones-llmfit.mintlify.app/installation) -- all install methods
-- [llmfit PyPI](https://pypi.org/project/llmfit/0.9.28/) -- Python package
-- [llmfit crates.io](https://crates.io/crates/llmfit) -- Rust crate
-- [llmfit.org](https://www.llmfit.org/) -- official website
+- huggingface-hub download API: verified via Context7 `/huggingface/huggingface_hub` -- `snapshot_download` parameters, `cache_dir` vs `local_dir`, `token`, `dry_run`, `allow_patterns` (HIGH)
+- huggingface-hub cache management: verified via Context7 `/huggingface/huggingface_hub` -- `scan_cache_dir`, `HFCacheInfo`, `CachedRepoInfo` (HIGH)
+- huggingface-hub error types: verified via Context7 -- `GatedRepoError` derives from `RepositoryNotFoundError`, `HfHubHTTPError`, `EntryNotFoundError` (HIGH)
+- huggingface-hub HfApi: verified via Context7 -- `model_info`, `auth_check`, `repo_exists` (HIGH)
+- HuggingFace gated models docs: https://huggingface.co/docs/hub/en/models-gated -- access request process, token permissions (HIGH)
+- HuggingFace download guide: https://huggingface.co/docs/huggingface_hub/en/guides/download (HIGH)
+- HuggingFace cache docs: https://huggingface.co/docs/huggingface_hub/en/guides/manage-cache (HIGH)
+- vLLM local model loading: https://github.com/vllm-project/vllm/issues/10721 -- requires HF model format with config.json (HIGH)
+- vLLM NFS config: https://docs.vllm.ai/en/latest/api/vllm/config/load/ -- NFS auto-detection, prefetch mode (MEDIUM)
+- llmfit model naming: https://github.com/AlexsJones/llmfit -- model DB sourced from HF API, `name` field uses HF repo_id format (MEDIUM)
+- Existing codebase: `start-vllm.sh` (NFS symlink to `/root/.cache/huggingface`), `setup.sh` (NFS mount), `node_detail.js` (recommendations table), `settings.py` (SecretStr pattern) (HIGH)
+- PROJECT.md milestone v1.7 target features (HIGH)

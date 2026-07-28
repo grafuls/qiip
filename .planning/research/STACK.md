@@ -1,251 +1,220 @@
 # Stack Research
 
-**Domain:** llmfit CLI integration for hardware-aware model recommendations (v1.6 milestone)
-**Researched:** 2026-07-23
+**Domain:** HuggingFace Hub model downloads, token auth, and NFS model catalog (v1.7 milestone)
+**Researched:** 2026-07-28
 **Confidence:** HIGH
-**Scope:** Stack additions for integrating the llmfit Rust CLI tool into node provisioning. llmfit is installed on and runs on target GPU servers, not the gateway. The gateway runs llmfit via SSH and parses JSON output. Existing stack (Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2) is validated and NOT re-evaluated here.
+**Scope:** Stack additions for downloading models from HuggingFace Hub to NFS storage, managing HF API tokens for gated models, and scanning NFS to build a local model catalog. Existing stack (Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2) is validated and NOT re-evaluated here.
 
-## New Python Dependencies for v1.6
+## New Python Dependencies for v1.7
 
-**None.**
+**One new runtime dependency: `huggingface-hub`.**
 
-Zero new runtime or dev dependencies. The entire integration is: run a command over SSH, parse JSON output with stdlib `json`, validate with Pydantic.
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| huggingface-hub | >=1.25, <2.0 | Model downloads, HF API, token auth | Official Python client for HuggingFace Hub. Provides `snapshot_download()` for full model downloads, `HfApi.model_info()` for metadata, and built-in token authentication for gated models (Llama, Mistral, etc.). Since v1.0 it uses httpx internally -- same HTTP client as our stack. Apache-2.0 licensed. Latest stable is 1.25.1 (July 27, 2026). Python >=3.10 required (we use 3.12). | HIGH |
 
-## Why No New Python Dependencies
+No new dev dependencies.
 
-### llmfit Is a Remote CLI Tool, Not a Python Library
+## Why huggingface-hub
 
-llmfit is a Rust binary that runs on the target GPU server, not on the gateway. The integration pattern is identical to the existing `nvidia-smi` GPU verification in `provisioner.py`:
+### It Is the Only Correct Choice
 
-1. SSH to host (asyncssh -- already installed)
-2. Run command (`llmfit recommend --json --limit 10`)
-3. Capture stdout (existing `SSHClient.run_streaming()` or `_ssh_run_command()`)
-4. Parse JSON (stdlib `json.loads()`)
-5. Validate with Pydantic model (Pydantic -- already installed)
-6. Return via FastAPI endpoint (FastAPI -- already installed)
+HuggingFace Hub is not a generic file server. Models are stored with LFS, Xet storage, revision tracking, access gating, and structured metadata. The `huggingface-hub` library handles all of this:
 
-Every piece of this chain already exists in the codebase.
+- **`snapshot_download(repo_id, local_dir, token)`** -- downloads an entire model repo to a local directory, resumable, with file integrity verification. Handles LFS pointers, concurrent file downloads (internal thread pool), and incomplete download recovery via `IncompleteSnapshotError`.
+- **`HfApi.model_info(repo_id, token)`** -- fetches model metadata (size, files, gating status) without downloading anything. Useful for the dashboard to show model details before download.
+- **Token parameter** -- pass `token="hf_xxx"` to any call for gated model access. No separate auth library needed.
+- **`scan_cache_dir(cache_dir)`** -- scans HF cache structure and returns `HFCacheInfo` with `CachedRepoInfo` per model. Useful if we download to HF cache layout. See NFS catalog section for trade-offs.
 
-### llmfit Installation on Target Servers
+### Dependency Alignment
 
-llmfit must be installed on target GPU servers during provisioning. The installation is a shell command executed via SSH, not a Python dependency.
+huggingface-hub v1.0+ migrated from `requests` to `httpx`. Its transitive dependencies:
 
-**Recommended installation method:** Pre-built binary download from GitHub releases.
+| Dependency | Already in our stack? | Notes |
+|------------|----------------------|-------|
+| httpx | Yes | Same version range. No conflict. Shared HTTP stack. |
+| filelock | No (new, small) | File locking for concurrent access. Stdlib-like. |
+| fsspec | No (new) | Filesystem abstraction. Pulled transitively. |
+| packaging | No (new, tiny) | Version parsing. |
+| pyyaml | No (new) | YAML parsing. Well-established. |
+| tqdm | No (new) | Progress bars. Used internally for download progress. |
+| typer | No (new) | CLI framework (for `hf` CLI). We do not use the CLI. |
+| typing-extensions | No (new, tiny) | Backport of typing features. |
+| hf-xet | Conditional | Architecture-gated optional. Xet storage acceleration. Auto-installed on x86_64. |
 
-```bash
-curl -fsSL https://github.com/AlexsJones/llmfit/releases/download/v1.1.6/llmfit-v1.1.6-x86_64-unknown-linux-gnu.tar.gz \
-  | tar xz -C /usr/local/bin/
-```
+**No conflicts with existing dependencies.** The httpx overlap is a feature -- both our proxy client and the HF client share the same HTTP stack.
 
-**Why pre-built binary over other options:**
+## Key API Surface
 
-| Method | Verdict | Reason |
-|--------|---------|--------|
-| Pre-built binary (GitHub release) | **USE** | Single curl+tar, no dependencies, ~5 seconds, pinnable version |
-| `curl -fsSL llmfit.axjns.dev/install.sh \| sh` | REJECT | Runs unaudited remote script as root. Fine interactively, wrong for automated provisioning. |
-| `cargo install llmfit` | REJECT | Requires Rust toolchain on target servers. Compilation takes minutes. Adding a build toolchain to GPU inference nodes is waste. |
-| `brew install llmfit` | REJECT | Homebrew on RHEL/Fedora lab servers is non-standard. Adds package manager complexity. |
-| `uv tool install llmfit` (Python wrapper) | REJECT | llmfit has a Python shim on PyPI but it just wraps the Rust binary. Adds uv/pip dependency on target nodes. The gateway has uv; the target GPU nodes should not need it. |
-| Podman/Docker container | REJECT | llmfit needs to detect host hardware (GPU, RAM, CPU). Container isolation may hide GPUs unless CDI/device passthrough is configured. Bare-metal binary is simpler and more reliable. |
+| Function | What It Does | Sync/Async | Wrap Pattern |
+|----------|-------------|------------|--------------|
+| `snapshot_download(repo_id, local_dir=, token=)` | Download entire model repo | Sync (internal thread pool) | `asyncio.to_thread()` |
+| `scan_cache_dir(cache_dir=)` | List cached repos with metadata | Sync | `asyncio.to_thread()` |
+| `HfApi.model_info(repo_id, token=)` | Get model metadata from Hub | Sync | `asyncio.to_thread()` |
 
-**Version pinning:** Hardcode the version in the provisioning script or settings. llmfit is actively developed (v1.1.6 released 2026-07-21, 30K+ GitHub stars). Pin to a known-good version and bump deliberately.
+All are sync. Wrap in `asyncio.to_thread()` -- same pattern as every etcd3gw call in the codebase.
 
-### llmfit JSON Output Schema
+**Thread-safety caveat:** `snapshot_download()` uses `tqdm` internally for progress, which has a known thread-safety issue when run via `ThreadPoolExecutor`. Call `huggingface_hub.utils.disable_progress_bars()` once at startup. We do not need terminal progress bars -- we track download status in our own state model.
 
-llmfit `recommend --json` produces a well-structured JSON envelope. The fields we need for model recommendation:
+## Key Exception Types
 
-**Envelope:**
+| Exception | When | Map To |
+|-----------|------|--------|
+| `RepositoryNotFoundError` | Invalid repo_id or private repo without token | 404 |
+| `GatedRepoError` | Gated model, no/invalid token | 403 |
+| `HfHubHTTPError` | Network/API errors | 502 |
+| `EntryNotFoundError` | Specific file not found in repo | 404 |
+| `IncompleteSnapshotError` | Download did not complete all files | Internal retry/fail |
 
-| Field | Type | Purpose |
-|-------|------|---------|
-| `system` | object | Detected hardware (GPU VRAM, RAM, CPU) |
-| `total_models` | int | Total models matching |
-| `returned_models` | int | Count returned |
-| `models` | array | Ranked model recommendations |
+## NFS Model Catalog: Two Approaches
 
-**Per-model fields we consume:**
+### Option A: Use HF Cache Layout + `scan_cache_dir()` (RECOMMENDED)
 
-| Field | Type | Example | Purpose |
-|-------|------|---------|---------|
-| `name` | string | `"Qwen/Qwen2.5-Coder-7B-Instruct"` | Full HuggingFace model ID |
-| `parameter_count` | string | `"7B"` | Human display |
-| `params_b` | float | `7.0` | Numeric params for sorting |
-| `fit_level` | string | `"good"` | `perfect`, `good`, `marginal`, `too_tight` |
-| `score` | float | `86.5` | Composite ranking score |
-| `score_components` | object | `{quality, speed, fit, context}` | Score breakdown |
-| `estimated_tps` | float | `42.5` | Estimated tokens/second |
-| `memory_required_gb` | float | `5.8` | VRAM needed |
-| `memory_available_gb` | float | `12.0` | VRAM detected |
-| `utilization_pct` | float | `48.3` | Memory utilization |
-| `best_quant` | string | `"Q5_K_M"` | Recommended quantization |
-| `context_length` | int | `32768` | Native context window |
-| `use_case` | string | `"Coding"` | Category |
-| `runtime` | string | `"llamacpp"` | Recommended runtime |
-| `license` | string | `"apache-2.0"` | License info |
-| `supports_tp` | array | `[1, 2, 4]` | Tensor parallelism degrees |
-| `disk_size_gb` | float | `5.1` | On-disk size at best_quant |
+Download models using `snapshot_download(cache_dir="/nfs/models")` which creates the standard HF cache structure: `models--org--name/snapshots/<hash>/`. Then use `scan_cache_dir("/nfs/models")` to enumerate what is downloaded.
 
-**Fields we can ignore:** `gguf_sources`, `ollama_name`, `verify_command`, `measured_tps`, `estimate_basis`, `installed`, `capability_ids`, `notes`. These are relevant for local llama.cpp/Ollama use cases, not for vLLM serving.
+**Why this approach:**
+- The existing `start-vllm.sh` already symlinks `~/.cache/huggingface` to NFS. vLLM loads models from the HF cache layout.
+- `scan_cache_dir()` returns structured `CachedRepoInfo` objects with repo_id, size, file count, and revision info. No custom parsing needed.
+- Resumable downloads and blob deduplication work automatically.
 
-**Important context:** llmfit's default recommendations are oriented toward local inference runtimes (llama.cpp, MLX, Ollama). For vLLM serving, the hardware detection (GPU count, VRAM per GPU, total VRAM) is the primary value. The model rankings may not perfectly match vLLM's memory requirements since vLLM uses different quantization and tensor parallelism strategies. The `--force-runtime vllm` flag exists and should be used.
+### Option B: Use `local_dir` + Filesystem Scan
 
-### Pydantic Models for llmfit Output
+Download models using `snapshot_download(local_dir="/nfs/models/meta-llama--Llama-3.1-8B-Instruct")` which writes files flat (no cache structure). Scan with `pathlib.Path.iterdir()`.
 
-Define Pydantic models to validate llmfit JSON output. This is pure Pydantic (already installed), no new libraries:
+**Why not:** Loses HF cache deduplication, resume logic is less reliable, and requires custom completeness detection. vLLM can load from flat dirs but the existing provisioning scripts use HF cache layout.
+
+## Integration with Existing App
+
+### Settings Addition
 
 ```python
-class LLMFitScoreComponents(BaseModel):
-    quality: float
-    speed: float
-    fit: float
-    context: float
+class HuggingFaceSettings(BaseModel):
+    """HuggingFace Hub configuration.
 
-class LLMFitModelRecommendation(BaseModel):
-    name: str
-    parameter_count: str
-    params_b: float
-    fit_level: str  # perfect, good, marginal, too_tight
-    score: float
-    score_components: LLMFitScoreComponents
-    estimated_tps: float
-    memory_required_gb: float
-    memory_available_gb: float
-    utilization_pct: float
-    best_quant: str
-    context_length: int
-    use_case: str
-    runtime: str
-    license: str
-    supports_tp: list[int] = []
-    disk_size_gb: float = 0.0
-
-class LLMFitResponse(BaseModel):
-    total_models: int
-    returned_models: int
-    models: list[LLMFitModelRecommendation]
+    When ``token`` is ``None`` (the default), only public models
+    can be downloaded. Setting it via
+    ``INFERENCE_PROXY_HUGGINGFACE__TOKEN`` enables gated model access.
+    """
+    token: SecretStr | None = None
+    models_dir: Path = Path("/nfs/models")
+    download_timeout: int = 7200  # seconds, 2 hours for large models (70B+)
 ```
 
-Use `model_config = ConfigDict(extra="ignore")` so new fields llmfit adds in future versions do not break parsing.
-
-## Integration Points with Existing App
-
-### SSH Execution (Existing Pattern)
-
-The `SSHClient._ssh_run_command()` helper already collects stdout from a remote command into a string. llmfit integration follows the exact same pattern as `_verify_gpu()` in `provisioner.py`:
+Follows the `RedfishSettings.bmc_password` pattern for `SecretStr`. Add to root `Settings` class:
 
 ```python
-# Existing pattern in provisioner.py:
-gpu_output = await self._ssh_run_command(hostname, "nvidia-smi ...")
-
-# llmfit follows same pattern:
-llmfit_output = await self._ssh_run_command(hostname, "llmfit recommend --json --limit 10 --force-runtime vllm")
+huggingface: HuggingFaceSettings = HuggingFaceSettings()
 ```
 
-### llmfit Installation During Provisioning
+Env vars: `INFERENCE_PROXY_HUGGINGFACE__TOKEN=hf_xxxxx`, `INFERENCE_PROXY_HUGGINGFACE__MODELS_DIR=/nfs/models`
 
-llmfit installation should be a step in `setup.sh` or a separate script uploaded during provisioning. It runs after system setup but can run before or after NVIDIA driver installation (llmfit detects GPUs but does not require drivers to be installed for hardware inventory -- it reads PCI device info).
+### Download Execution Pattern
 
-However, for accurate model recommendations including VRAM detection, llmfit should run **after** NVIDIA drivers are installed so it can detect GPU memory via `nvidia-smi` or NVML.
+Same pattern as etcd3gw sync calls throughout the codebase:
+
+```python
+from huggingface_hub import snapshot_download
+from huggingface_hub.utils import disable_progress_bars
+
+disable_progress_bars()  # call once at startup
+
+# In async context:
+path = await asyncio.to_thread(
+    snapshot_download,
+    repo_id="meta-llama/Llama-3.1-8B-Instruct",
+    cache_dir=str(settings.huggingface.models_dir),
+    token=settings.huggingface.token.get_secret_value() if settings.huggingface.token else None,
+)
+```
+
+### Download Status Tracking
+
+Downloads are long-running (minutes to hours). Track status in-memory, same pattern as provisioning state:
+
+```python
+class DownloadStatus(StrEnum):
+    PENDING = "pending"
+    DOWNLOADING = "downloading"
+    COMPLETE = "complete"
+    FAILED = "failed"
+```
+
+In-memory dict is sufficient for v1.7. Completed state is visible on the filesystem via `scan_cache_dir()`. If a download is interrupted and the gateway restarts, the model simply is not present in the catalog -- operator retries manually. No persistence needed beyond what the filesystem provides.
 
 ### Admin API Extension
 
-New endpoint following existing patterns:
+New endpoints following existing admin patterns:
 
 ```
-GET /admin/nodes/{hostname}/recommendations -> LLMFitRecommendationsResponse
+GET  /admin/models/catalog          -> list models on NFS (scan_cache_dir)
+POST /admin/models/download         -> start download (repo_id in body)
+GET  /admin/models/downloads        -> current download statuses
 ```
-
-This endpoint SSHes to the host, runs llmfit, parses output, and returns recommendations. It is an on-demand operation (operator clicks a button), not part of the provisioning sequence.
-
-### Provisioning Flow Change
-
-The provisioning flow does NOT change for v1.6. llmfit recommendations are a **pre-provisioning** step: the operator checks recommendations, picks a model, then starts provisioning with that model. The `provision()` method's sequence stays the same.
-
-### ProvisioningStep Enum
-
-No new enum values needed. llmfit runs outside the provisioning state machine -- it is an advisory query, not a provisioning step.
-
-### Settings
-
-Minimal new config:
-
-```python
-class LLMFitSettings(BaseModel):
-    """llmfit CLI configuration."""
-    version: str = "v1.1.6"  # pinned version for binary download
-    binary_path: str = "/usr/local/bin/llmfit"  # install location on target
-    recommend_limit: int = 10  # --limit flag
-    install_timeout: int = 60  # seconds for download+install
-```
-
-Env var: `INFERENCE_PROXY_LLMFIT__VERSION`, `INFERENCE_PROXY_LLMFIT__RECOMMEND_LIMIT`, etc.
 
 ## Alternatives Considered
 
-| Recommended | Alternative | Why Not |
-|-------------|-------------|---------|
-| Run llmfit CLI via SSH | Build Python hardware detection | llmfit already exists, is well-maintained (30K stars), detects GPU/RAM/CPU accurately, and ranks models. Reimplementing this in Python is months of work for an inferior result. |
-| Pre-built binary download | `cargo install` on target | Requires Rust toolchain on GPU servers. Compilation is slow. Binary download is seconds. |
-| Pre-built binary download | Install script (`curl \| sh`) | Unaudited remote script in automated provisioning. Pre-built binary is more controlled. |
-| `--force-runtime vllm` flag | Default runtime detection | llmfit defaults to llama.cpp/MLX/Ollama. We serve with vLLM. Force the runtime to get relevant recommendations. |
-| On-demand SSH execution | Cache recommendations in etcd | Hardware does not change. Cache adds complexity for no benefit -- the operator queries once, picks a model, and provisions. YAGNI. |
-| Pydantic model with `extra="ignore"` | Parse raw dict | Pydantic gives type safety and forward compatibility. Already in the stack. Zero cost. |
-| `_ssh_run_command()` (existing) | New SSH execution method | The existing helper collects stdout into a string. That is exactly what we need. |
+| Category | Recommended | Alternative | Why Not |
+|----------|-------------|-------------|---------|
+| Download client | huggingface-hub | httpx direct to HF API | Would need to reimplement cache structure, LFS handling, blob dedup, resume, gated auth. Months of fragile work. |
+| Download client | huggingface-hub | `hf` CLI via subprocess | Harder to integrate (output parsing, error handling, token passing). Library gives typed Python exceptions. |
+| Download client | huggingface-hub | `git lfs clone` | Requires git-lfs installed. No Python-level progress tracking. No token management API. |
+| Cache scanning | `scan_cache_dir()` | Custom `os.walk()` | Would need to parse `models--org--name` naming, handle symlinks, verify completeness. `scan_cache_dir()` does this correctly with `CachedRepoInfo`. |
+| Download tracking | In-memory dict | SQLite / etcd | Downloads are ephemeral. Completed state lives on filesystem. No persistence needed. |
+| Download tracking | In-memory dict | Redis | New infrastructure dependency for transient data. YAGNI. |
+| Token storage | `SecretStr` in settings | Vault / external secret manager | Internal network tool. Env var + SecretStr is the established pattern (see Redfish BMC password). |
 
 ## What NOT to Add
 
 | Technology | Why Not |
 |------------|---------|
-| Any Python GPU detection library (`gputil`, `pynvml`, `nvidia-ml-py`) | llmfit handles hardware detection on the target server. The gateway never touches GPUs. |
-| `subprocess` / local llmfit execution | llmfit must run on the target server to detect that server's hardware, not on the gateway. |
-| Model database / SQLite | Recommendations are queried on-demand from live hardware. No persistence needed. |
-| Background polling for recommendations | Hardware does not change between queries. On-demand is correct. |
-| WebSocket for recommendation streaming | llmfit `recommend --json` returns in ~2 seconds. No streaming needed. HTTP request/response is fine. |
-| New HTTP client library | httpx is not involved. This is pure SSH + JSON parsing. |
-| Task queue (Celery, etc.) | Running llmfit takes ~2 seconds. An asyncio task or even a synchronous endpoint is fine. No queue needed. |
-| Custom model ranking algorithm | llmfit's scoring (quality, speed, fit, context) is well-designed. Use it, do not reinvent it. |
-| `requests` library | Not needed. No HTTP calls to external services. SSH only. |
+| `transformers` | Massive dependency (PyTorch). We only download model files, not load them. |
+| `torch` / `tensorflow` | Model execution happens on vLLM nodes, not the gateway. |
+| `datasets` | Not downloading datasets. |
+| `safetensors` | vLLM handles model loading. Gateway only downloads. |
+| `boto3` / `s3fs` | Models are on HuggingFace Hub, not S3. |
+| `celery` / `dramatiq` | `asyncio.to_thread` is sufficient for background downloads. Same pattern as provisioning. No task queue needed. |
+| `requests` | huggingface-hub uses httpx since v1.0. We already use httpx. No reason to add requests. |
+| `hf_transfer` | Rust-based download accelerator. Optional optimization. Not needed for v1.7 -- standard downloads are fast enough on internal networks. Add when download speed is measurably a problem. |
+| WebSocket / SSE for download progress | Scope says "simple status (downloading/complete/failed)". Dashboard polling on existing 10-second interval suffices. |
 
 ## Installation
 
 ```bash
-# No new Python dependencies to install on the gateway.
-# Existing pyproject.toml already has everything needed.
-
-# On target servers (during provisioning, via SSH):
-curl -fsSL https://github.com/AlexsJones/llmfit/releases/download/v1.1.6/llmfit-v1.1.6-x86_64-unknown-linux-gnu.tar.gz \
-  | tar xz -C /usr/local/bin/
+# Add to pyproject.toml dependencies:
+uv add "huggingface-hub>=1.25,<2.0"
 ```
+
+No other installation steps on the gateway. No changes to target server provisioning scripts.
 
 ## Key Version Constraints
 
-No new Python version constraints. All existing constraints from v1.5 remain valid.
+| Dependency | Minimum | Why This Minimum |
+|------------|---------|------------------|
+| huggingface-hub >= 1.25 | Latest stable (July 2026). Uses httpx internally (since v1.0). Python >=3.10 required (we use 3.12). Includes `snapshot_download` with `local_dir`/`cache_dir` support, `HfApi.model_info()`, `scan_cache_dir()`, and token auth. |
 
-| Existing Dependency | Minimum | Still Valid | v1.6 Relevance |
-|---------------------|---------|-------------|----------------|
-| asyncssh >= 2.20 | SSH client | Yes | Runs llmfit on remote hosts, downloads binary |
-| Pydantic >= 2.10 | Model validation | Yes | New Pydantic models for llmfit JSON output |
-| FastAPI >= 0.135 | HTTP framework | Yes | New admin endpoint for recommendations |
-| structlog >= 26.1.0 | Structured logging | Yes | llmfit operation logging |
+**Existing constraints unchanged:**
 
-**External tool version:**
-
-| Tool | Version | Where | Why This Version |
-|------|---------|-------|------------------|
-| llmfit | v1.1.6 | Target GPU servers (not gateway) | Latest stable release (2026-07-21). Pre-built binaries available for x86_64 linux (gnu and musl). Supports `--json`, `--force-runtime vllm`, `--limit`. |
+| Existing Dependency | Minimum | v1.7 Relevance |
+|---------------------|---------|----------------|
+| FastAPI >= 0.135 | New admin endpoints for download management and catalog |
+| Pydantic >= 2.10 | New models for download status, catalog entries, HF settings |
+| pydantic-settings >= 2.14 | HuggingFaceSettings with SecretStr token |
+| structlog >= 26.1.0 | Download operation logging |
 
 ## Sources
 
-- llmfit GitHub: https://github.com/AlexsJones/llmfit -- v1.1.6 (July 2026), 30K+ stars, Rust CLI
-- llmfit README: https://github.com/AlexsJones/llmfit/blob/main/README.md -- installation methods, CLI usage
-- llmfit CLI docs: https://github.com/AlexsJones/llmfit/blob/main/docs/cli.md -- `recommend --json --limit --force-runtime --use-case` flags
-- llmfit API docs: https://github.com/AlexsJones/llmfit/blob/main/API.md -- full JSON response schema for model recommendations
-- llmfit releases: https://github.com/AlexsJones/llmfit/releases/tag/v1.1.6 -- pre-built binaries for linux x86_64 (gnu, musl), aarch64
-- Existing codebase: `inference_proxy/provisioning/provisioner.py` -- `_verify_gpu()` and `_ssh_run_command()` patterns to follow
-- Existing codebase: `inference_proxy/provisioning/ssh_client.py` -- SSHClient with `run_streaming()` and `upload()`
-- Existing codebase: `inference_proxy/api/admin.py` -- admin endpoint patterns
-- Existing codebase: `inference_proxy/config/settings.py` -- settings model patterns
+- huggingface-hub PyPI: https://pypi.org/project/huggingface-hub/ -- v1.25.1 (July 2026), Apache-2.0
+- huggingface-hub GitHub: https://github.com/huggingface/huggingface_hub -- official Python client
+- huggingface-hub download guide: Context7 /huggingface/huggingface_hub -- snapshot_download, local_dir, cache_dir, allow_patterns, token parameter (HIGH)
+- huggingface-hub cache management: Context7 /huggingface/huggingface_hub -- scan_cache_dir, HFCacheInfo, CachedRepoInfo (HIGH)
+- huggingface-hub HfApi: Context7 /huggingface/huggingface_hub -- model_info, list_models (HIGH)
+- huggingface-hub async discussion: https://github.com/huggingface/huggingface_hub/issues/1123 -- no native async for snapshot_download, asyncio.to_thread is the pattern
+- huggingface-hub tqdm thread safety: https://github.com/huggingface/huggingface_hub/issues/3285 -- disable_progress_bars() workaround for ThreadPoolExecutor usage
+- huggingface-hub NFS + Xet: https://github.com/huggingface/huggingface_hub/issues/3463 -- NFS volumes work, Xet activation is repo-dependent
+- Existing codebase: `inference_proxy/config/settings.py` -- SecretStr pattern (RedfishSettings.bmc_password), pydantic-settings nested model pattern
+- Existing codebase: `inference_proxy/provisioning/provisioner.py` -- asyncio.to_thread pattern for sync operations, background task pattern
+- Existing codebase: `inference_proxy/provisioning/state.py` -- StrEnum + frozen Pydantic model for state tracking
 
 ---
-*Stack research for: llmfit CLI integration for hardware-aware model recommendations (v1.6)*
-*Researched: 2026-07-23*
+*Stack research for: HuggingFace Hub model downloads, token auth, and NFS model catalog (v1.7)*
+*Researched: 2026-07-28*
