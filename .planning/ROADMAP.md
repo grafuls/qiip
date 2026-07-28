@@ -149,15 +149,11 @@ Plans:
   2. Recommendations table shows an "Already downloaded" badge when a recommended model exists on NFS
   3. Download status (downloading/complete/failed) is visible in the recommendations table and updates without page refresh
 
-**Plans**: 2 plans
+**Plans**: 1 plan
 Plans:
-**Wave 1**
 
-- [x] 31-01-PLAN.md — DownloadService, Pydantic models, and unit tests
+- [ ] 32-01-PLAN.md — Download column, catalog cross-reference, download trigger, status polling
 
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 31-02-PLAN.md — DI provider, admin endpoints, lifespan wiring, integration tests
 **UI hint**: yes
 
 ## Progress
@@ -198,4 +194,4 @@ Phases execute in numeric order: 30 -> 31 -> 32
 | 29. Dashboard Recommendations | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 30. Foundation & Model Catalog | v1.7 | 2/2 | Complete    | 2026-07-28 |
 | 31. Download Service & API | v1.7 | 2/2 | Complete    | 2026-07-28 |
-| 32. Dashboard Download Integration | v1.7 | 0/0 | Not started | - |
+| 32. Dashboard Download Integration | v1.7 | 0/1 | Not started | - |
