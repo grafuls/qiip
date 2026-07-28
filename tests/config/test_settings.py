@@ -10,6 +10,7 @@ from inference_proxy.config.settings import (
     DashboardSettings,
     EtcdSettings,
     GatewaySettings,
+    HuggingFaceSettings,
     ProvisioningSettings,
     QUADSSettings,
     RedfishSettings,
@@ -284,3 +285,29 @@ class TestRedfishSettingsIsNotBaseSettings:
 class TestSettingsIsBaseSettings:
     def test_settings_is_base_settings(self) -> None:
         assert issubclass(Settings, BaseSettings)
+
+
+class TestHuggingFaceSettings:
+    def test_cache_dir_required(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("INFERENCE_PROXY_HUGGINGFACE__CACHE_DIR", raising=False)
+        with pytest.raises(ValidationError, match="huggingface"):
+            Settings(_env_file=None)
+
+    def test_api_token_optional(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_HUGGINGFACE__CACHE_DIR", "/data/hf")
+        monkeypatch.delenv("INFERENCE_PROXY_HUGGINGFACE__API_TOKEN", raising=False)
+        settings = Settings(_env_file=None)
+        assert settings.huggingface.api_token is None
+
+    def test_api_token_from_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("INFERENCE_PROXY_HUGGINGFACE__CACHE_DIR", "/data/hf")
+        monkeypatch.setenv("INFERENCE_PROXY_HUGGINGFACE__API_TOKEN", "hf_test123")
+        settings = Settings(_env_file=None)
+        assert settings.huggingface.api_token is not None
+        assert settings.huggingface.api_token.get_secret_value() == "hf_test123"
+
+
+class TestHuggingFaceSettingsIsNotBaseSettings:
+    def test_huggingface_settings_is_base_model_not_base_settings(self) -> None:
+        assert not issubclass(HuggingFaceSettings, BaseSettings)
+        assert issubclass(HuggingFaceSettings, BaseModel)
