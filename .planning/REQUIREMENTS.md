@@ -19,10 +19,10 @@ Requirements for v1.7 HuggingFace Integration. Each maps to roadmap phases.
 
 ### Downloads
 
-- [ ] **DL-01**: Operator can trigger a model download from HuggingFace Hub to NFS via POST /admin/models/download
-- [ ] **DL-02**: Gateway tracks download status (downloading/complete/failed) per model in memory
-- [ ] **DL-03**: Admin API exposes GET /admin/models/downloads returning current download statuses
-- [ ] **DL-04**: Downloads use the configured HF token to access gated models (Llama, Mistral, etc.)
+- [x] **DL-01**: Operator can trigger a model download from HuggingFace Hub to NFS via POST /admin/models/download
+- [x] **DL-02**: Gateway tracks download status (downloading/complete/failed) per model in memory
+- [x] **DL-03**: Admin API exposes GET /admin/models/downloads returning current download statuses
+- [x] **DL-04**: Downloads use the configured HF token to access gated models (Llama, Mistral, etc.)
 
 ### Dashboard
 
@@ -69,10 +69,10 @@ Deferred to future milestone. Tracked but not in current roadmap.
 | CFG-02 | Phase 30 | Complete |
 | CAT-01 | Phase 30 | Complete |
 | CAT-02 | Phase 30 | Complete |
-| DL-01 | Phase 31 | Pending |
-| DL-02 | Phase 31 | Pending |
-| DL-03 | Phase 31 | Pending |
-| DL-04 | Phase 31 | Pending |
+| DL-01 | Phase 31 | Complete |
+| DL-02 | Phase 31 | Complete |
+| DL-03 | Phase 31 | Complete |
+| DL-04 | Phase 31 | Complete |
 | DASH-01 | Phase 32 | Pending |
 | DASH-02 | Phase 32 | Pending |
 | DASH-03 | Phase 32 | Pending |
