@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
 from inference_proxy.config.dependencies import (
+    get_catalog_service,
     get_llmfit_runner,
     get_provisioner,
     get_quads_client,
@@ -28,6 +29,7 @@ from inference_proxy.config.dependencies import (
     get_unified_node_service,
 )
 from inference_proxy.discovery.registry import NodeRegistry
+from inference_proxy.huggingface.catalog import ModelCatalogResponse, ModelCatalogService
 from inference_proxy.llmfit.errors import LLMFitParseError, LLMFitTimeoutError
 from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.models.admin import (
@@ -106,6 +108,15 @@ async def get_metrics(
         per_model=request_metrics.get_per_model(),
         per_node=request_metrics.get_per_node(),
     )
+
+
+@admin_router.get("/models/catalog")
+async def list_catalog(
+    catalog: ModelCatalogService = Depends(get_catalog_service),
+) -> ModelCatalogResponse:
+    """Return the list of models available in the HuggingFace NFS cache."""
+    models = await catalog.list_models()
+    return ModelCatalogResponse(models=models)
 
 
 @admin_router.post("/nodes/setup", status_code=202)

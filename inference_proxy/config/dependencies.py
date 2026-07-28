@@ -17,6 +17,7 @@ from functools import lru_cache
 from fastapi import Request
 
 from inference_proxy.discovery.registry import NodeRegistry
+from inference_proxy.huggingface.catalog import ModelCatalogService
 from inference_proxy.llmfit.runner import LLMFitRunner
 from inference_proxy.provisioning.provisioner import NodeProvisioner
 from inference_proxy.proxy.client import ProxyClient
@@ -96,6 +97,11 @@ def get_provisioner(request: Request) -> NodeProvisioner:
 def get_quads_client(request: Request) -> QUADSClient | None:
     """Return the QUADS client, or None when QUADS is not configured (D-10)."""
     return request.app.state.quads_client  # type: ignore[no-any-return]
+
+
+def get_catalog_service(request: Request) -> ModelCatalogService:
+    """Return the model catalog service from the current application state."""
+    return request.app.state.catalog_service  # type: ignore[no-any-return]
 
 
 def get_llmfit_runner(request: Request) -> LLMFitRunner:

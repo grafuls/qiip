@@ -34,6 +34,7 @@ from inference_proxy.config.dependencies import get_settings
 from inference_proxy.config.logging import configure_logging
 from inference_proxy.config.settings import Settings
 from inference_proxy.discovery.etcd_client import EtcdClient
+from inference_proxy.huggingface.catalog import ModelCatalogService
 from inference_proxy.discovery.registry import NodeRegistry
 from inference_proxy.discovery.serializer import node_from_etcd
 from inference_proxy.discovery.watcher import run_watcher
@@ -116,6 +117,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             1. Signal the watch thread to stop via ``threading.Event`` (per D-10)
             2. Join the watch thread with timeout
         """
+        # D-08/D-10: HuggingFace startup guards — before any HF usage
+        import os as _os
+
+        _os.environ["HF_HUB_DISABLE_XET"] = "1"
+        from huggingface_hub.utils import disable_progress_bars
+
+        disable_progress_bars()
+
         configure_logging(
             json_output=resolved_settings.logging.json_output,
             log_level=getattr(
@@ -168,6 +177,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ssh_client=ssh_client, settings=resolved_settings.llmfit
         )
         app.state.llmfit_runner = llmfit_runner
+
+        # Model catalog from NFS-mounted HuggingFace cache
+        cache_path = Path(resolved_settings.huggingface.cache_dir)
+        if not cache_path.is_dir():
+            raise RuntimeError(
+                f"HuggingFace cache directory does not exist: {cache_path}"
+            )
+        catalog_service = ModelCatalogService(
+            cache_dir=resolved_settings.huggingface.cache_dir
+        )
+        app.state.catalog_service = catalog_service
 
         if resolved_settings.redfish.bmc_username is not None:
             redfish_http = httpx.AsyncClient(
