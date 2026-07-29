@@ -292,6 +292,105 @@ function connectLogStream() {
   });
 }
 
+// ponytail: module-level state for download polling and catalog cache
+var catalogSetCache = new Set();
+var downloadPollTimer = null;
+
+function renderDownloadCell(td, modelName, catalogSet, downloadMap) {
+  td.textContent = "";
+  td.dataset.repoId = modelName;
+
+  var dl = downloadMap[modelName];
+
+  if (dl && dl.status === "downloading") {
+    var badge = document.createElement("span");
+    badge.className = "badge badge-in-progress";
+    badge.textContent = "Downloading…";
+    td.appendChild(badge);
+  } else if ((dl && dl.status === "complete") || catalogSet.has(modelName)) {
+    var badge = document.createElement("span");
+    badge.className = "badge badge-complete";
+    badge.textContent = "Downloaded";
+    td.appendChild(badge);
+  } else if (dl && dl.status === "failed") {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "badge badge-failed";
+    btn.style.cursor = "pointer";
+    btn.textContent = "Failed — Retry";
+    btn.addEventListener("click", function () { triggerDownload(modelName, td); });
+    td.appendChild(btn);
+  } else {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn-setup";
+    btn.textContent = "Download";
+    btn.addEventListener("click", function () { triggerDownload(modelName, td); });
+    td.appendChild(btn);
+  }
+}
+
+async function triggerDownload(repoId, td) {
+  // ponytail: optimistic UI — show Downloading immediately, don't wait for poll (Pitfall 2)
+  td.textContent = "";
+  var badge = document.createElement("span");
+  badge.className = "badge badge-in-progress";
+  badge.textContent = "Downloading…";
+  td.appendChild(badge);
+
+  try {
+    var resp = await fetch("/admin/models/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_id: repoId }),
+    });
+    if (resp.ok) {
+      showToast("Download started for " + repoId, "success");
+      startDownloadPolling();
+    } else {
+      var err = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
+      showToast(err.detail || "Download failed", "error");
+      renderDownloadCell(td, repoId, new Set(), { [repoId]: { status: "failed" } });
+    }
+  } catch (e) {
+    showToast("Network error starting download", "error");
+    renderDownloadCell(td, repoId, new Set(), {});
+  }
+}
+
+function startDownloadPolling() {
+  if (downloadPollTimer) return; // ponytail: single timer guard (T-32-02, Pitfall 4)
+  pollDownloadStatuses();
+  downloadPollTimer = setInterval(pollDownloadStatuses, 4000);
+}
+
+async function pollDownloadStatuses() {
+  try {
+    var resp = await fetch("/admin/models/downloads");
+    if (!resp.ok) return;
+    var downloads = await resp.json();
+
+    var downloadMap = {};
+    for (var i = 0; i < downloads.length; i++) downloadMap[downloads[i].repo_id] = downloads[i];
+
+    var cells = document.querySelectorAll("td[data-repo-id]");
+    for (var j = 0; j < cells.length; j++) {
+      var cell = cells[j];
+      var repoId = cell.dataset.repoId;
+      if (downloadMap[repoId]) {
+        if (downloadMap[repoId].status === "complete") catalogSetCache.add(repoId);
+        renderDownloadCell(cell, repoId, catalogSetCache, downloadMap);
+      }
+    }
+
+    var anyActive = downloads.some(function (d) { return d.status === "downloading"; });
+    if (!anyActive) {
+      clearInterval(downloadPollTimer);
+      downloadPollTimer = null;
+    }
+  } catch (_) { /* poll failure is silent — next tick retries */ }
+}
+
 // ponytail: on-demand fetch, not polled — each call triggers SSH+llmfit on remote host
 async function loadRecommendations() {
   var btn = document.getElementById("load-recs-btn");
@@ -321,6 +420,25 @@ async function loadRecommendations() {
 
     var data = await resp.json();
 
+    // ponytail: fetch catalog + downloads in parallel, graceful degradation per D-01/Pitfall 1
+    var catalogSet = new Set();
+    var downloadMap = {};
+    try {
+      var catalogResp = await fetch("/admin/models/catalog");
+      if (catalogResp.ok) {
+        var catalogData = await catalogResp.json();
+        catalogSet = new Set(catalogData.models.map(function (m) { return m.repo_id; }));
+      }
+    } catch (_) { /* catalog unavailable — all models show Download button */ }
+    try {
+      var dlResp = await fetch("/admin/models/downloads");
+      if (dlResp.ok) {
+        var dlArray = await dlResp.json();
+        for (var d = 0; d < dlArray.length; d++) downloadMap[dlArray[d].repo_id] = dlArray[d];
+      }
+    } catch (_) { /* downloads unavailable — no status overlay */ }
+    catalogSetCache = catalogSet;
+
     // Hardware summary
     var sys = data.system;
     hwSummary.style.display = "";
@@ -336,7 +454,7 @@ async function loadRecommendations() {
       var table = document.createElement("div");
       table.className = "table-wrap";
       var html = "<table><thead><tr>" +
-        "<th>Model</th><th>Category</th><th>Score</th><th>Fit</th><th>Est. tok/s</th><th>Memory</th>" +
+        "<th>Model</th><th>Category</th><th>Score</th><th>Fit</th><th>Est. tok/s</th><th>Memory</th><th>Download</th>" +
         "</tr></thead><tbody>";
       for (var i = 0; i < data.models.length; i++) {
         var m = data.models[i];
@@ -354,6 +472,18 @@ async function loadRecommendations() {
       table.innerHTML = html;
       content.textContent = "";
       content.appendChild(table);
+
+      // ponytail: append Download cells via createElement (needs addEventListener)
+      var rows = table.querySelectorAll("tbody tr");
+      for (var j = 0; j < rows.length; j++) {
+        var td = document.createElement("td");
+        renderDownloadCell(td, data.models[j].name, catalogSet, downloadMap);
+        rows[j].appendChild(td);
+      }
+
+      // ponytail: if any downloads are active, start polling (handles Reload case)
+      var anyActive = Object.keys(downloadMap).some(function (k) { return downloadMap[k].status === "downloading"; });
+      if (anyActive) startDownloadPolling();
     }
 
     btn.textContent = "Reload";
