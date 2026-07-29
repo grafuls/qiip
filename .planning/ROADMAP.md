@@ -90,7 +90,7 @@
 
 - [x] **Phase 30: Foundation & Model Catalog** - HuggingFace settings, NFS model catalog service, and catalog API endpoint (completed 2026-07-28)
 - [x] **Phase 31: Download Service & API** - Background model downloads with dedicated thread pool, status tracking, and admin endpoints (completed 2026-07-28)
-- [ ] **Phase 32: Dashboard Download Integration** - Download buttons, "already downloaded" badges, and status display in recommendations table
+- [x] **Phase 32: Dashboard Download Integration** - Download buttons, "already downloaded" badges, and status display in recommendations table (completed 2026-07-29)
 
 ## Phase Details
 
@@ -152,7 +152,7 @@ Plans:
 **Plans**: 1 plan
 Plans:
 
-- [ ] 32-01-PLAN.md — Download column, catalog cross-reference, download trigger, status polling
+- [x] 32-01-PLAN.md — Download column, catalog cross-reference, download trigger, status polling
 
 **UI hint**: yes
 
@@ -194,4 +194,4 @@ Phases execute in numeric order: 30 -> 31 -> 32
 | 29. Dashboard Recommendations | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 30. Foundation & Model Catalog | v1.7 | 2/2 | Complete    | 2026-07-28 |
 | 31. Download Service & API | v1.7 | 2/2 | Complete    | 2026-07-28 |
-| 32. Dashboard Download Integration | v1.7 | 0/1 | Not started | - |
+| 32. Dashboard Download Integration | v1.7 | 1/1 | Complete   | 2026-07-29 |
