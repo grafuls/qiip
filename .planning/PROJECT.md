@@ -68,6 +68,18 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - ✓ Dashboard expandable error sub-row for failed nodes — v1.5 (Phase 24)
 - ✓ Human-readable Redfish error mapping — v1.5 (Phase 21)
 
+### Validated in v1.7
+
+- [x] HuggingFace API token configuration for gated model access — v1.7 (Phase 30)
+- [x] NFS cache directory scanning returning list of downloaded models — v1.7 (Phase 30)
+- [x] Admin API: GET /admin/models/catalog — v1.7 (Phase 30)
+- [x] Background model download from HuggingFace Hub to NFS — v1.7 (Phase 31)
+- [x] Download status tracking (downloading/complete/failed) — v1.7 (Phase 31)
+- [x] Admin API: POST /admin/models/download, GET /admin/models/downloads — v1.7 (Phase 31)
+- [x] Dashboard download button per recommended model — v1.7 (Phase 32)
+- [x] "Already downloaded" badge in recommendations table — v1.7 (Phase 32)
+- [x] Live download status in recommendations table with polling — v1.7 (Phase 32)
+
 ### Active
 
 - [x] Install llmfit CLI on target GPU servers during provisioning setup — v1.6 (Phase 26)
@@ -85,22 +97,11 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - Geographic distribution — future work
 - Model caching/optimization — future work
 
-## Current Milestone: v1.7 HuggingFace Integration
-
-**Goal:** Download models from HuggingFace Hub to NFS storage, integrated with llmfit recommendations in the dashboard.
-
-**Target features:**
-- Download models from HuggingFace Hub to the gateway's NFS mount
-- HuggingFace API token support for gated models (Llama, Mistral, etc.)
-- NFS model catalog — gateway scans NFS to know what's already downloaded
-- Download button on llmfit recommendations pane (per recommended model)
-- Simple download status (downloading/complete/failed) in the dashboard
-- "Already downloaded" indicator when a recommended model exists on NFS
-
 ## Context
 
-Shipped v1.6 across 29 phases. All milestones complete: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements, v1.6 LLMFit for Best Fit Models. The gateway proxies OpenAI-compatible requests to vLLM nodes with service discovery, load balancing, circuit breakers, SSH provisioning, QUADS host discovery, Redfish power management, llmfit model recommendations, operations dashboard, and chatbot playground with system prompt configuration.
-Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2.
+Shipped v1.7 across 32 phases. All milestones complete: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements, v1.6 LLMFit for Best Fit Models, v1.7 HuggingFace Integration. The gateway proxies OpenAI-compatible requests to vLLM nodes with service discovery, load balancing, circuit breakers, SSH provisioning, QUADS host discovery, Redfish power management, llmfit model recommendations, HuggingFace model downloads, operations dashboard, and chatbot playground with system prompt configuration.
+Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2, huggingface-hub.
+Codebase: 16,237 LOC, 568 tests.
 
 The system leverages existing QUADS-managed server infrastructure. QUADS tracks server allocations across labs; idle servers with GPUs can be dynamically provisioned to run vLLM containers. The gateway sits between clients and these vLLM nodes, providing a single stable endpoint.
 
@@ -111,6 +112,7 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 - The gateway is a FastAPI application using httpx for async proxying
 - Operations dashboard: Jinja2-rendered HTML with vanilla JS polling for auto-refresh
 - v1.2: SSH-based node provisioning and teardown from gateway
+- v1.7: HuggingFace model downloads to NFS with dashboard integration
 - Future: NGINX (external access), Prometheus metrics, auto-scaling
 
 ## Constraints
@@ -151,6 +153,11 @@ The system leverages existing QUADS-managed server infrastructure. QUADS tracks 
 | System prompt via messages.slice()+unshift | Never mutates conversation array; takes effect on next send | ✓ Validated v1.4 |
 | localStorage for system prompt persistence | Same pattern as theme preference; single-user internal tool | ✓ Validated v1.4 |
 | CSS custom properties for theming | All new UI uses var(--*) tokens only — zero hardcoded colors | ✓ Validated v1.4 |
+| huggingface-hub for HF integration | Single dependency, native cache scanning, gated model support | ✓ Validated v1.7 |
+| cache_dir= over local_dir= | HF cache layout compatibility with vLLM model loading | ✓ Validated v1.7 |
+| Sync downloads via ThreadPoolExecutor | huggingface-hub is sync; dedicated 2-3 worker thread pool | ✓ Validated v1.7 |
+| Independent fetch for catalog/downloads | try/catch per request, not Promise.all — prevents cascade failures | ✓ Validated v1.7 |
+| Lazy 4s polling with single-timer guard | Starts on download trigger, auto-stops when no active downloads | ✓ Validated v1.7 |
 
 ## Evolution
 
@@ -170,4 +177,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-28 — Milestone v1.7 started: HuggingFace Integration*
+*Last updated: 2026-07-29 after v1.7 milestone*

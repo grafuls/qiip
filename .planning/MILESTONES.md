@@ -1,5 +1,30 @@
 # Milestones
 
+## v1.7 HuggingFace Integration — SHIPPED 2026-07-29
+
+**Phases:** 3 | **Plans:** 5 | **Tests:** 568 | **LOC:** 16,237 (Python + HTML/CSS/JS)
+**Timeline:** 2026-07-28 to 2026-07-29 (2 days)
+**Commits:** 8 feat, 1 fix
+**Requirements:** 11/11 complete (100%)
+
+### Key Accomplishments
+
+1. HuggingFace settings with SecretStr token and NFS cache directory configuration
+2. ModelCatalogService scanning HF cache via asyncio.to_thread with admin API endpoint
+3. DownloadService with thread-safe status tracking, semaphore-gated concurrency, and background downloads
+4. Admin API: GET /admin/models/catalog, POST /admin/models/download, GET /admin/models/downloads
+5. Dashboard download column with catalog cross-reference, optimistic UI trigger, and lazy 4s polling
+
+### Known Deferred Items
+
+- Download enhancements (DLE-01 through DLE-05) deferred to future milestone
+- In-memory download status (lost on restart)
+- Verification gaps from v1.0 still open (Phases 3, 6)
+
+**Archive:** [v1.7-ROADMAP.md](milestones/v1.7-ROADMAP.md) | [v1.7-REQUIREMENTS.md](milestones/v1.7-REQUIREMENTS.md)
+
+---
+
 ## v1.5 Node Setup Enhancements (Shipped: 2026-07-22)
 
 **Phases completed:** 4 phases, 6 plans, 5 tasks

@@ -9,7 +9,7 @@
 - ✅ **v1.4 Chatbot Playground** — Phases 19-20 (shipped 2026-07-21)
 - ✅ **v1.5 Node Setup Enhancements** — Phases 21-24 (shipped 2026-07-22)
 - ✅ **v1.6 LLMFit for Best Fit Models** — Phases 25-29 (shipped 2026-07-26)
-- 🚧 **v1.7 HuggingFace Integration** — Phases 30-32 (in progress)
+- ✅ **v1.7 HuggingFace Integration** — Phases 30-32 (shipped 2026-07-29)
 
 ## Phases
 
@@ -84,82 +84,16 @@
 
 </details>
 
-### v1.7 HuggingFace Integration (In Progress)
+<details>
+<summary>v1.7 HuggingFace Integration (Phases 30-32) — SHIPPED 2026-07-29</summary>
 
-**Milestone Goal:** Download models from HuggingFace Hub to NFS storage, integrated with llmfit recommendations in the dashboard.
+- [x] Phase 30: Foundation & Model Catalog (2/2 plans) — completed 2026-07-28
+- [x] Phase 31: Download Service & API (2/2 plans) — completed 2026-07-28
+- [x] Phase 32: Dashboard Download Integration (1/1 plan) — completed 2026-07-29
 
-- [x] **Phase 30: Foundation & Model Catalog** - HuggingFace settings, NFS model catalog service, and catalog API endpoint (completed 2026-07-28)
-- [x] **Phase 31: Download Service & API** - Background model downloads with dedicated thread pool, status tracking, and admin endpoints (completed 2026-07-28)
-- [x] **Phase 32: Dashboard Download Integration** - Download buttons, "already downloaded" badges, and status display in recommendations table (completed 2026-07-29)
-
-## Phase Details
-
-### Phase 30: Foundation & Model Catalog
-
-**Goal**: Gateway can discover which models are already downloaded on NFS storage
-**Depends on**: Nothing (first phase of v1.7)
-**Requirements**: CFG-01, CFG-02, CAT-01, CAT-02
-**Success Criteria** (what must be TRUE):
-
-  1. Operator can configure HuggingFace API token and NFS cache directory path via environment variables
-  2. Gateway scans the NFS cache directory and returns a list of downloaded model repo IDs
-  3. GET /admin/models/catalog returns all models currently available on NFS with their repo IDs
-
-**Plans**: 2 plans
-Plans:
-**Wave 1**
-
-- [x] 30-01-PLAN.md — HuggingFace settings, catalog service, and unit tests
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 30-02-PLAN.md — Admin endpoint wiring, lifespan startup, integration tests
-
-### Phase 31: Download Service & API
-
-**Goal**: Operators can download models from HuggingFace Hub to NFS and monitor download status
-**Depends on**: Phase 30
-**Requirements**: DL-01, DL-02, DL-03, DL-04
-**Success Criteria** (what must be TRUE):
-
-  1. POST /admin/models/download triggers a background download of a specified model from HuggingFace Hub to NFS
-  2. Downloads use the configured HF token to access gated models (Llama, Mistral, etc.)
-  3. Gateway tracks per-model download status (downloading/complete/failed) in memory
-  4. GET /admin/models/downloads returns current download statuses for all active and recently completed downloads
-  5. Concurrent downloads do not block the event loop or starve other background services
-
-**Plans**: 2 plans
-Plans:
-**Wave 1**
-
-- [x] 31-01-PLAN.md — DownloadService, Pydantic models, and unit tests
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 31-02-PLAN.md — DI provider, admin endpoints, lifespan wiring, integration tests
-
-### Phase 32: Dashboard Download Integration
-
-**Goal**: Operators can trigger and monitor model downloads directly from the recommendations table
-**Depends on**: Phase 31
-**Requirements**: DASH-01, DASH-02, DASH-03
-**Success Criteria** (what must be TRUE):
-
-  1. Node detail recommendations table shows a "Download" button for each recommended model
-  2. Recommendations table shows an "Already downloaded" badge when a recommended model exists on NFS
-  3. Download status (downloading/complete/failed) is visible in the recommendations table and updates without page refresh
-
-**Plans**: 1 plan
-Plans:
-
-- [x] 32-01-PLAN.md — Download column, catalog cross-reference, download trigger, status polling
-
-**UI hint**: yes
+</details>
 
 ## Progress
-
-**Execution Order:**
-Phases execute in numeric order: 30 -> 31 -> 32
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -192,6 +126,6 @@ Phases execute in numeric order: 30 -> 31 -> 32
 | 27. Admin API Endpoint | v1.6 | 2/2 | Complete | 2026-07-26 |
 | 28. Model Selection | v1.6 | 1/1 | Complete | 2026-07-26 |
 | 29. Dashboard Recommendations | v1.6 | 1/1 | Complete | 2026-07-26 |
-| 30. Foundation & Model Catalog | v1.7 | 2/2 | Complete    | 2026-07-28 |
-| 31. Download Service & API | v1.7 | 2/2 | Complete    | 2026-07-28 |
-| 32. Dashboard Download Integration | v1.7 | 1/1 | Complete   | 2026-07-29 |
+| 30. Foundation & Model Catalog | v1.7 | 2/2 | Complete | 2026-07-28 |
+| 31. Download Service & API | v1.7 | 2/2 | Complete | 2026-07-28 |
+| 32. Dashboard Download Integration | v1.7 | 1/1 | Complete | 2026-07-29 |

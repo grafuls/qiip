@@ -33,6 +33,39 @@
 
 ---
 
+## Milestone: v1.7 — HuggingFace Integration
+
+**Shipped:** 2026-07-29
+**Phases:** 3 | **Plans:** 5
+
+### What Was Built
+- HuggingFace settings with SecretStr token and NFS cache dir configuration
+- ModelCatalogService scanning HF cache with admin API endpoint
+- DownloadService with thread-safe status tracking and semaphore-gated background downloads
+- Dashboard download column with catalog cross-reference, optimistic UI, lazy polling
+
+### What Worked
+- llmfit model names being HF repo IDs eliminated mapping complexity — zero transformation needed
+- Independent try/catch per fetch (catalog, downloads, recommendations) prevented cascade failures
+- Optimistic UI pattern (immediate badge swap on download click) gave instant feedback without waiting for server
+- 2-day execution for 3 phases — tight scope and clear requirements kept velocity high
+
+### What Was Inefficient
+- Phase 32 DASH requirements were left unchecked in REQUIREMENTS.md traceability despite code being complete — caught at milestone close
+- XSS vectors found in code review after Phase 32 execution — security review should run before marking phase complete
+
+### Patterns Established
+- asyncio.to_thread wrapper for sync HF library calls (same pattern as etcd3gw)
+- Module-level cache Set shared between initial load and poll updater for download state
+- Lazy polling with single-timer guard — starts on user action, auto-stops when idle
+
+### Key Lessons
+1. When reusing a sync library in an async app, the thread pool pattern (asyncio.to_thread + ThreadPoolExecutor) is now proven across two subsystems (etcd, HF)
+2. Dashboard features that poll should use lazy polling (start on trigger, stop when idle) rather than always-on intervals
+3. Security review needs to run as part of phase execution, not as a post-hoc catch-up
+
+---
+
 ## Cross-Milestone Trends
 
 ### Process Evolution
@@ -41,6 +74,7 @@
 |-----------|--------|-------|------------|
 | v1.0 MVP | 6 | 13 | Established TDD, circuit breaker, structured logging patterns |
 | v1.1 Web UI | 3 | 5 | Added frontend (Jinja2+JS), first UI verification gap |
+| v1.7 HuggingFace | 3 | 5 | HF downloads integrated into dashboard, 2-day execution |
 
 ### Cumulative Quality
 
@@ -48,6 +82,7 @@
 |-----------|-------|-----|------------------|
 | v1.0 | 226 | 6,830 | FastAPI, httpx, etcd3gw, structlog, pydantic-settings |
 | v1.1 | 265 | 7,618 | jinja2 |
+| v1.7 | 568 | 16,237 | huggingface-hub |
 
 ### Top Lessons (Verified Across Milestones)
 
