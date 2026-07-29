@@ -117,7 +117,9 @@
   1. Node detail page shows a model selector dropdown populated from GET /admin/models/catalog
   2. Setup action on node detail page sends the selected model in SetupRequest.model
   3. Setup button is disabled when no models are downloaded (catalog is empty)
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 35-01-PLAN.md — Model selector card and catalog wiring
 **UI hint**: yes
 
 ## Progress
