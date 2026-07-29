@@ -526,7 +526,28 @@ document.addEventListener("click", function () {
   for (var i = 0; i < open.length; i++) open[i].classList.remove("open");
 });
 
+var POWER_BADGE = {
+  On:  { cls: "badge-complete", text: "Power: On" },
+  Off: { cls: "badge-failed",   text: "Power: Off" },
+};
+var POWER_UNKNOWN = { cls: "badge-unknown", text: "Power: Unknown" };
+
+async function refreshPowerState() {
+  var el = document.querySelector("#power-state span");
+  try {
+    var resp = await fetch("/admin/nodes/" + encodeURIComponent(NODE_ID) + "/power");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var data = await resp.json();
+    var info = POWER_BADGE[data.power_state] || POWER_UNKNOWN;
+  } catch (_) {
+    var info = POWER_UNKNOWN;
+  }
+  el.className = "badge " + info.cls;
+  el.textContent = info.text;
+}
+
 document.addEventListener("DOMContentLoaded", function () {
   refreshDetail();
+  refreshPowerState();
   setInterval(refreshDetail, POLL_INTERVAL_MS);
 });
