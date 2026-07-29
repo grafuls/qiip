@@ -10,7 +10,8 @@
 - ✅ **v1.5 Node Setup Enhancements** — Phases 21-24 (shipped 2026-07-22)
 - ✅ **v1.6 LLMFit for Best Fit Models** — Phases 25-29 (shipped 2026-07-26)
 - ✅ **v1.7 HuggingFace Integration** — Phases 30-32 (shipped 2026-07-29)
-- 🚧 **v1.8 Nodes Power Control** — Phases 33-34 (in progress)
+- ✅ **v1.8 Nodes Power Control** — Phases 33-34 (shipped 2026-07-29)
+- 🚧 **v1.9 Model Selection in Node Setup** — Phase 35 (in progress)
 
 ## Phases
 
@@ -94,42 +95,35 @@
 
 </details>
 
-### 🚧 v1.8 Nodes Power Control
+<details>
+<summary>v1.8 Nodes Power Control (Phases 33-34) — SHIPPED 2026-07-29</summary>
 
-- [x] **Phase 33: Power State Display** - Fetch and show BMC power state badge on node detail page (completed 2026-07-29)
-- [ ] **Phase 34: Power Action Controls** - Power action buttons with confirmation and context-aware visibility
+- [x] Phase 33: Power State Display (1/1 plan) — completed 2026-07-29
+- [x] Phase 34: Power Action Controls (1/1 plan) — completed 2026-07-29
+
+</details>
+
+### 🚧 v1.9 Model Selection in Node Setup
+
+- [ ] **Phase 35: Model Selector on Node Detail Page** - Model dropdown from downloaded catalog, required for setup, sent in SetupRequest.model
 
 ## Phase Details
 
-### Phase 33: Power State Display
-**Goal**: Operators can see the current BMC power state of any node on its detail page
-**Depends on**: Nothing (backend API exists from v1.5)
-**Requirements**: PWR-01, PWR-02
+### Phase 35: Model Selector on Node Detail Page
+**Goal**: Operators select a downloaded model from a dropdown on the node detail page before setting up a node
+**Depends on**: Nothing (catalog API and SetupRequest.model exist)
+**Requirements**: MDL-01, MDL-02, MDL-03
 **Success Criteria** (what must be TRUE):
-  1. Node detail page shows a power state badge (On/Off/Unknown) in the node header area on page load
-  2. Power state is fetched from the existing GET /admin/nodes/{hostname}/power endpoint without requiring manual refresh
-  3. A reusable refresh function exists that re-fetches and updates the power state badge (consumed by Phase 34 action handlers)
-**Plans**: 1 plan
-Plans:
-- [x] 33-01-PLAN.md — Power state badge and refreshPowerState function
-**UI hint**: yes
-
-### Phase 34: Power Action Controls
-**Goal**: Operators can trigger BMC power actions from the node detail page with safety guards
-**Depends on**: Phase 33
-**Requirements**: PWR-03, PWR-04, PWR-05
-**Success Criteria** (what must be TRUE):
-  1. Node detail page displays Power On, Force Off, Graceful Restart, and Force Restart action buttons
-  2. Clicking Force Off or Force Restart shows a confirmation dialog before sending the request
-  3. Buttons are disabled or hidden based on current power state (e.g., Power On not shown when node is already on)
-  4. After a successful power action, the power state badge automatically refreshes to reflect the new state
+  1. Node detail page shows a model selector dropdown populated from GET /admin/models/catalog
+  2. Setup action on node detail page sends the selected model in SetupRequest.model
+  3. Setup button is disabled when no models are downloaded (catalog is empty)
 **Plans**: TBD
 **UI hint**: yes
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 33 → 34
+Phases execute in numeric order: 35
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -165,5 +159,6 @@ Phases execute in numeric order: 33 → 34
 | 30. Foundation & Model Catalog | v1.7 | 2/2 | Complete | 2026-07-28 |
 | 31. Download Service & API | v1.7 | 2/2 | Complete | 2026-07-28 |
 | 32. Dashboard Download Integration | v1.7 | 1/1 | Complete | 2026-07-29 |
-| 33. Power State Display | v1.8 | 1/1 | Complete   | 2026-07-29 |
-| 34. Power Action Controls | v1.8 | 0/? | Not started | - |
+| 33. Power State Display | v1.8 | 1/1 | Complete | 2026-07-29 |
+| 34. Power Action Controls | v1.8 | 1/1 | Complete | 2026-07-29 |
+| 35. Model Selector on Node Detail Page | v1.9 | 0/? | Not started | - |

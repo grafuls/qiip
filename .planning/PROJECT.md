@@ -85,18 +85,24 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - ✓ Install llmfit CLI on target GPU servers during provisioning setup — v1.6 (Phase 26)
 - ✓ Operator selects which model to deploy via SetupRequest.model field — v1.6 (Phase 28)
 
+### Validated in v1.8
+
+- [x] Power state display on node detail page (On/Off/Unknown badge) — v1.8 (Phase 33)
+- [x] Power action buttons on node detail page (Power On, Force Off, Graceful Restart, Force Restart) — v1.8 (Phase 34)
+
 ### Active
 
-- [ ] Power state display on node detail page (On/Off/Unknown badge)
-- [ ] Power action buttons on node detail page (Power On, Force Off, Graceful Restart, Force Restart)
+- [ ] Model selector dropdown on node detail page for setup (from downloaded catalog)
+- [ ] Setup button disabled when no models downloaded
 
-## Current Milestone: v1.8 Nodes Power Control
+## Current Milestone: v1.9 Model Selection in Node Setup
 
-**Goal:** Surface BMC power management on the node detail page so operators can see power state and trigger power actions without using the API directly.
+**Goal:** Operators select which downloaded model to deploy when setting up a node from the node detail page.
 
 **Target features:**
-- Power state display on node detail page (On/Off/Unknown badge)
-- Power action buttons on node detail page (Power On, Force Off, Graceful Restart, Force Restart)
+- Model selector dropdown populated from NFS model catalog
+- Setup sends selected model in SetupRequest.model
+- Setup blocked when no models downloaded
 
 ### Out of Scope
 
@@ -112,7 +118,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ## Context
 
-Shipped v1.7 across 32 phases. Milestones: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements, v1.6 LLMFit for Best Fit Models, v1.7 HuggingFace Integration. Currently building v1.8: surfacing existing Redfish power management in the node detail dashboard page.
+Shipped v1.8 across 34 phases. Milestones: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements, v1.6 LLMFit for Best Fit Models, v1.7 HuggingFace Integration, v1.8 Nodes Power Control. Currently building v1.9: model selection from downloaded catalog during node setup.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2, huggingface-hub.
 Codebase: 16,237 LOC, 568 tests.
 
@@ -190,4 +196,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-29 after v1.8 milestone start*
+*Last updated: 2026-07-29 after v1.9 milestone start*
