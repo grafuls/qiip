@@ -532,18 +532,98 @@ var POWER_BADGE = {
 };
 var POWER_UNKNOWN = { cls: "badge-unknown", text: "Power: Unknown" };
 
+var currentPowerState = null;
+
+var POWER_ACTIONS = [
+  { action: "On", label: "Power On", css: "btn-setup", confirm: false },
+  { action: "ForceOff", label: "Force Off", css: "btn-teardown", confirm: true,
+    confirmMsg: "Force off " + NODE_ID + "? This will immediately cut power." },
+  { action: "GracefulRestart", label: "Graceful Restart", css: "btn-cancel", confirm: false },
+  { action: "ForceRestart", label: "Force Restart", css: "btn-cancel", confirm: true,
+    confirmMsg: "Force restart " + NODE_ID + "? This will immediately reset the node." },
+];
+
+function renderPowerButtons() {
+  var container = document.getElementById("power-actions");
+  container.textContent = "";
+  var visible;
+  if (currentPowerState === "On") {
+    visible = ["ForceOff", "GracefulRestart", "ForceRestart"];
+  } else if (currentPowerState === "Off") {
+    visible = ["On"];
+  } else {
+    visible = ["On", "ForceOff", "GracefulRestart", "ForceRestart"];
+  }
+  for (var i = 0; i < POWER_ACTIONS.length; i++) {
+    (function (pa) {
+      if (visible.indexOf(pa.action) === -1) return;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = pa.css;
+      btn.textContent = pa.label;
+      btn.addEventListener("click", function () { handlePowerAction(pa.action); });
+      container.appendChild(btn);
+    })(POWER_ACTIONS[i]);
+  }
+}
+
+async function handlePowerAction(action) {
+  var config;
+  for (var i = 0; i < POWER_ACTIONS.length; i++) {
+    if (POWER_ACTIONS[i].action === action) { config = POWER_ACTIONS[i]; break; }
+  }
+  if (!config) return;
+  if (config.confirm && !window.confirm(config.confirmMsg)) return;
+
+  var el = document.querySelector("#power-state span");
+  var prevClass = el.className;
+  var prevText = el.textContent;
+
+  var btns = document.querySelectorAll("#power-actions button");
+  for (var j = 0; j < btns.length; j++) btns[j].disabled = true;
+
+  el.className = "badge badge-unknown";
+  el.textContent = "Power: ...";
+
+  try {
+    var resp = await fetch("/admin/nodes/" + encodeURIComponent(NODE_ID) + "/power", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: action }),
+    });
+    if (resp.ok) {
+      showToast("Power action sent: " + config.label, "success");
+      refreshPowerState();
+    } else {
+      var data = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
+      showToast(data.detail || "HTTP " + resp.status, "error");
+      el.className = prevClass;
+      el.textContent = prevText;
+      for (var k = 0; k < btns.length; k++) btns[k].disabled = false;
+    }
+  } catch (err) {
+    showToast(config.label + " failed: " + err.message, "error");
+    el.className = prevClass;
+    el.textContent = prevText;
+    for (var k = 0; k < btns.length; k++) btns[k].disabled = false;
+  }
+}
+
 async function refreshPowerState() {
   var el = document.querySelector("#power-state span");
   try {
     var resp = await fetch("/admin/nodes/" + encodeURIComponent(NODE_ID) + "/power");
     if (!resp.ok) throw new Error("HTTP " + resp.status);
     var data = await resp.json();
+    currentPowerState = data.power_state;
     var info = POWER_BADGE[data.power_state] || POWER_UNKNOWN;
   } catch (_) {
+    currentPowerState = null;
     var info = POWER_UNKNOWN;
   }
   el.className = "badge " + info.cls;
   el.textContent = info.text;
+  renderPowerButtons();
 }
 
 document.addEventListener("DOMContentLoaded", function () {
