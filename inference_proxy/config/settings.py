@@ -141,6 +141,8 @@ class LLMFitSettings(BaseModel):
     binary_path: str = "/usr/local/bin/llmfit"
     timeout: float = 60.0
     allowed_providers: list[str] = []
+    version: str = "1.1.6"
+    install_url: str = "https://github.com/AlexsJones/llmfit/releases/download/v{version}/llmfit-v{version}-x86_64-unknown-linux-musl.tar.gz"
 
 
 class HuggingFaceSettings(BaseModel):
