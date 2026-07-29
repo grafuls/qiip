@@ -96,7 +96,7 @@
 
 ### 🚧 v1.8 Nodes Power Control
 
-- [ ] **Phase 33: Power State Display** - Fetch and show BMC power state badge on node detail page
+- [x] **Phase 33: Power State Display** - Fetch and show BMC power state badge on node detail page (completed 2026-07-29)
 - [ ] **Phase 34: Power Action Controls** - Power action buttons with confirmation and context-aware visibility
 
 ## Phase Details
@@ -111,7 +111,7 @@
   3. A reusable refresh function exists that re-fetches and updates the power state badge (consumed by Phase 34 action handlers)
 **Plans**: 1 plan
 Plans:
-- [ ] 33-01-PLAN.md — Power state badge and refreshPowerState function
+- [x] 33-01-PLAN.md — Power state badge and refreshPowerState function
 **UI hint**: yes
 
 ### Phase 34: Power Action Controls
@@ -165,5 +165,5 @@ Phases execute in numeric order: 33 → 34
 | 30. Foundation & Model Catalog | v1.7 | 2/2 | Complete | 2026-07-28 |
 | 31. Download Service & API | v1.7 | 2/2 | Complete | 2026-07-28 |
 | 32. Dashboard Download Integration | v1.7 | 1/1 | Complete | 2026-07-29 |
-| 33. Power State Display | v1.8 | 0/1 | Not started | - |
+| 33. Power State Display | v1.8 | 1/1 | Complete   | 2026-07-29 |
 | 34. Power Action Controls | v1.8 | 0/? | Not started | - |
