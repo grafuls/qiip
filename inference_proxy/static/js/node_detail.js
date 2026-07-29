@@ -292,8 +292,9 @@ function connectLogStream() {
   });
 }
 
-// ponytail: module-level cache so poll updater can reference catalog without re-fetching
+// ponytail: module-level state for download polling and catalog cache
 var catalogSetCache = new Set();
+var downloadPollTimer = null;
 
 function renderDownloadCell(td, modelName, catalogSet, downloadMap) {
   td.textContent = "";
@@ -327,6 +328,67 @@ function renderDownloadCell(td, modelName, catalogSet, downloadMap) {
     btn.addEventListener("click", function () { triggerDownload(modelName, td); });
     td.appendChild(btn);
   }
+}
+
+async function triggerDownload(repoId, td) {
+  // ponytail: optimistic UI — show Downloading immediately, don't wait for poll (Pitfall 2)
+  td.textContent = "";
+  var badge = document.createElement("span");
+  badge.className = "badge badge-in-progress";
+  badge.textContent = "Downloading…";
+  td.appendChild(badge);
+
+  try {
+    var resp = await fetch("/admin/models/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo_id: repoId }),
+    });
+    if (resp.ok) {
+      showToast("Download started for " + repoId, "success");
+      startDownloadPolling();
+    } else {
+      var err = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
+      showToast(err.detail || "Download failed", "error");
+      renderDownloadCell(td, repoId, new Set(), { [repoId]: { status: "failed" } });
+    }
+  } catch (e) {
+    showToast("Network error starting download", "error");
+    renderDownloadCell(td, repoId, new Set(), {});
+  }
+}
+
+function startDownloadPolling() {
+  if (downloadPollTimer) return; // ponytail: single timer guard (T-32-02, Pitfall 4)
+  pollDownloadStatuses();
+  downloadPollTimer = setInterval(pollDownloadStatuses, 4000);
+}
+
+async function pollDownloadStatuses() {
+  try {
+    var resp = await fetch("/admin/models/downloads");
+    if (!resp.ok) return;
+    var downloads = await resp.json();
+
+    var downloadMap = {};
+    for (var i = 0; i < downloads.length; i++) downloadMap[downloads[i].repo_id] = downloads[i];
+
+    var cells = document.querySelectorAll("td[data-repo-id]");
+    for (var j = 0; j < cells.length; j++) {
+      var cell = cells[j];
+      var repoId = cell.dataset.repoId;
+      if (downloadMap[repoId]) {
+        if (downloadMap[repoId].status === "complete") catalogSetCache.add(repoId);
+        renderDownloadCell(cell, repoId, catalogSetCache, downloadMap);
+      }
+    }
+
+    var anyActive = downloads.some(function (d) { return d.status === "downloading"; });
+    if (!anyActive) {
+      clearInterval(downloadPollTimer);
+      downloadPollTimer = null;
+    }
+  } catch (_) { /* poll failure is silent — next tick retries */ }
 }
 
 // ponytail: on-demand fetch, not polled — each call triggers SSH+llmfit on remote host
