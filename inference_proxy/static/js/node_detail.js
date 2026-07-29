@@ -16,7 +16,7 @@ function showToast(message, type) {
 var ACTION_CONFIG = {
   setup: {
     method: "POST", url: function () { return "/admin/nodes/setup"; },
-    body: function (id) { return { hostname: id }; }, confirm: false,
+    body: function (id) { var b = { hostname: id }; var m = getSelectedModel(); if (m) b.model = m; return b; }, confirm: false,
     label: "Setup Node", css: "btn-setup",
     successMsg: function (id) { return "Setup started for " + id; },
   },
@@ -29,7 +29,7 @@ var ACTION_CONFIG = {
   },
   retry: {
     method: "POST", url: function () { return "/admin/nodes/setup"; },
-    body: function (id) { return { hostname: id }; }, confirm: false,
+    body: function (id) { var b = { hostname: id }; var m = getSelectedModel(); if (m) b.model = m; return b; }, confirm: false,
     label: "Retry", css: "btn-retry",
     successMsg: function (id) { return "Retry started for " + id; },
   },
@@ -178,7 +178,11 @@ async function refreshDetail() {
       var tdRq = document.createElement("td"); tdRq.textContent = node.state === "available" ? "—" : (perNode[node.node_id] || 0); tr.appendChild(tdRq);
 
       var tdAc = document.createElement("td");
-      tdAc.appendChild(createActionsDropdown(node.node_id, node.actions || []));
+      var enabledActions = node.actions || [];
+      if (catalogModels.length === 0) {
+        enabledActions = enabledActions.filter(function (a) { return a !== "setup"; });
+      }
+      tdAc.appendChild(createActionsDropdown(node.node_id, enabledActions));
       tr.appendChild(tdAc);
 
       infoBody.appendChild(tr);
@@ -626,7 +630,44 @@ async function refreshPowerState() {
   renderPowerButtons();
 }
 
+// ponytail: model catalog state for setup config card
+var catalogModels = [];
+
+function getSelectedModel() {
+  var el = document.getElementById("model-select");
+  return el ? el.value : "";
+}
+
+async function fetchCatalog() {
+  var sel = document.getElementById("model-select");
+  var status = document.getElementById("model-status");
+  try {
+    var resp = await fetch("/admin/models/catalog");
+    if (!resp.ok) throw new Error("HTTP " + resp.status);
+    var data = await resp.json();
+    catalogModels = data.models || [];
+  } catch (_) {
+    catalogModels = [];
+  }
+  if (catalogModels.length === 0) {
+    sel.style.display = "none";
+    status.style.display = "inline";
+    status.textContent = "No models downloaded";
+  } else {
+    sel.style.display = "";
+    status.style.display = "none";
+    sel.textContent = "";
+    for (var i = 0; i < catalogModels.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = catalogModels[i].repo_id;
+      opt.textContent = catalogModels[i].repo_id;
+      sel.appendChild(opt);
+    }
+  }
+}
+
 document.addEventListener("DOMContentLoaded", function () {
+  fetchCatalog();
   refreshDetail();
   refreshPowerState();
   setInterval(refreshDetail, POLL_INTERVAL_MS);
