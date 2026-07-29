@@ -80,15 +80,28 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - [x] "Already downloaded" badge in recommendations table — v1.7 (Phase 32)
 - [x] Live download status in recommendations table with polling — v1.7 (Phase 32)
 
+### Validated in v1.6
+
+- ✓ Install llmfit CLI on target GPU servers during provisioning setup — v1.6 (Phase 26)
+- ✓ Operator selects which model to deploy via SetupRequest.model field — v1.6 (Phase 28)
+
 ### Active
 
-- [x] Install llmfit CLI on target GPU servers during provisioning setup — v1.6 (Phase 26)
-- [ ] Run llmfit via SSH to detect hardware and produce ranked model recommendations
-- [ ] Admin API endpoint returning model fit recommendations for a given server
-- [x] Operator selects which model to deploy via SetupRequest.model field — v1.6 (Phase 28)
+- [ ] Power state display on node detail page (On/Off/Unknown badge)
+- [ ] Power action buttons on node detail page (Power On, Force Off, Graceful Restart, Force Restart)
+
+## Current Milestone: v1.8 Nodes Power Control
+
+**Goal:** Surface BMC power management on the node detail page so operators can see power state and trigger power actions without using the API directly.
+
+**Target features:**
+- Power state display on node detail page (On/Off/Unknown badge)
+- Power action buttons on node detail page (Power On, Force Off, Graceful Restart, Force Restart)
 
 ### Out of Scope
 
+- llmfit SSH-based hardware detection and ranked model recommendations — partially built in v1.6, deferred
+- Admin API for model fit recommendations — deferred from v1.6
 - Authentication/authorization — internal network only for v1
 - NGINX/SSL termination — separate deployment concern
 - Control plane (full orchestration, auto-scaling) — v1.2 covers setup/teardown only
@@ -99,7 +112,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ## Context
 
-Shipped v1.7 across 32 phases. All milestones complete: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements, v1.6 LLMFit for Best Fit Models, v1.7 HuggingFace Integration. The gateway proxies OpenAI-compatible requests to vLLM nodes with service discovery, load balancing, circuit breakers, SSH provisioning, QUADS host discovery, Redfish power management, llmfit model recommendations, HuggingFace model downloads, operations dashboard, and chatbot playground with system prompt configuration.
+Shipped v1.7 across 32 phases. Milestones: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements, v1.6 LLMFit for Best Fit Models, v1.7 HuggingFace Integration. Currently building v1.8: surfacing existing Redfish power management in the node detail dashboard page.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2, huggingface-hub.
 Codebase: 16,237 LOC, 568 tests.
 
@@ -177,4 +190,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-29 after v1.7 milestone*
+*Last updated: 2026-07-29 after v1.8 milestone start*

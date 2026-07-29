@@ -1,17 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.7
-milestone_name: HuggingFace Integration
-status: complete
-stopped_at: Milestone v1.7 shipped
-last_updated: "2026-07-29"
-last_activity: 2026-07-29 -- Milestone v1.7 completed
+milestone: v1.8
+milestone_name: Nodes Power Control
+status: planning
+last_updated: "2026-07-29T09:38:09.934Z"
+last_activity: 2026-07-29
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 5
-  completed_plans: 5
-  percent: 100
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -25,12 +24,10 @@ See: .planning/PROJECT.md (updated 2026-07-29)
 
 ## Current Position
 
-Phase: 32 (dashboard-download-integration) — COMPLETE
-Plan: 1 of 1
-Status: Milestone v1.7 shipped
-Last activity: 2026-07-29 -- Milestone v1.7 completed
-
-Progress: [██████████] 100%
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-07-29 — Milestone v1.8 started
 
 ## Performance Metrics
 
