@@ -62,10 +62,8 @@ async function handleAction(action, nodeId) {
     var resp = await fetch(config.url(nodeId), options);
     if (resp.ok) {
       showToast(config.successMsg(nodeId), "success");
-      if (action === "setup" || action === "retry" || action === "teardown" || action === "cancel" || action === "force_teardown") {
-        logReceivedAny = false; logStreamDone = false;
-        if (logSource) { logSource.close(); logSource = null; }
-      }
+      logReceivedAny = false; logStreamDone = false;
+      if (logSource) { logSource.close(); logSource = null; }
     } else {
       var data = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
       showToast(data.detail || "HTTP " + resp.status, "error");
@@ -350,11 +348,11 @@ async function triggerDownload(repoId, td) {
     } else {
       var err = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
       showToast(err.detail || "Download failed", "error");
-      renderDownloadCell(td, repoId, new Set(), { [repoId]: { status: "failed" } });
+      renderDownloadCell(td, repoId, catalogSetCache, { [repoId]: { status: "failed" } });
     }
   } catch (e) {
     showToast("Network error starting download", "error");
-    renderDownloadCell(td, repoId, new Set(), {});
+    renderDownloadCell(td, repoId, catalogSetCache, {});
   }
 }
 
@@ -412,7 +410,11 @@ async function loadRecommendations() {
         ssh_error: "llmfit command failed on " + NODE_ID + ".",
       };
       showToast(msgs[err.error_type] || err.detail || "Failed to load recommendations", "error");
-      content.innerHTML = '<span class="error-text">' + (err.detail || "Failed to load") + '</span>';
+      content.textContent = "";
+      var errSpan = document.createElement("span");
+      errSpan.className = "error-text";
+      errSpan.textContent = err.detail || "Failed to load";
+      content.appendChild(errSpan);
       btn.textContent = "Retry";
       btn.disabled = false;
       return;
@@ -442,44 +444,61 @@ async function loadRecommendations() {
     // Hardware summary
     var sys = data.system;
     hwSummary.style.display = "";
-    hwSummary.innerHTML = "<strong>GPU:</strong> " + (sys.gpu_name || "Unknown") +
-      " &nbsp;&middot;&nbsp; <strong>VRAM:</strong> " + sys.gpu_vram_gb.toFixed(1) + " GB" +
-      " &nbsp;&middot;&nbsp; <strong>Backend:</strong> " + (sys.backend || "Unknown");
+    hwSummary.textContent = "";
+    var hwParts = [
+      ["GPU: ", sys.gpu_name || "Unknown"],
+      [" · VRAM: ", sys.gpu_vram_gb.toFixed(1) + " GB"],
+      [" · Backend: ", sys.backend || "Unknown"],
+    ];
+    for (var hp = 0; hp < hwParts.length; hp++) {
+      var label = document.createElement("strong");
+      label.textContent = hwParts[hp][0];
+      hwSummary.appendChild(label);
+      hwSummary.appendChild(document.createTextNode(hwParts[hp][1]));
+    }
 
     // Model table
     if (data.models.length === 0) {
       content.innerHTML = '<span style="color:var(--muted);font-size:0.875rem">No model recommendations available for this hardware.</span>';
     } else {
       var FIT_BADGE = { perfect: "badge-complete", good: "badge-in-progress", marginal: "badge-failed" };
-      var table = document.createElement("div");
-      table.className = "table-wrap";
-      var html = "<table><thead><tr>" +
-        "<th>Model</th><th>Category</th><th>Score</th><th>Fit</th><th>Est. tok/s</th><th>Memory</th><th>Download</th>" +
-        "</tr></thead><tbody>";
+      var wrap = document.createElement("div");
+      wrap.className = "table-wrap";
+      var tbl = document.createElement("table");
+      var thead = document.createElement("thead");
+      var headRow = document.createElement("tr");
+      var headers = ["Model", "Category", "Score", "Fit", "Est. tok/s", "Memory", "Download"];
+      for (var h = 0; h < headers.length; h++) {
+        var th = document.createElement("th"); th.textContent = headers[h]; headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      tbl.appendChild(thead);
+
+      var tbody = document.createElement("tbody");
       for (var i = 0; i < data.models.length; i++) {
         var m = data.models[i];
         var badgeCls = FIT_BADGE[m.fit_level] || "badge-in-progress";
-        html += "<tr>" +
-          "<td>" + m.name + "</td>" +
-          "<td>" + (m.category || "—") + "</td>" +
-          "<td>" + m.score.toFixed(1) + "%</td>" +
-          "<td><span class=\"badge " + badgeCls + "\">" + m.fit_level + "</span></td>" +
-          "<td>" + m.estimated_tps.toFixed(1) + "</td>" +
-          "<td>" + m.memory_required_gb.toFixed(1) + " GB</td>" +
-          "</tr>";
-      }
-      html += "</tbody></table>";
-      table.innerHTML = html;
-      content.textContent = "";
-      content.appendChild(table);
+        var row = document.createElement("tr");
 
-      // ponytail: append Download cells via createElement (needs addEventListener)
-      var rows = table.querySelectorAll("tbody tr");
-      for (var j = 0; j < rows.length; j++) {
-        var td = document.createElement("td");
-        renderDownloadCell(td, data.models[j].name, catalogSet, downloadMap);
-        rows[j].appendChild(td);
+        var tdName = document.createElement("td"); tdName.textContent = m.name; row.appendChild(tdName);
+        var tdCat = document.createElement("td"); tdCat.textContent = m.category || "—"; row.appendChild(tdCat);
+        var tdScore = document.createElement("td"); tdScore.textContent = m.score.toFixed(1) + "%"; row.appendChild(tdScore);
+        var tdFit = document.createElement("td");
+        var fitBadge = document.createElement("span"); fitBadge.className = "badge " + badgeCls; fitBadge.textContent = m.fit_level;
+        tdFit.appendChild(fitBadge); row.appendChild(tdFit);
+        var tdTps = document.createElement("td"); tdTps.textContent = m.estimated_tps.toFixed(1); row.appendChild(tdTps);
+        var tdMem = document.createElement("td"); tdMem.textContent = m.memory_required_gb.toFixed(1) + " GB"; row.appendChild(tdMem);
+
+        var tdDl = document.createElement("td");
+        renderDownloadCell(tdDl, m.name, catalogSet, downloadMap);
+        row.appendChild(tdDl);
+
+        tbody.appendChild(row);
       }
+      tbl.appendChild(tbody);
+      wrap.appendChild(tbl);
+      content.textContent = "";
+      content.appendChild(wrap);
 
       // ponytail: if any downloads are active, start polling (handles Reload case)
       var anyActive = Object.keys(downloadMap).some(function (k) { return downloadMap[k].status === "downloading"; });
@@ -490,7 +509,11 @@ async function loadRecommendations() {
     btn.disabled = false;
   } catch (e) {
     showToast("Network error loading recommendations", "error");
-    content.innerHTML = '<span class="error-text">Network error</span>';
+    content.textContent = "";
+    var netErr = document.createElement("span");
+    netErr.className = "error-text";
+    netErr.textContent = "Network error";
+    content.appendChild(netErr);
     btn.textContent = "Retry";
     btn.disabled = false;
   }
