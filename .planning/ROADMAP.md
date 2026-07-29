@@ -11,7 +11,7 @@
 - ✅ **v1.6 LLMFit for Best Fit Models** — Phases 25-29 (shipped 2026-07-26)
 - ✅ **v1.7 HuggingFace Integration** — Phases 30-32 (shipped 2026-07-29)
 - ✅ **v1.8 Nodes Power Control** — Phases 33-34 (shipped 2026-07-29)
-- 🚧 **v1.9 Model Selection in Node Setup** — Phase 35 (in progress)
+- ✅ **v1.9 Model Selection in Node Setup** — Phase 35 (shipped 2026-07-29)
 
 ## Phases
 
@@ -103,29 +103,14 @@
 
 </details>
 
-### 🚧 v1.9 Model Selection in Node Setup
+<details>
+<summary>v1.9 Model Selection in Node Setup (Phase 35) — SHIPPED 2026-07-29</summary>
 
-- [ ] **Phase 35: Model Selector on Node Detail Page** - Model dropdown from downloaded catalog, required for setup, sent in SetupRequest.model
+- [x] Phase 35: Model Selector on Node Detail Page (1/1 plan) — completed 2026-07-29
 
-## Phase Details
-
-### Phase 35: Model Selector on Node Detail Page
-**Goal**: Operators select a downloaded model from a dropdown on the node detail page before setting up a node
-**Depends on**: Nothing (catalog API and SetupRequest.model exist)
-**Requirements**: MDL-01, MDL-02, MDL-03
-**Success Criteria** (what must be TRUE):
-  1. Node detail page shows a model selector dropdown populated from GET /admin/models/catalog
-  2. Setup action on node detail page sends the selected model in SetupRequest.model
-  3. Setup button is disabled when no models are downloaded (catalog is empty)
-**Plans**: 1 plan
-Plans:
-- [ ] 35-01-PLAN.md — Model selector card and catalog wiring
-**UI hint**: yes
+</details>
 
 ## Progress
-
-**Execution Order:**
-Phases execute in numeric order: 35
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -163,4 +148,4 @@ Phases execute in numeric order: 35
 | 32. Dashboard Download Integration | v1.7 | 1/1 | Complete | 2026-07-29 |
 | 33. Power State Display | v1.8 | 1/1 | Complete | 2026-07-29 |
 | 34. Power Action Controls | v1.8 | 1/1 | Complete | 2026-07-29 |
-| 35. Model Selector on Node Detail Page | v1.9 | 0/? | Not started | - |
+| 35. Model Selector on Node Detail Page | v1.9 | 1/1 | Complete | 2026-07-29 |

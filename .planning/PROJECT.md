@@ -90,19 +90,14 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 - [x] Power state display on node detail page (On/Off/Unknown badge) — v1.8 (Phase 33)
 - [x] Power action buttons on node detail page (Power On, Force Off, Graceful Restart, Force Restart) — v1.8 (Phase 34)
 
-### Active
+### Validated in v1.9
 
-- [ ] Model selector dropdown on node detail page for setup (from downloaded catalog)
-- [ ] Setup button disabled when no models downloaded
+- [x] Model selector dropdown on node detail page for setup (from downloaded catalog) — v1.9 (Phase 35)
+- [x] Setup button disabled when no models downloaded — v1.9 (Phase 35)
 
-## Current Milestone: v1.9 Model Selection in Node Setup
+## Current State
 
-**Goal:** Operators select which downloaded model to deploy when setting up a node from the node detail page.
-
-**Target features:**
-- Model selector dropdown populated from NFS model catalog
-- Setup sends selected model in SetupRequest.model
-- Setup blocked when no models downloaded
+Shipped v1.9. No active milestone — run `/gsd:new-milestone` to start the next one.
 
 ### Out of Scope
 
@@ -118,7 +113,7 @@ Route inference requests to healthy vLLM nodes with automatic failover — the g
 
 ## Context
 
-Shipped v1.8 across 34 phases. Milestones: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements, v1.6 LLMFit for Best Fit Models, v1.7 HuggingFace Integration, v1.8 Nodes Power Control. Currently building v1.9: model selection from downloaded catalog during node setup.
+Shipped v1.9 across 35 phases. Milestones: v1.0 MVP, v1.1 Web UI, v1.2 Node Setup, v1.3 QUADS Integration, v1.4 Chatbot Playground, v1.5 Node Setup Enhancements, v1.6 LLMFit for Best Fit Models, v1.7 HuggingFace Integration, v1.8 Nodes Power Control, v1.9 Model Selection in Node Setup.
 Tech stack: Python 3.12, FastAPI, httpx, etcd3gw, asyncssh, structlog, Pydantic v2, Jinja2, huggingface-hub.
 Codebase: 16,237 LOC, 568 tests.
 
@@ -196,4 +191,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-29 after v1.9 milestone start*
+*Last updated: 2026-07-29 after v1.9 milestone completion*
