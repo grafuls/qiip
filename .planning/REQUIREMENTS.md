@@ -37,17 +37,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PWR-01 | — | Pending |
-| PWR-02 | — | Pending |
-| PWR-03 | — | Pending |
-| PWR-04 | — | Pending |
-| PWR-05 | — | Pending |
+| PWR-01 | Phase 33 | Pending |
+| PWR-02 | Phase 33 | Pending |
+| PWR-03 | Phase 34 | Pending |
+| PWR-04 | Phase 34 | Pending |
+| PWR-05 | Phase 34 | Pending |
 
 **Coverage:**
 - v1.8 requirements: 5 total
-- Mapped to phases: 0
-- Unmapped: 5
+- Mapped to phases: 5
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-29*
-*Last updated: 2026-07-29 after initial definition*
+*Last updated: 2026-07-29 after roadmap creation*
