@@ -109,7 +109,9 @@
   1. Node detail page shows a power state badge (On/Off/Unknown) in the node header area on page load
   2. Power state is fetched from the existing GET /admin/nodes/{hostname}/power endpoint without requiring manual refresh
   3. A reusable refresh function exists that re-fetches and updates the power state badge (consumed by Phase 34 action handlers)
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [ ] 33-01-PLAN.md — Power state badge and refreshPowerState function
 **UI hint**: yes
 
 ### Phase 34: Power Action Controls
@@ -163,5 +165,5 @@ Phases execute in numeric order: 33 → 34
 | 30. Foundation & Model Catalog | v1.7 | 2/2 | Complete | 2026-07-28 |
 | 31. Download Service & API | v1.7 | 2/2 | Complete | 2026-07-28 |
 | 32. Dashboard Download Integration | v1.7 | 1/1 | Complete | 2026-07-29 |
-| 33. Power State Display | v1.8 | 0/? | Not started | - |
+| 33. Power State Display | v1.8 | 0/1 | Not started | - |
 | 34. Power Action Controls | v1.8 | 0/? | Not started | - |
