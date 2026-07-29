@@ -3,8 +3,9 @@ gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Nodes Power Control
 status: planning
-last_updated: "2026-07-29"
-last_activity: 2026-07-29
+stopped_at: Phase 33 context gathered
+last_updated: "2026-07-29T10:11:17.706Z"
+last_activity: 2026-07-29 — Roadmap created for v1.8 Nodes Power Control
 progress:
   total_phases: 2
   completed_phases: 0
@@ -68,6 +69,6 @@ None active.
 
 ## Session Continuity
 
-Last session: 2026-07-29
-Stopped at: Roadmap created for v1.8, ready to plan Phase 33
-Resume file: None
+Last session: 2026-07-29T10:11:17.697Z
+Stopped at: Phase 33 context gathered
+Resume file: .planning/phases/33-power-state-display/33-CONTEXT.md
