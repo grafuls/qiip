@@ -87,6 +87,17 @@ class NodeProvisioner:
     def log_buffer(self) -> ProvisioningLogBuffer:
         return self._log_buffer
 
+    def _script_env_prefix(self) -> str:
+        """Build env var prefix for remote script invocation."""
+        s = self._settings
+        return (
+            f"NFS_SERVER={shlex.quote(s.nfs_server)} "
+            f"NFS_MOUNT_POINT={shlex.quote(s.nfs_mount_point)} "
+            f"NVIDIA_DRIVER_VERSION={shlex.quote(s.nvidia_driver_version)} "
+            f"VLLM_PORT={s.vllm_port} "
+            f"LLMFIT_VERSION={shlex.quote(s.llmfit_version)} "
+        )
+
     def _log(
         self,
         hostname: str,
@@ -329,7 +340,7 @@ class NodeProvisioner:
     async def _run_setup(self, hostname: str) -> None:
         """Run setup.sh and parse step markers from stdout (D-05, D-06)."""
         async for stream, line in self._ssh_client.run_streaming(
-            hostname, "bash auto-vllm/setup.sh"
+            hostname, f"{self._script_env_prefix()}bash auto-vllm/setup.sh"
         ):
             if stream == "stdout":
                 match = STEP_PATTERN.search(line)
@@ -365,7 +376,7 @@ class NodeProvisioner:
 
     async def _run_start_vllm(self, hostname: str, *, model: str | None = None) -> str:
         """Run start-vllm.sh and extract model name from stdout."""
-        command = "bash auto-vllm/start-vllm.sh"
+        command = f"{self._script_env_prefix()}bash auto-vllm/start-vllm.sh"
         if model:
             command = f"VLLM_MODEL={shlex.quote(model)} {command}"
         model_name: str | None = None

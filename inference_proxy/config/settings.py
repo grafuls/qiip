@@ -117,6 +117,10 @@ class ProvisioningSettings(BaseModel):
     scripts_dir: Path = Path("auto-vllm")
     boot_wait_timeout: int = 300  # D-05: 5 minutes for cold boot
     boot_wait_interval: int = 10
+    nfs_server: str = "storage.example.com:/mnt/SATA/scratch/grafuls/hf-cache"
+    nfs_mount_point: str = "/srv/hf-cache"
+    nvidia_driver_version: str = "580.126.09"
+    llmfit_version: str = "1.1.6"
 
 
 class QUADSSettings(BaseModel):

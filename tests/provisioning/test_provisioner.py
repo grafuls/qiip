@@ -265,7 +265,7 @@ class TestModelExtraction:
         provisioner = _make_provisioner(ssh_client=ssh)
 
         await provisioner._run_start_vllm("host1")
-        assert captured_commands[0] == "bash auto-vllm/start-vllm.sh"
+        assert captured_commands[0].endswith("bash auto-vllm/start-vllm.sh")
 
     @pytest.mark.asyncio
     async def test_quotes_model_with_special_chars(self) -> None:
@@ -284,7 +284,8 @@ class TestModelExtraction:
         await provisioner._run_start_vllm("host1", model="model; rm -rf /")
         cmd = captured_commands[0]
         # shlex.quote wraps in single quotes so the shell treats it as one token
-        assert cmd.startswith("VLLM_MODEL='model; rm -rf /' bash auto-vllm/start-vllm.sh")
+        assert "VLLM_MODEL='model; rm -rf /'" in cmd
+        assert cmd.endswith("bash auto-vllm/start-vllm.sh")
 
 
 class TestHealthPoll:

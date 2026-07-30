@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # --- Configurable defaults ---
-NFS_SERVER="${NFS_SERVER:-rdu-storage02.scalelab.redhat.com:/mnt/SATA/scratch/grafuls/hf-cache}"
+NFS_SERVER="${NFS_SERVER:-storage.example.com:/mnt/SATA/scratch/grafuls/hf-cache}"
 NFS_MOUNT_POINT="${NFS_MOUNT_POINT:-/srv/hf-cache}"
 NVIDIA_DRIVER_VERSION="${NVIDIA_DRIVER_VERSION:-580.126.09}"
 NVIDIA_DRIVER_URL="${NVIDIA_DRIVER_URL:-https://us.download.nvidia.com/tesla/${NVIDIA_DRIVER_VERSION}/NVIDIA-Linux-x86_64-${NVIDIA_DRIVER_VERSION}.run}"
