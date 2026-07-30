@@ -125,7 +125,8 @@ EOF
     ln -sfn "${NFS_MOUNT_POINT}" /root/.cache/huggingface
 
     # ponytail: no CUDA toolkit installed (driver-only .run), flashinfer uses precompiled AOT kernels
-    export VLLM_NO_FLASHINFER_JIT=1
+    export FLASHINFER_JIT=0
+    unset VLLM_MODEL
 
     set -f
     /opt/vllm-venv/bin/vllm serve "$MODEL" \
