@@ -76,9 +76,10 @@ install_cuda_toolkit() {
         echo "CUDA toolkit already installed, skipping"
         return 0
     fi
-    sudo dnf -y install dnf-plugins-core
+    sudo dnf -y install dnf-plugins-core ninja-build
     sudo dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
     sudo dnf -y install cuda-toolkit
+    ln -sfn /usr/bin/ninja-build /usr/local/bin/ninja
 }
 
 install_vllm() {
