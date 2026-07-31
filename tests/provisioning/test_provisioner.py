@@ -10,6 +10,7 @@ import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import asyncssh
 import httpx
 import pytest
 
@@ -863,6 +864,7 @@ def _make_teardown_provisioner(
             yield item
 
     ssh.run_streaming = mock_streaming
+    ssh.upload = AsyncMock()
 
     provisioner = _make_provisioner(
         ssh_client=ssh,
@@ -911,12 +913,20 @@ class TestTeardownGraceful:
     async def test_graceful_teardown_ssh_command(self) -> None:
         provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
         commands: list[str] = []
+        operation_order: list[str] = []
+
+        async def mock_upload(host: str, local_path) -> None:
+            assert host == "host1"
+            assert local_path == provisioner._settings.scripts_dir
+            operation_order.append("upload")
 
         async def mock_streaming(host: str, command: str):
             commands.append(command)
+            operation_order.append("stop")
             for item in [("stdout", "ok")]:
                 yield item
 
+        ssh.upload = AsyncMock(side_effect=mock_upload)
         ssh.run_streaming = mock_streaming
 
         with patch(
@@ -926,8 +936,8 @@ class TestTeardownGraceful:
             mock_tt.return_value = True
             await provisioner.teardown("host1")
 
-        assert any("kill " in c and "vllm.pid" in c for c in commands)
-        assert not any("kill -9" in c for c in commands)
+        assert commands == ["bash auto-vllm/stop-vllm.sh"]
+        assert operation_order == ["upload", "stop"]
 
     @pytest.mark.asyncio
     async def test_etcd_node_key_deleted(self) -> None:
@@ -947,6 +957,37 @@ class TestTeardownGraceful:
 
         # D-11: should delete /nodes/host1
         assert "/nodes/host1" in deleted_keys
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("force", [False, True])
+    async def test_upload_failure_still_attempts_stop_and_deregisters(
+        self,
+        force: bool,
+    ) -> None:
+        """Script refresh failure cannot prevent the teardown attempt."""
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+        commands: list[str] = []
+        ssh.upload = AsyncMock(side_effect=asyncssh.SFTPFailure("disk full"))
+
+        async def mock_streaming(host: str, command: str):
+            assert host == "host1"
+            commands.append(command)
+            yield ("stdout", "stopped")
+
+        ssh.run_streaming = mock_streaming
+
+        await provisioner.teardown("host1", force=force)
+
+        expected_command = "bash auto-vllm/stop-vllm.sh"
+        if force:
+            expected_command += " --force"
+        assert commands == [expected_command]
+        etcd.delete.assert_called_once_with("/nodes/host1")
+        registry.remove.assert_called_once_with("host1")
+        assert any(
+            "Could not refresh teardown scripts" in entry["msg"]
+            for entry in provisioner.log_buffer.get_entries("host1")
+        )
 
 
 class TestTeardownForce:
@@ -979,7 +1020,7 @@ class TestTeardownForce:
         registry.drain.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_force_uses_kill_9(self) -> None:
+    async def test_force_uses_verified_stop_helper(self) -> None:
         provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
         commands: list[str] = []
 
@@ -997,7 +1038,7 @@ class TestTeardownForce:
             mock_tt.return_value = True
             await provisioner.teardown("host1", force=True)
 
-        assert any("kill -9" in c and "vllm.pid" in c for c in commands)
+        assert commands == ["bash auto-vllm/stop-vllm.sh --force"]
 
 
 class TestDrainTimeout:
@@ -1105,6 +1146,24 @@ class TestTeardownSSHFailure:
                 await provisioner.teardown("host1", force=True)
 
         assert "failed" in state_steps
+
+    @pytest.mark.asyncio
+    async def test_stop_failure_preserves_registration(self) -> None:
+        """A failed verified stop cannot deregister a possibly-live backend."""
+        provisioner, ssh, etcd, registry, tracker = _make_teardown_provisioner()
+
+        async def failing_streaming(host: str, command: str):
+            assert command == "bash auto-vllm/stop-vllm.sh --force"
+            raise RemoteCommandError(host, command, 1, "process survived")
+            yield  # pragma: no cover
+
+        ssh.run_streaming = failing_streaming
+
+        with pytest.raises(ProvisioningError, match="exited with status 1"):
+            await provisioner.teardown("host1", force=True)
+
+        etcd.delete.assert_not_called()
+        registry.remove.assert_not_called()
 
 
 class TestPowerOnIfNeeded:

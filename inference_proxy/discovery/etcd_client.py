@@ -379,6 +379,15 @@ class EtcdClient:
         """
         return self._client.put(key, value)
 
+    def replace(
+        self,
+        key: str,
+        expected_value: str | bytes,
+        new_value: str | bytes,
+    ) -> bool:
+        """Replace *key* only when its current value matches *expected_value*."""
+        return self._client.replace(key, expected_value, new_value)
+
     def delete(self, key: str) -> bool:
         """Delete a key from etcd.
 

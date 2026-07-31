@@ -14,6 +14,7 @@ import re
 import shlex
 from collections.abc import Coroutine
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -67,6 +68,12 @@ class PreflightError(Exception):
         super().__init__(f"Pre-flight failed on {hostname}: {'; '.join(failures)}")
 
 
+@dataclass
+class _ProvisioningTask:
+    task: asyncio.Task[None]
+    started: bool = False
+
+
 class NodeProvisioner:
     """Orchestrates full provisioning of a vLLM node on a remote host.
 
@@ -96,6 +103,7 @@ class NodeProvisioner:
         self._log_buffer = log_buffer or ProvisioningLogBuffer()
         self._lifecycle = lifecycle_coordinator or HostLifecycleCoordinator()
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._provisioning_tasks: dict[str, _ProvisioningTask] = {}
 
     @property
     def log_buffer(self) -> ProvisioningLogBuffer:
@@ -302,6 +310,16 @@ class NodeProvisioner:
 
         try:
             await self._provision(hostname, managed=managed, model=model)
+        except asyncio.CancelledError:
+            self._log(hostname, "error", "Provisioning cancelled by teardown")
+            await self._update_state(
+                hostname,
+                ProvisioningStep.FAILED,
+                failed_step="cancelled",
+                error="Provisioning cancelled by teardown",
+            )
+            self._log_buffer.mark_complete(hostname)
+            raise
         finally:
             lease.release()
 
@@ -415,7 +433,18 @@ class NodeProvisioner:
             )
             f_key, f_value = node_to_etcd(failed_node, self._etcd_client.prefix)
             try:
-                await asyncio.to_thread(self._etcd_client.put, f_key, f_value)
+                replaced = await asyncio.to_thread(
+                    self._etcd_client.replace,
+                    f_key,
+                    value,
+                    f_value,
+                )
+                if not replaced:
+                    logger.info(
+                        "failed_node_update_skipped",
+                        hostname=hostname,
+                        reason="node changed or removed",
+                    )
             except Exception:
                 logger.warning("failed_node_update_failed", hostname=hostname)
             raise ProvisioningError(str(exc)) from exc
@@ -565,12 +594,82 @@ class NodeProvisioner:
         logger.info("node_registered", hostname=hostname, model=model, key=key)
 
     def fire_background(
-        self, coro: Coroutine[object, object, None]
+        self,
+        coro: Coroutine[object, object, None],
+        *,
+        provisioning_hostname: str | None = None,
     ) -> asyncio.Task[None]:
-        """Schedule a coroutine as a background task, preventing GC."""
-        task = asyncio.create_task(coro)
+        """Schedule a coroutine and optionally track host provisioning ownership."""
+        if provisioning_hostname is not None:
+            current = self._provisioning_tasks.get(provisioning_hostname)
+            if current is not None and not current.task.done():
+                raise RuntimeError(
+                    f"Provisioning task already active for '{provisioning_hostname}'"
+                )
+
+        record: _ProvisioningTask | None = None
+        scheduled_coro = coro
+        if provisioning_hostname is not None:
+
+            async def _tracked_provision() -> None:
+                if record is None:
+                    raise RuntimeError("provisioning task record was not initialized")
+                record.started = True
+                await coro
+
+            scheduled_coro = _tracked_provision()
+
+        try:
+            task = asyncio.create_task(scheduled_coro)
+        except Exception:
+            if scheduled_coro is not coro:
+                scheduled_coro.close()
+            raise
         self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+
+        if provisioning_hostname is not None:
+            record = _ProvisioningTask(task)
+            self._provisioning_tasks[provisioning_hostname] = record
+
+        def _task_done(done_task: asyncio.Task[None]) -> None:
+            self._background_tasks.discard(done_task)
+            if record is not None and not record.started:
+                coro.close()
+            if (
+                provisioning_hostname is not None
+                and self._provisioning_tasks.get(provisioning_hostname) is record
+            ):
+                self._provisioning_tasks.pop(provisioning_hostname, None)
+
+        task.add_done_callback(_task_done)
+        return task
+
+    async def cancel_active_provision(self, hostname: str) -> asyncio.Task[None] | None:
+        """Cancel and await the active provisioning task for *hostname*."""
+        record = self._provisioning_tasks.get(hostname)
+        if record is None or record.task.done():
+            return None
+
+        task = record.task
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+
+        if not task.cancelled():
+            raise RuntimeError(
+                f"Provisioning task for '{hostname}' swallowed cancellation"
+            )
+
+        if not record.started:
+            # A task cancelled before its coroutine first runs cannot record
+            # its own terminal state. Normal cancellation is recorded inside
+            # provision() while that task still owns the host lease.
+            await self._update_state(
+                hostname,
+                ProvisioningStep.FAILED,
+                failed_step="cancelled",
+                error="Provisioning cancelled by teardown",
+            )
         return task
 
     async def _drain_wait(self, hostname: str) -> None:
@@ -632,16 +731,32 @@ class NodeProvisioner:
                 hostname, ProvisioningStep.STOPPING_VLLM, started_at=teardown_started_at
             )
             self._log(hostname, "info", "Stopping vLLM process")
+            # Existing nodes may predate stop-vllm.sh, and a cancelled setup
+            # may not have reached its upload step. Refresh the bundle before
+            # invoking the verified stop path.
+            try:
+                await self._upload_scripts(hostname)
+            except Exception as exc:
+                # The refresh is upgrade compatibility, not a teardown
+                # precondition. The existing remote copy may still work; if
+                # it does not, the verified stop command below reports the
+                # operation as FAILED without deregistering the node.
+                logger.warning(
+                    "teardown_script_refresh_failed",
+                    hostname=hostname,
+                    error=str(exc),
+                    exc_info=True,
+                )
+                self._log(
+                    hostname,
+                    "warning",
+                    "Could not refresh teardown scripts; attempting the "
+                    "existing remote stop script",
+                )
+            stop_command = "bash auto-vllm/stop-vllm.sh"
             if force:
-                await self._ssh_run_command(
-                    hostname,
-                    "kill -9 $(cat /var/run/vllm.pid) 2>/dev/null; rm -f /var/run/vllm.pid",
-                )
-            else:
-                await self._ssh_run_command(
-                    hostname,
-                    "kill $(cat /var/run/vllm.pid) 2>/dev/null; rm -f /var/run/vllm.pid",
-                )
+                stop_command += " --force"
+            await self._ssh_run_command(hostname, stop_command)
 
             await self._update_state(
                 hostname, ProvisioningStep.DEREGISTERING, started_at=teardown_started_at

@@ -1,0 +1,274 @@
+"""Behavioral tests for verified vLLM process replacement."""
+
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import time
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+START_SCRIPT = REPO_ROOT / "auto-vllm" / "start-vllm.sh"
+STOP_SCRIPT = REPO_ROOT / "auto-vllm" / "stop-vllm.sh"
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.write_text(content)
+    path.chmod(0o755)
+
+
+def _wait_for_line(path: Path, expected: str, *, timeout: float = 2) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists() and expected in path.read_text().splitlines():
+            return
+        time.sleep(0.01)
+    pytest.fail(f"{expected!r} did not appear in {path}")
+
+
+def _script_environment(
+    tmp_path: Path,
+    *,
+    vllm_bin: Path,
+    process_log: Path,
+) -> dict[str, str]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    nvidia_smi = bin_dir / "nvidia-smi"
+    _write_executable(
+        nvidia_smi,
+        """#!/bin/bash
+case "$*" in
+  *"--query-gpu=name"*) echo "NVIDIA A100" ;;
+  *"--list-gpus"*) echo "GPU 0: NVIDIA A100" ;;
+  *"--query-gpu=memory.total"*) echo "81920" ;;
+esac
+""",
+    )
+
+    cache_dir = tmp_path / "nfs-cache"
+    cache_dir.mkdir(exist_ok=True)
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{bin_dir}:{env['PATH']}",
+            "AUTOVLLM_BIN": str(vllm_bin),
+            "AUTOVLLM_COMMAND_PATTERN": f"{vllm_bin} serve",
+            "AUTOVLLM_PID_FILE": str(tmp_path / "vllm.pid"),
+            "AUTOVLLM_HF_CACHE_LINK": str(tmp_path / "cache" / "huggingface"),
+            "AUTOVLLM_LOG_FILE": str(tmp_path / "vllm-serve.log"),
+            "AUTOVLLM_STOP_TIMEOUT": "2",
+            "AUTOVLLM_STOP_INTERVAL": "0.01",
+            "AUTOVLLM_TEST_LOG": str(process_log),
+            "NFS_MOUNT_POINT": str(cache_dir),
+        }
+    )
+    return env
+
+
+def _start_fake_vllm(
+    vllm_bin: Path,
+    model: str,
+    env: dict[str, str],
+) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        [str(vllm_bin), "serve", model],
+        env=env,
+        text=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
+def test_start_vllm_stops_existing(tmp_path: Path) -> None:
+    """A stale PID cannot hide an orphan, and no unrelated PID is killed."""
+    process_log = tmp_path / "process.log"
+    vllm_bin = tmp_path / "fake-vllm"
+    _write_executable(
+        vllm_bin,
+        """#!/bin/bash
+model="$2"
+echo "start:${model}" >> "$AUTOVLLM_TEST_LOG"
+trap 'echo "stop:'"${model}"'" >> "$AUTOVLLM_TEST_LOG"; exit 0' TERM
+while true; do sleep 1; done
+""",
+    )
+    env = _script_environment(
+        tmp_path,
+        vllm_bin=vllm_bin,
+        process_log=process_log,
+    )
+    old_vllm = _start_fake_vllm(vllm_bin, "old-model", env)
+    unrelated = subprocess.Popen(["sleep", "30"])
+    pid_file = Path(env["AUTOVLLM_PID_FILE"])
+
+    try:
+        _wait_for_line(process_log, "start:old-model")
+        # Simulate PID reuse: the file names a live but unrelated process,
+        # while the real old vLLM must be discovered from its command line.
+        pid_file.write_text(str(unrelated.pid))
+        env["VLLM_MODEL"] = "new-model"
+
+        result = subprocess.run(
+            ["bash", str(START_SCRIPT)],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        _wait_for_line(process_log, "start:new-model")
+        old_vllm.wait(timeout=2)
+        assert unrelated.poll() is None
+        assert process_log.read_text().splitlines()[:3] == [
+            "start:old-model",
+            "stop:old-model",
+            "start:new-model",
+        ]
+    finally:
+        subprocess.run(
+            ["bash", str(STOP_SCRIPT), "--force"],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        if old_vllm.poll() is None:
+            old_vllm.kill()
+        unrelated.terminate()
+        unrelated.wait(timeout=2)
+
+
+def test_start_vllm_aborts_when_existing_process_cannot_stop(
+    tmp_path: Path,
+) -> None:
+    """A process surviving SIGTERM prevents a replacement launch."""
+    process_log = tmp_path / "process.log"
+    vllm_bin = tmp_path / "stubborn-vllm"
+    _write_executable(
+        vllm_bin,
+        """#!/bin/bash
+model="$2"
+echo "start:${model}" >> "$AUTOVLLM_TEST_LOG"
+trap '' TERM
+while true; do sleep 1; done
+""",
+    )
+    env = _script_environment(
+        tmp_path,
+        vllm_bin=vllm_bin,
+        process_log=process_log,
+    )
+    old_vllm = _start_fake_vllm(vllm_bin, "old-model", env)
+    pid_file = Path(env["AUTOVLLM_PID_FILE"])
+
+    try:
+        _wait_for_line(process_log, "start:old-model")
+        pid_file.write_text(str(old_vllm.pid))
+        env["VLLM_MODEL"] = "new-model"
+        env["AUTOVLLM_STOP_TIMEOUT"] = "1"
+
+        result = subprocess.run(
+            ["bash", str(START_SCRIPT)],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+
+        assert result.returncode != 0
+        assert "Timed out waiting for vLLM PID" in result.stderr
+        assert process_log.read_text().splitlines() == ["start:old-model"]
+        assert pid_file.read_text() == str(old_vllm.pid)
+        assert old_vllm.poll() is None
+    finally:
+        old_vllm.send_signal(signal.SIGKILL)
+        old_vllm.wait(timeout=2)
+        pid_file.unlink(missing_ok=True)
+
+
+def test_stop_vllm_stale_pid_does_not_kill_unrelated_process(
+    tmp_path: Path,
+) -> None:
+    """PID existence alone is never treated as vLLM identity."""
+    process_log = tmp_path / "process.log"
+    vllm_bin = tmp_path / "fake-vllm"
+    _write_executable(vllm_bin, "#!/bin/bash\nexit 0\n")
+    env = _script_environment(
+        tmp_path,
+        vllm_bin=vllm_bin,
+        process_log=process_log,
+    )
+    unrelated = subprocess.Popen(["sleep", "30"])
+    pid_file = Path(env["AUTOVLLM_PID_FILE"])
+    pid_file.write_text(str(unrelated.pid))
+
+    try:
+        result = subprocess.run(
+            ["bash", str(STOP_SCRIPT)],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+
+        assert result.returncode == 0
+        assert unrelated.poll() is None
+        assert not pid_file.exists()
+        assert "Ignoring stale vLLM PID file" in result.stderr
+    finally:
+        unrelated.terminate()
+        unrelated.wait(timeout=2)
+
+
+def test_force_stop_kills_stubborn_process_and_removes_pidfile(
+    tmp_path: Path,
+) -> None:
+    """Force mode verifies SIGKILL completion before deleting the PID file."""
+    process_log = tmp_path / "process.log"
+    vllm_bin = tmp_path / "stubborn-vllm"
+    _write_executable(
+        vllm_bin,
+        """#!/bin/bash
+echo "start:$2" >> "$AUTOVLLM_TEST_LOG"
+trap '' TERM
+while true; do sleep 1; done
+""",
+    )
+    env = _script_environment(
+        tmp_path,
+        vllm_bin=vllm_bin,
+        process_log=process_log,
+    )
+    process = _start_fake_vllm(vllm_bin, "old-model", env)
+    pid_file = Path(env["AUTOVLLM_PID_FILE"])
+
+    try:
+        _wait_for_line(process_log, "start:old-model")
+        pid_file.write_text(str(process.pid))
+
+        result = subprocess.run(
+            ["bash", str(STOP_SCRIPT), "--force"],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+
+        assert result.returncode == 0, result.stderr
+        process.wait(timeout=2)
+        assert not pid_file.exists()
+        assert "Stopped vLLM process" in result.stdout
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=2)

@@ -386,8 +386,61 @@ class TestTeardownEndpoint:
         mock_provisioner: MagicMock,
     ) -> None:
         test_registry.add(_make_node(node_id="gpu01"))
-        client.delete("/admin/nodes/gpu01?force=true")
-        mock_provisioner.fire_background.assert_called_once()
+        response = client.delete("/admin/nodes/gpu01?force=true")
+
+        assert response.status_code == 202
+        coro = mock_provisioner.fire_background.call_args.args[0]
+        asyncio.run(asyncio.wait_for(coro, timeout=1))
+        mock_provisioner.teardown.assert_awaited_once_with(
+            "gpu01",
+            force=True,
+            lifecycle_lease=ANY,
+        )
+
+    def test_busy_non_provision_operation_still_returns_409(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        test_registry.add(_make_node(node_id="gpu01"))
+        mock_provisioner.try_reserve_host.side_effect = None
+        mock_provisioner.try_reserve_host.return_value = None
+
+        response = client.delete("/admin/nodes/gpu01")
+
+        assert response.status_code == 409
+        assert "operation already in progress" in response.json()["detail"]
+        mock_provisioner.cancel_active_provision.assert_awaited_once_with("gpu01")
+        mock_provisioner.fire_background.assert_not_called()
+
+    def test_cancel_handoff_reports_when_host_is_re_reserved(
+        self,
+        client: TestClient,
+        test_registry: NodeRegistry,
+        mock_provisioner: MagicMock,
+    ) -> None:
+        test_registry.add(_make_node(node_id="gpu01"))
+        call_order: list[str] = []
+
+        async def cancel(_hostname: str) -> MagicMock:
+            call_order.append("cancel")
+            return MagicMock()
+
+        async def reserve(_hostname: str) -> None:
+            call_order.append("reserve")
+            return None
+
+        mock_provisioner.cancel_active_provision.side_effect = cancel
+        mock_provisioner.try_reserve_host.side_effect = reserve
+
+        response = client.delete("/admin/nodes/gpu01")
+
+        assert response.status_code == 409
+        assert "re-reserved" in response.json()["detail"]
+        assert "retry teardown" in response.json()["detail"]
+        assert call_order == ["cancel", "reserve"]
+        mock_provisioner.fire_background.assert_not_called()
 
     def test_unknown_node_returns_404(
         self,
@@ -614,7 +667,8 @@ class TestSetupDedupGuard:
 
         task = NeverStartedTask()
 
-        def hold_background(background):
+        def hold_background(background, *, provisioning_hostname):
+            assert provisioning_hostname == "gpu01"
             task.background = background
             return task
 

@@ -179,6 +179,26 @@ class TestEtcdSnapshot:
         )
 
 
+class TestEtcdWrites:
+    @patch("inference_proxy.discovery.etcd_client.Etcd3Client")
+    def test_replace_delegates_compare_and_swap(
+        self,
+        mock_etcd3_cls: MagicMock,
+    ) -> None:
+        mock_instance = mock_etcd3_cls.return_value
+        mock_instance.replace.return_value = True
+        client = EtcdClient(_settings())
+
+        replaced = client.replace("/nodes/gpu01", b"old", b"new")
+
+        assert replaced is True
+        mock_instance.replace.assert_called_once_with(
+            "/nodes/gpu01",
+            b"old",
+            b"new",
+        )
+
+
 class TestRawWatch:
     @patch("inference_proxy.discovery.etcd_client.Etcd3Client")
     def test_watch_forwards_start_revision_and_preserves_batch(
