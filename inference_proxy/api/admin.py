@@ -275,7 +275,10 @@ async def setup_node(
 
         background = _provision_and_cleanup()
         try:
-            task = provisioner.fire_background(background)
+            task = provisioner.fire_background(
+                background,
+                provisioning_hostname=hostname,
+            )
         except Exception:
             background.close()
             pending_hosts.discard(hostname)
@@ -347,16 +350,25 @@ async def teardown_node(
 ) -> TeardownResponse:
     """Trigger teardown of a node (runs in background)."""
     node_id = canonical_hostname(node_id)
+    cancelled_provision = await provisioner.cancel_active_provision(node_id)
     lease = await provisioner.try_reserve_host(node_id)
     if lease is None:
+        if cancelled_provision is not None:
+            detail = (
+                f"Host '{node_id}' was re-reserved after provisioning "
+                "cancellation; wait for the current operation to finish and "
+                "retry teardown"
+            )
+        else:
+            detail = f"Host lifecycle operation already in progress for '{node_id}'"
         raise HTTPException(
             status_code=409,
-            detail=f"Host lifecycle operation already in progress for '{node_id}'",
+            detail=detail,
         )
 
     transferred = False
     try:
-        if registry.get(node_id) is None:
+        if registry.get(node_id) is None and cancelled_provision is None:
             raise HTTPException(status_code=404, detail=f"Node '{node_id}' not found")
 
         async def _teardown_and_cleanup() -> None:

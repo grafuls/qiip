@@ -3,6 +3,11 @@ set -euo pipefail
 
 VLLM_PORT="${VLLM_PORT:-8000}"
 NFS_MOUNT_POINT="${NFS_MOUNT_POINT:-/srv/hf-cache}"
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+VLLM_BIN="${AUTOVLLM_BIN:-/opt/vllm-venv/bin/vllm}"
+PID_FILE="${AUTOVLLM_PID_FILE:-/var/run/vllm.pid}"
+HF_CACHE_LINK="${AUTOVLLM_HF_CACHE_LINK:-/root/.cache/huggingface}"
+VLLM_LOG_FILE="${AUTOVLLM_LOG_FILE:-/var/log/vllm-serve.log}"
 
 detect_gpu_info() {
     if ! command -v nvidia-smi &>/dev/null; then
@@ -107,6 +112,10 @@ configure_vllm_params() {
 }
 
 run_vllm() {
+    # Never launch over an older or orphaned server. A failed verified stop
+    # aborts this script under set -e rather than registering the wrong model.
+    bash "${SCRIPT_DIR}/stop-vllm.sh"
+
     cat <<EOF
 
 # vLLM Configuration
@@ -121,15 +130,15 @@ run_vllm() {
 
 EOF
 
-    mkdir -p /root/.cache
-    ln -sfn "${NFS_MOUNT_POINT}" /root/.cache/huggingface
+    mkdir -p "$(dirname "$HF_CACHE_LINK")"
+    ln -sfn "${NFS_MOUNT_POINT}" "$HF_CACHE_LINK"
 
     # ponytail: no CUDA toolkit installed (driver-only .run), flashinfer uses precompiled AOT kernels
     export FLASHINFER_JIT=0
     unset VLLM_MODEL
 
     set -f
-    /opt/vllm-venv/bin/vllm serve "$MODEL" \
+    "$VLLM_BIN" serve "$MODEL" \
         --host 0.0.0.0 \
         --port "${VLLM_PORT}" \
         --tensor-parallel-size "$TENSOR_PARALLEL" \
@@ -139,10 +148,10 @@ EOF
         --enable-auto-tool-choice \
         --tool-call-parser hermes \
         ${EXTRA_ARGS:-} \
-        > /var/log/vllm-serve.log 2>&1 &
+        > "$VLLM_LOG_FILE" 2>&1 &
 
-    echo $! > /var/run/vllm.pid
-    echo "vLLM started (PID $(cat /var/run/vllm.pid))"
+    echo $! > "$PID_FILE"
+    echo "vLLM started (PID $(cat "$PID_FILE"))"
 }
 
 main() {

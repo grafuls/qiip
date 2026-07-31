@@ -161,6 +161,7 @@ def app(
     mock_provisioner = MagicMock()
     mock_provisioner._etcd_client = MagicMock()
     mock_provisioner.list_tasks_raw = AsyncMock(return_value=[])
+    mock_provisioner.cancel_active_provision = AsyncMock(return_value=None)
     mock_provisioner.try_reserve_host = AsyncMock(
         side_effect=lambda hostname: MagicMock(hostname=hostname)
     )
