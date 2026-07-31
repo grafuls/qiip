@@ -95,6 +95,7 @@ class NodeProvisioner:
         redfish_client: RedfishClient | None = None,
         log_buffer: ProvisioningLogBuffer | None = None,
         lifecycle_coordinator: HostLifecycleCoordinator | None = None,
+        hf_token: str | None = None,
     ) -> None:
         self._ssh_client = ssh_client
         self._etcd_client = etcd_client
@@ -106,6 +107,7 @@ class NodeProvisioner:
         self._redfish_client = redfish_client
         self._log_buffer = log_buffer or ProvisioningLogBuffer()
         self._lifecycle = lifecycle_coordinator or HostLifecycleCoordinator()
+        self._hf_token = hf_token
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._provisioning_tasks: dict[str, _ProvisioningTask] = {}
 
@@ -139,13 +141,16 @@ class NodeProvisioner:
     def _script_env_prefix(self) -> str:
         """Build env var prefix for remote script invocation."""
         s = self._settings
-        return (
+        prefix = (
             f"NFS_SERVER={shlex.quote(s.nfs_server)} "
             f"NFS_MOUNT_POINT={shlex.quote(s.nfs_mount_point)} "
             f"NVIDIA_DRIVER_VERSION={shlex.quote(s.nvidia_driver_version)} "
             f"VLLM_PORT={s.vllm_port} "
             f"LLMFIT_VERSION={shlex.quote(s.llmfit_version)} "
         )
+        if self._hf_token:
+            prefix += f"HF_TOKEN={shlex.quote(self._hf_token)} "
+        return prefix
 
     def _log(
         self,
@@ -532,9 +537,10 @@ class NodeProvisioner:
 
     async def _run_start_vllm(self, hostname: str, *, model: str | None = None) -> str:
         """Run start-vllm.sh and extract model name from stdout."""
-        command = f"{self._script_env_prefix()}bash auto-vllm/start-vllm.sh"
+        prefix = self._script_env_prefix()
         if model:
-            command = f"VLLM_MODEL={shlex.quote(model)} {command}"
+            prefix = f"VLLM_MODEL={shlex.quote(model)} {prefix}"
+        command = f"{prefix}bash auto-vllm/start-vllm.sh"
         model_name: str | None = None
         async for stream, line in self._ssh_client.run_streaming(hostname, command):
             logger.debug(
