@@ -25,6 +25,7 @@ class ProvisioningStep(StrEnum):
     UPLOADING_SCRIPTS = "uploading_scripts"
     SYSTEM_UPDATE = "system_update"
     NVIDIA_DRIVER = "nvidia_driver"
+    CUDA_TOOLKIT = "cuda_toolkit"
     VLLM_INSTALL = "vllm_install"
     NFS_MOUNT = "nfs_mount"
     FIREWALL = "firewall"
