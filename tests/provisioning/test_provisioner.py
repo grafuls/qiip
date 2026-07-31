@@ -315,9 +315,9 @@ class TestModelExtraction:
 
         await provisioner._run_start_vllm("host1", model="org/model")
         assert len(captured_commands) == 1
-        assert captured_commands[0].startswith("VLLM_MODEL=")
+        assert "VLLM_MODEL=" in captured_commands[0]
         assert "org/model" in captured_commands[0]
-        assert "bash auto-vllm/start-vllm.sh" in captured_commands[0]
+        assert captured_commands[0].endswith("bash auto-vllm/start-vllm.sh")
 
     @pytest.mark.asyncio
     async def test_omits_env_var_when_model_none(self) -> None:
@@ -354,7 +354,7 @@ class TestModelExtraction:
         cmd = captured_commands[0]
         # shlex.quote wraps in single quotes so the shell treats it as one token
         assert "VLLM_MODEL='model; rm -rf /'" in cmd
-        assert cmd.endswith("bash auto-vllm/start-vllm.sh")
+        assert "bash auto-vllm/start-vllm.sh" in cmd
 
 
 class TestHealthPoll:

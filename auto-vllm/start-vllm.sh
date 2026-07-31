@@ -133,10 +133,6 @@ EOF
     mkdir -p "$(dirname "$HF_CACHE_LINK")"
     ln -sfn "${NFS_MOUNT_POINT}" "$HF_CACHE_LINK"
 
-    # ponytail: no CUDA toolkit installed (driver-only .run), flashinfer uses precompiled AOT kernels
-    export FLASHINFER_JIT=0
-    unset VLLM_MODEL
-
     set -f
     "$VLLM_BIN" serve "$MODEL" \
         --host 0.0.0.0 \

@@ -71,6 +71,17 @@ install_nvidia_driver() {
     rm -f /tmp/NVIDIA-driver.run
 }
 
+install_cuda_toolkit() {
+    if [ -x /usr/local/cuda/bin/nvcc ]; then
+        echo "CUDA toolkit already installed, skipping"
+        return 0
+    fi
+    sudo dnf -y install dnf-plugins-core ninja-build
+    sudo dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel9/x86_64/cuda-rhel9.repo
+    sudo dnf -y install cuda-toolkit
+    ln -sfn /usr/bin/ninja-build /usr/local/bin/ninja
+}
+
 install_vllm() {
     if [ -x /opt/vllm-venv/bin/vllm ]; then
         echo "vLLM already installed in /opt/vllm-venv, skipping"
@@ -124,6 +135,7 @@ install_llmfit() {
 # --- Main ---
 step system_update run_system_update
 step nvidia_driver install_nvidia_driver
+step cuda_toolkit install_cuda_toolkit
 step vllm_install install_vllm
 step nfs_mount mount_nfs_cache
 step firewall configure_firewall

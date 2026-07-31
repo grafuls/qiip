@@ -265,6 +265,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         log_buffer = ProvisioningLogBuffer()
 
+        hf_token = resolved_settings.huggingface.api_token
         provisioner = NodeProvisioner(
             ssh_client=ssh_client,
             etcd_client=etcd_client,
@@ -275,6 +276,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             circuit_breaker_registry=circuit_breaker_registry,
             redfish_client=app.state.redfish_client,
             log_buffer=log_buffer,
+            hf_token=hf_token.get_secret_value() if hf_token else None,
         )
         app.state.provisioner = provisioner
 
