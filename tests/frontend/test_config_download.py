@@ -66,9 +66,7 @@ class TestGenerateOpenCodeConfig:
         provider = result["provider"]["qiip"]
         assert provider["npm"] == "@ai-sdk/openai-compatible"
         assert provider["name"] == "QIIP Inference Proxy"
-        assert provider["options"]["baseURL"] == (
-            "http://proxy.example.com:8080/v1"
-        )
+        assert provider["options"]["baseURL"] == ("http://proxy.example.com:8080/v1")
         assert "meta-llama/Llama-3-8B" in provider["models"]
         assert provider["models"]["meta-llama/Llama-3-8B"]["name"] == (
             "meta-llama/Llama-3-8B"

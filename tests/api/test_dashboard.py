@@ -115,9 +115,7 @@ class TestDashboardTableStructure:
         response = client.get("/dashboard")
         assert 'id="node-table-body"' in response.text
 
-    def test_loading_row_colspan_matches_column_count(
-        self, client: TestClient
-    ) -> None:
+    def test_loading_row_colspan_matches_column_count(self, client: TestClient) -> None:
         """Loading placeholder colspan matches the number of column headers."""
         response = client.get("/dashboard")
         assert 'colspan="8"' in response.text
