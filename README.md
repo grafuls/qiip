@@ -24,6 +24,52 @@ Clients ──► NGINX ──► Inference Proxy  ──► vLLM Node A
 - **Health checking** — background thread probes each node's `/health` endpoint; marks nodes unhealthy after repeated failures and recovers them automatically
 - **Graceful shutdown** — drains in-flight requests before stopping, with configurable timeout
 - **Structured logging** — JSON or pretty console output via structlog
+- **Operations dashboard** — interactive web UI at `/dashboard` with real-time node table, detail pages, and provisioning status
+- **QUADS integration** — background polling of QUADS inventory and availability; unified view merging QUADS hosts with etcd-registered nodes
+- **QUADS schedule enforcement** — automated teardown of managed nodes when QUADS reports an upcoming scheduling conflict
+- **End-to-end node provisioning** — SSH-based pipeline: BMC power-on, NVIDIA driver and CUDA toolkit install, vLLM setup, NFS mount, firewall, health poll, and etcd registration
+- **Node teardown** — graceful shutdown with connection draining, force teardown option, and provisioning task cancellation
+- **Provisioning log streaming** — live SSE stream of provisioning and vLLM logs viewable in the dashboard
+- **BMC power management (Redfish)** — query and control node power state; supports On, ForceOff, GracefulRestart, and ForceRestart
+- **Model catalog** — scans shared NFS-mounted HuggingFace cache, verifies model completeness via tree manifests, exposed via `/admin/models/catalog`
+- **Background model downloads** — concurrent HuggingFace downloads with status tracking; duplicate-safe and re-downloadable after completion or failure
+- **Hardware-aware model recommendations** — runs llmfit via SSH on a target host to produce ranked recommendations with fit levels, throughput, and memory estimates; auto-installs the binary on first use
+- **Request metrics** — per-model and per-node counters exposed via `/admin/metrics`
+- **Admin authentication** — HTTP Basic required on all `/admin/*` endpoints and `/dashboard*` pages; inference API remains public
+- **Backend endpoint allowlist** — configurable hostname wildcard, CIDR network, and port allowlists; rejects non-matching registrations with loopback-only defaults
+
+## Table of Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Quick Start](#quick-start)
+  - [Verify it's running](#verify-its-running)
+  - [Send a request](#send-a-request)
+  - [Use with the OpenAI Python SDK](#use-with-the-openai-python-sdk)
+- [API Endpoints](#api-endpoints)
+  - [Administrative access](#administrative-access)
+  - [Error responses](#error-responses)
+- [Configuration](#configuration)
+  - [Upgrade requirements](#upgrade-requirements)
+  - [Gateway](#gateway)
+  - [Admin authentication](#admin-authentication)
+  - [etcd](#etcd)
+  - [Routing](#routing)
+  - [SSH and provisioning commands](#ssh-and-provisioning-commands)
+  - [Proxy (HTTP client)](#proxy-http-client)
+  - [Resilience](#resilience)
+  - [Logging](#logging)
+  - [Redfish BMC](#redfish-bmc)
+- [Architecture](#architecture)
+  - [Request flow](#request-flow)
+  - [Background threads](#background-threads)
+- [Development](#development)
+  - [Setup](#setup)
+  - [Run tests](#run-tests)
+  - [Lint and format](#lint-and-format)
+  - [Type check](#type-check)
+- [Technology Stack](#technology-stack)
+- [License](#license)
 
 ## Requirements
 
