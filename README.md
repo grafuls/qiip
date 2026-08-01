@@ -1,9 +1,11 @@
 # QUADS LLM Inference Proxy
 
-A gateway service that proxies OpenAI-compatible requests to [vLLM](https://docs.vllm.ai/) inference nodes running on idle QUADS lab servers. It dynamically discovers backends via etcd, health-checks them, and routes requests with automatic failover — so clients see a single, reliable endpoint.
+A QUADS-native inference abstraction framework that fully automates installation, drivers, setup and presentation of disparate free GPU-equipped systems into a single unified usage interface and inference API.
+
+qiip provides a gateway service that proxies OpenAI-compatible requests to [vLLM](https://docs.vllm.ai/) inference nodes running on idle QUADS lab servers or standalone, free GPU-equipped hardware.  It dynamically discovers backends via etcd, health-checks them, and routes requests with automatic failover — so clients see a single, reliable endpoint.
 
 ```
-Clients ──► NGINX ──► Inference Proxy ──► vLLM Node A
+Clients ──► NGINX ──► Inference Proxy  ──► vLLM Node A
                            │           ──► vLLM Node B
                            │           ──► vLLM Node C
                            ▼
