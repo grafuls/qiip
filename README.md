@@ -37,6 +37,7 @@ Clients ──► NGINX ──► Inference Proxy  ──► vLLM Node A
 - **Request metrics** — per-model and per-node counters exposed via `/admin/metrics`
 - **Admin authentication** — HTTP Basic required on all `/admin/*` endpoints and `/dashboard*` pages; inference API remains public
 - **Backend endpoint allowlist** — configurable hostname wildcard, CIDR network, and port allowlists; rejects non-matching registrations with loopback-only defaults
+- **Client config downloads** — one-click download of OpenCode CLI and Pi coding agent configuration files from the dashboard and node detail pages; dashboard configs point at the proxy for load-balanced access, node detail configs point at individual vLLM endpoints
 
 ## Table of Contents
 
