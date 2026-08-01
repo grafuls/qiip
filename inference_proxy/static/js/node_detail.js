@@ -171,6 +171,7 @@ async function refreshDetail() {
     if (!node) {
       stateEl.textContent = "Node not found";
       renderTableMessage(infoBody, 9, "Node not found in registry");
+      document.getElementById("config-download-panel").style.display = "none";
     } else {
       stateEl.textContent = node.state;
 
@@ -204,6 +205,18 @@ async function refreshDetail() {
       tr.appendChild(tdAc);
 
       infoBody.appendChild(tr);
+
+      var cfgPanel = document.getElementById("config-download-panel");
+      var cfgHint = document.getElementById("config-download-hint");
+      var cfgButtons = document.getElementById("config-download-buttons");
+      if (node.state === "healthy" && node.model) {
+        cfgPanel.style.display = "";
+        cfgHint.textContent = "Download agent configuration pointing directly at this node (" + node.endpoint + ").";
+        cfgButtons.textContent = "";
+        cfgButtons.appendChild(createConfigButtons(node.endpoint, node.model));
+      } else {
+        cfgPanel.style.display = "none";
+      }
     }
 
     // ponytail: filter tasks by hostname — matching against node_id (which is the hostname)

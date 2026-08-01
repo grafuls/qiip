@@ -72,6 +72,7 @@ const ACTION_CONFIG = {
 const inFlightNodes = new Set();
 const expandedErrorNodes = new Set();
 let openActionMenuNode = null;
+let openConfigMenuNode = null;
 let dashboardPollInFlight = false;
 let dashboardRequestSequence = 0;
 let dashboardLastRenderedSequence = 0;
@@ -188,7 +189,7 @@ async function refreshDashboard() {
       tbody.textContent = "";
       const emptyRow = document.createElement("tr");
       const emptyCell = document.createElement("td");
-      emptyCell.colSpan = 7;
+      emptyCell.colSpan = 8;
       emptyCell.textContent = "No nodes found";
       emptyRow.appendChild(emptyCell);
       tbody.appendChild(emptyRow);
@@ -225,6 +226,42 @@ async function refreshDashboard() {
         const tdModel = document.createElement("td");
         tdModel.textContent = node.state === "available" ? "—" : node.model;
         tr.appendChild(tdModel);
+
+        const tdConfig = document.createElement("td");
+        if (node.state === "healthy" && node.model) {
+          const cfgGroup = document.createElement("div");
+          cfgGroup.className = "action-group";
+          const cfgTrigger = document.createElement("button");
+          cfgTrigger.type = "button";
+          cfgTrigger.className = "btn-config";
+          cfgTrigger.textContent = "Download ▾";
+          const cfgMenu = document.createElement("div");
+          cfgMenu.className = "action-menu";
+          cfgMenu.appendChild(createConfigButtons(window.location.origin, node.model));
+          if (openConfigMenuNode === node.node_id) {
+            cfgMenu.classList.add("open");
+            requestAnimationFrame(function () { positionActionMenu(cfgTrigger, cfgMenu); });
+          }
+          cfgTrigger.addEventListener("click", function (e) {
+            e.stopPropagation();
+            var wasOpen = cfgMenu.classList.contains("open");
+            document.querySelectorAll(".action-menu.open").forEach(function (m) { m.classList.remove("open"); });
+            openActionMenuNode = null;
+            if (!wasOpen) {
+              openConfigMenuNode = node.node_id;
+              cfgMenu.classList.add("open");
+              positionActionMenu(cfgTrigger, cfgMenu);
+            } else {
+              openConfigMenuNode = null;
+            }
+          });
+          cfgGroup.appendChild(cfgTrigger);
+          cfgGroup.appendChild(cfgMenu);
+          tdConfig.appendChild(cfgGroup);
+        } else {
+          tdConfig.textContent = "—";
+        }
+        tr.appendChild(tdConfig);
 
         const tdState = document.createElement("td");
         const stateBadge = document.createElement("span");
@@ -264,6 +301,7 @@ async function refreshDashboard() {
             e.stopPropagation();
             var wasOpen = menu.classList.contains("open");
             document.querySelectorAll(".action-menu.open").forEach(function (m) { m.classList.remove("open"); });
+            openConfigMenuNode = null;
             if (!wasOpen) {
               openActionMenuNode = node.node_id;
               menu.classList.add("open");
@@ -288,7 +326,7 @@ async function refreshDashboard() {
           subRow.style.display = expanded ? "table-row" : "none";
 
           const subTd = document.createElement("td");
-          subTd.colSpan = 7;
+          subTd.colSpan = 8;
 
           const detail = document.createElement("div");
           detail.className = "error-detail";
@@ -373,6 +411,7 @@ document.addEventListener("DOMContentLoaded", function () {
         m.classList.remove("open");
       });
       openActionMenuNode = null;
+      openConfigMenuNode = null;
     }
   });
 

@@ -602,7 +602,11 @@ sandbox.fetch = async function () {{ requestCount += 1; return {{ ok: true }}; }
 _DASHBOARD_HARNESS = r"""
 const fs = require("fs");
 const vm = require("vm");
+const path = require("path");
 const source = fs.readFileSync(process.argv[1], "utf8");
+const configDownloadSource = fs.readFileSync(
+  path.join(path.dirname(process.argv[1]), "config_download.js"), "utf8"
+);
 const elements = new Map();
 const allElements = [];
 
@@ -669,8 +673,12 @@ const sandbox = {
     },
     createElement(tagName) { return new Element(tagName); },
     createTextNode(text) { const node = new Element("text"); node.textContent = text; return node; },
+    createDocumentFragment() { const f = new Element("fragment"); return f; },
+    body: { appendChild(child) { return child; }, removeChild(child) {} },
   },
-  window: { confirm() { return true; } },
+  window: { confirm() { return true; }, location: { origin: "http://localhost:8080" } },
+  URL: { createObjectURL() { return "blob:test"; }, revokeObjectURL() {} },
+  Blob: function () {},
   requestAnimationFrame(callback) { callback(); },
   setTimeout() { return 1; },
   setInterval() { return 1; },
@@ -678,6 +686,7 @@ const sandbox = {
 };
 
 vm.createContext(sandbox);
+vm.runInContext(configDownloadSource, sandbox);
 vm.runInContext(source, sandbox);
 sandbox.showToast = function () {};
 
