@@ -454,4 +454,4 @@ uv run mypy inference_proxy
 
 ## License
 
-Internal use — Perf/Scale DevOps Team.
+Open Source, crafted with :heart: via [GPLv3](LICENSE)
