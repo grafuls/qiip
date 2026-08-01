@@ -61,7 +61,7 @@ function createConfigButtons(baseUrl, modelId) {
   btnOC.className = "btn-config";
   btnOC.textContent = "OpenCode CLI";
   btnOC.addEventListener("click", function () {
-    downloadConfigFile(generateOpenCodeConfig(baseUrl, modelId), ".opencode.json");
+    downloadConfigFile(generateOpenCodeConfig(baseUrl, modelId), "opencode.json");
   });
   var btnPi = document.createElement("button");
   btnPi.type = "button";
