@@ -229,35 +229,20 @@ async function refreshDashboard() {
 
         const tdConfig = document.createElement("td");
         if (node.state === "healthy" && node.model) {
-          const cfgGroup = document.createElement("div");
-          cfgGroup.className = "action-group";
-          const cfgTrigger = document.createElement("button");
-          cfgTrigger.type = "button";
-          cfgTrigger.className = "btn-config";
-          cfgTrigger.textContent = "Download ▾";
-          const cfgMenu = document.createElement("div");
-          cfgMenu.className = "action-menu";
-          cfgMenu.appendChild(createConfigButtons(window.location.origin, node.model));
+          const cfgDropdown = createConfigDropdown(
+            window.location.origin, node.model, positionActionMenu,
+            function (menuOpen) {
+              openActionMenuNode = null;
+              openConfigMenuNode = menuOpen ? node.node_id : null;
+            }
+          );
           if (openConfigMenuNode === node.node_id) {
+            var cfgMenu = cfgDropdown.querySelector(".action-menu");
+            var cfgTrigger = cfgDropdown.querySelector("button");
             cfgMenu.classList.add("open");
             requestAnimationFrame(function () { positionActionMenu(cfgTrigger, cfgMenu); });
           }
-          cfgTrigger.addEventListener("click", function (e) {
-            e.stopPropagation();
-            var wasOpen = cfgMenu.classList.contains("open");
-            document.querySelectorAll(".action-menu.open").forEach(function (m) { m.classList.remove("open"); });
-            openActionMenuNode = null;
-            if (!wasOpen) {
-              openConfigMenuNode = node.node_id;
-              cfgMenu.classList.add("open");
-              positionActionMenu(cfgTrigger, cfgMenu);
-            } else {
-              openConfigMenuNode = null;
-            }
-          });
-          cfgGroup.appendChild(cfgTrigger);
-          cfgGroup.appendChild(cfgMenu);
-          tdConfig.appendChild(cfgGroup);
+          tdConfig.appendChild(cfgDropdown);
         } else {
           tdConfig.textContent = "—";
         }

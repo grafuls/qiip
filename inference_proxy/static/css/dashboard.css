@@ -449,7 +449,7 @@ td button:focus-visible {
   cursor: pointer;
 }
 
-.action-menu button:hover:not(:disabled) { background: var(--bg); }
+.action-menu button:hover:not(:disabled) { background: var(--bg); color: var(--text); }
 .action-menu button:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .btn-action-trigger {

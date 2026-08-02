@@ -54,23 +54,49 @@ function downloadConfigFile(data, filename) {
   URL.revokeObjectURL(url);
 }
 
-function createConfigButtons(baseUrl, modelId) {
-  var frag = document.createDocumentFragment();
-  var btnOC = document.createElement("button");
-  btnOC.type = "button";
-  btnOC.className = "btn-config";
-  btnOC.textContent = "OpenCode CLI";
-  btnOC.addEventListener("click", function () {
-    downloadConfigFile(generateOpenCodeConfig(baseUrl, modelId), "opencode.json");
+var CONFIG_FORMATS = [
+  { label: "OpenCode CLI", generator: generateOpenCodeConfig, filename: "opencode.json" },
+  { label: "Pi Agent", generator: generatePiConfig, filename: "models.json" },
+];
+
+function createConfigDropdown(baseUrl, modelId, positionFn, onToggle) {
+  var group = document.createElement("div");
+  group.className = "action-group";
+
+  var trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "btn-config";
+  trigger.textContent = "Download ▾";
+
+  var menu = document.createElement("div");
+  menu.className = "action-menu";
+
+  for (var i = 0; i < CONFIG_FORMATS.length; i++) {
+    (function (fmt) {
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn-config";
+      btn.textContent = fmt.label;
+      btn.addEventListener("click", function () {
+        downloadConfigFile(fmt.generator(baseUrl, modelId), fmt.filename);
+        menu.classList.remove("open");
+      });
+      menu.appendChild(btn);
+    })(CONFIG_FORMATS[i]);
+  }
+
+  trigger.addEventListener("click", function (e) {
+    e.stopPropagation();
+    var wasOpen = menu.classList.contains("open");
+    document.querySelectorAll(".action-menu.open").forEach(function (m) { m.classList.remove("open"); });
+    if (!wasOpen) {
+      menu.classList.add("open");
+      if (positionFn) positionFn(trigger, menu);
+    }
+    if (onToggle) onToggle(!wasOpen);
   });
-  var btnPi = document.createElement("button");
-  btnPi.type = "button";
-  btnPi.className = "btn-config";
-  btnPi.textContent = "Pi Agent";
-  btnPi.addEventListener("click", function () {
-    downloadConfigFile(generatePiConfig(baseUrl, modelId), "models.json");
-  });
-  frag.appendChild(btnOC);
-  frag.appendChild(btnPi);
-  return frag;
+
+  group.appendChild(trigger);
+  group.appendChild(menu);
+  return group;
 }

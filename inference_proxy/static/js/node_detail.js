@@ -213,7 +213,7 @@ async function refreshDetail() {
         cfgPanel.style.display = "";
         cfgHint.textContent = "Download agent configuration pointing directly at this node (" + node.endpoint + ").";
         cfgButtons.textContent = "";
-        cfgButtons.appendChild(createConfigButtons(node.endpoint, node.model));
+        cfgButtons.appendChild(createConfigDropdown(node.endpoint, node.model));
       } else {
         cfgPanel.style.display = "none";
       }
