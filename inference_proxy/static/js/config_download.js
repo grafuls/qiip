@@ -80,6 +80,7 @@ function createConfigDropdown(baseUrl, modelId, positionFn, onToggle) {
       btn.addEventListener("click", function () {
         downloadConfigFile(fmt.generator(baseUrl, modelId), fmt.filename);
         menu.classList.remove("open");
+        if (onToggle) onToggle(false);
       });
       menu.appendChild(btn);
     })(CONFIG_FORMATS[i]);

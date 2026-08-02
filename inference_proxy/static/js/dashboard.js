@@ -237,8 +237,8 @@ async function refreshDashboard() {
             }
           );
           if (openConfigMenuNode === node.node_id) {
-            var cfgMenu = cfgDropdown.querySelector(".action-menu");
-            var cfgTrigger = cfgDropdown.querySelector("button");
+            const cfgMenu = cfgDropdown.querySelector(".action-menu");
+            const cfgTrigger = cfgDropdown.querySelector("button");
             cfgMenu.classList.add("open");
             requestAnimationFrame(function () { positionActionMenu(cfgTrigger, cfgMenu); });
           }
