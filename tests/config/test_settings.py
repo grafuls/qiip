@@ -15,9 +15,11 @@ from inference_proxy.config.settings import (
     GatewaySettings,
     HuggingFaceSettings,
     LLMFitSettings,
+    LoggingSettings,
     ProvisioningSettings,
     QUADSSettings,
     RedfishSettings,
+    ResilienceSettings,
     RoutingSettings,
     Settings,
     SSHSettings,
@@ -80,12 +82,72 @@ class TestDefaultGatewaySettings:
         assert settings.gateway.host == "0.0.0.0"
         assert settings.gateway.port == 8080
 
+    def test_retired_graceful_shutdown_timeout_warns_with_replacement(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv(
+            "INFERENCE_PROXY_GATEWAY__GRACEFUL_SHUTDOWN_TIMEOUT",
+            "60",
+        )
+
+        with pytest.warns(
+            UserWarning,
+            match="uvicorn --timeout-graceful-shutdown",
+        ):
+            settings = Settings(_env_file=None)
+
+        assert settings.gateway.retired_graceful_shutdown_timeout == 60
+        assert "graceful_shutdown_timeout" not in GatewaySettings.model_fields
+
+
+class TestLoggingSettings:
+    @pytest.mark.parametrize(
+        ("configured", "canonical"),
+        [
+            ("debug", "DEBUG"),
+            ("INFO", "INFO"),
+            ("Warning", "WARNING"),
+            ("ERROR", "ERROR"),
+            ("critical", "CRITICAL"),
+        ],
+    )
+    def test_log_level_validation_matrix(
+        self,
+        configured: str,
+        canonical: str,
+    ) -> None:
+        assert LoggingSettings(level=configured).level == canonical
+
+    @pytest.mark.parametrize("configured", ["TRACE", "VERBOSE", "inf", "", 10])
+    def test_unknown_log_level_is_rejected(self, configured: object) -> None:
+        with pytest.raises(ValidationError, match="logging.level"):
+            LoggingSettings(level=configured)  # type: ignore[arg-type]
+
 
 class TestDefaultEtcdSettings:
     def test_default_etcd_settings(self) -> None:
         settings = Settings(_env_file=None)
         assert settings.etcd.endpoints == ["http://localhost:2379"]
         assert settings.etcd.node_prefix == "/nodes/"
+        assert settings.etcd.node_lease_ttl == 600
+
+    def test_node_lease_ttl_exceeds_health_and_restart_budgets(self) -> None:
+        settings = Settings(_env_file=None)
+
+        assert settings.etcd.node_lease_ttl > 300
+        assert (
+            settings.etcd.node_lease_ttl > 3 * settings.resilience.health_check_interval
+        )
+
+        with pytest.raises(ValidationError, match="greater than 300"):
+            EtcdSettings(node_lease_ttl=300)
+        with pytest.raises(ValidationError, match="three times"):
+            Settings(
+                _env_file=None,
+                etcd=EtcdSettings(node_lease_ttl=600),
+                resilience=ResilienceSettings(health_check_interval=200),
+            )
 
 
 class TestDefaultRoutingSettings:

@@ -699,7 +699,44 @@ class NodeProvisioner:
         )
         key, value = node_to_etcd(node, self._etcd_client.prefix)
         # ponytail: etcd3gw is sync, asyncio.to_thread wraps it (Pitfall 5)
-        await asyncio.to_thread(self._etcd_client.put, key, value)
+        lease_id: int | None = None
+        if managed:
+            try:
+                lease_id = await asyncio.to_thread(self._etcd_client.grant_node_lease)
+            except Exception:
+                # Lease protection is convergent rather than a precondition
+                # for completing an otherwise successful hour-long provision.
+                # The health checker adopts this managed key after its next
+                # successful probe.
+                logger.warning(
+                    "node_lease_grant_failed_during_registration",
+                    hostname=hostname,
+                    exc_info=True,
+                )
+                self._log(
+                    hostname,
+                    "warning",
+                    "Node registered without a lease; health checking will retry",
+                )
+
+        try:
+            if lease_id is None:
+                await asyncio.to_thread(self._etcd_client.put, key, value)
+            else:
+                await asyncio.to_thread(
+                    self._etcd_client.put,
+                    key,
+                    value,
+                    lease_id=lease_id,
+                )
+        except Exception:
+            if lease_id is not None:
+                with suppress(Exception):
+                    await asyncio.to_thread(
+                        self._etcd_client.revoke_lease,
+                        lease_id,
+                    )
+            raise
         logger.info("node_registered", hostname=hostname, model=model, key=key)
 
     def fire_background(
@@ -752,6 +789,19 @@ class NodeProvisioner:
 
         task.add_done_callback(_task_done)
         return task
+
+    async def shutdown(self) -> None:
+        """Cancel and await every lifecycle task still owned by this process.
+
+        This method owns shutdown lifecycle only. Per-task exception observation
+        remains the responsibility of ``fire_background``'s done callback so a
+        future generic observer cannot double-log failures during shutdown.
+        """
+        tasks = tuple(self._background_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def cancel_active_provision(self, hostname: str) -> asyncio.Task[None] | None:
         """Cancel and await the active provisioning task for *hostname*."""
