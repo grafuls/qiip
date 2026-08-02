@@ -63,6 +63,12 @@
                 </div>
             </section>
 
+            <section class="card" id="config-download-panel" style="display:none">
+                <h2 class="card-title">Client Configuration</h2>
+                <p id="config-download-hint" style="color:var(--muted);font-size:0.875rem"></p>
+                <div id="config-download-buttons" style="display:flex;gap:0.5rem;margin-top:0.5rem"></div>
+            </section>
+
             <section class="card" id="setup-config-panel">
                 <h2 class="card-title">Setup Configuration</h2>
                 <div>
@@ -120,6 +126,7 @@
         const POLL_INTERVAL_MS = {{ poll_interval * 1000 }};
         const NODE_ID = {{ node_id | tojson }};
     </script>
+    <script src="{{ url_for('static', path='js/config_download.js') }}"></script>
     <script src="{{ url_for('static', path='js/node_detail.js') }}"></script>
 </body>
 </html>

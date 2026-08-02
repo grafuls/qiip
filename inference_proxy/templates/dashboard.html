@@ -56,13 +56,14 @@
                                 <th scope="col">GPU Vendor</th>
                                 <th scope="col">GPU Model</th>
                                 <th scope="col">Model</th>
+                                <th scope="col">Config</th>
                                 <th scope="col">State</th>
                                 <th scope="col">Requests</th>
                                 <th scope="col">Actions</th>
                             </tr>
                         </thead>
                         <tbody id="node-table-body">
-                            <tr><td colspan="7">Loading node data...</td></tr>
+                            <tr><td colspan="8">Loading node data...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -77,6 +78,7 @@
     </footer>
 
     <script>const POLL_INTERVAL_MS = {{ poll_interval * 1000 }};</script>
+    <script src="{{ url_for('static', path='js/config_download.js') }}"></script>
     <script src="{{ url_for('static', path='js/dashboard.js') }}"></script>
 </body>
 </html>

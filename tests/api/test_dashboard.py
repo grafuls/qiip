@@ -64,6 +64,20 @@ class TestDashboardTemplate:
         response = client.get("/dashboard")
         assert "dashboard.js" in response.text
 
+    def test_contains_config_download_js(self, client: TestClient) -> None:
+        """HTML contains script tag for config_download.js."""
+        response = client.get("/dashboard")
+        assert "config_download.js" in response.text
+
+    def test_config_download_js_loaded_before_dashboard_js(
+        self, client: TestClient
+    ) -> None:
+        """config_download.js appears before dashboard.js in the HTML."""
+        response = client.get("/dashboard")
+        config_pos = response.text.index("config_download.js")
+        dashboard_pos = response.text.index("dashboard.js")
+        assert config_pos < dashboard_pos
+
     def test_fonts_loaded_before_dashboard_css(self, client: TestClient) -> None:
         """Google Fonts link appears before dashboard.css link in the HTML."""
         response = client.get("/dashboard")
@@ -83,6 +97,7 @@ class TestDashboardTableStructure:
             "GPU Vendor",
             "GPU Model",
             "Model",
+            "Config",
             "State",
             "Requests",
             "Actions",
@@ -99,6 +114,11 @@ class TestDashboardTableStructure:
         """HTML contains tbody with id="node-table-body" for JS population."""
         response = client.get("/dashboard")
         assert 'id="node-table-body"' in response.text
+
+    def test_loading_row_colspan_matches_column_count(self, client: TestClient) -> None:
+        """Loading placeholder colspan matches the number of column headers."""
+        response = client.get("/dashboard")
+        assert 'colspan="8"' in response.text
 
 
 class TestDashboardPolling:
@@ -198,6 +218,11 @@ class TestDashboardBadgeCSS:
         assert ".btn-setup" in css, "Missing CSS class: .btn-setup"
         assert ".btn-teardown" in css, "Missing CSS class: .btn-teardown"
 
+    def test_badge_css_contains_config_button_class(self) -> None:
+        """dashboard.css contains .btn-config for config download buttons."""
+        css = self._css_path.read_text()
+        assert ".btn-config" in css, "Missing CSS class: .btn-config"
+
 
 class TestSetupForm:
     """Dashboard HTML contains the setup form elements (DASH-01, D-04, D-05)."""
@@ -283,3 +308,22 @@ class TestNodeDetailPage:
         response = client.get("/dashboard/nodes/host01.example.com")
         assert response.status_code == 200
         assert "host01.example.com" in response.text
+
+    def test_contains_config_download_panel(self, client: TestClient) -> None:
+        """Page contains the config download panel section."""
+        response = client.get("/dashboard/nodes/test-node")
+        assert 'id="config-download-panel"' in response.text
+
+    def test_contains_config_download_js(self, client: TestClient) -> None:
+        """Page loads config_download.js."""
+        response = client.get("/dashboard/nodes/test-node")
+        assert "config_download.js" in response.text
+
+    def test_config_download_js_loaded_before_node_detail_js(
+        self, client: TestClient
+    ) -> None:
+        """config_download.js appears before node_detail.js in the HTML."""
+        response = client.get("/dashboard/nodes/test-node")
+        config_pos = response.text.index("config_download.js")
+        detail_pos = response.text.index("node_detail.js")
+        assert config_pos < detail_pos

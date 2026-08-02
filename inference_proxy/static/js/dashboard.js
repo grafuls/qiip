@@ -72,6 +72,7 @@ const ACTION_CONFIG = {
 const inFlightNodes = new Set();
 const expandedErrorNodes = new Set();
 let openActionMenuNode = null;
+let openConfigMenuNode = null;
 let dashboardPollInFlight = false;
 let dashboardRequestSequence = 0;
 let dashboardLastRenderedSequence = 0;
@@ -188,7 +189,7 @@ async function refreshDashboard() {
       tbody.textContent = "";
       const emptyRow = document.createElement("tr");
       const emptyCell = document.createElement("td");
-      emptyCell.colSpan = 7;
+      emptyCell.colSpan = 8;
       emptyCell.textContent = "No nodes found";
       emptyRow.appendChild(emptyCell);
       tbody.appendChild(emptyRow);
@@ -225,6 +226,27 @@ async function refreshDashboard() {
         const tdModel = document.createElement("td");
         tdModel.textContent = node.state === "available" ? "—" : node.model;
         tr.appendChild(tdModel);
+
+        const tdConfig = document.createElement("td");
+        if (node.state === "healthy" && node.model) {
+          const cfgDropdown = createConfigDropdown(
+            window.location.origin, node.model, positionActionMenu,
+            function (menuOpen) {
+              openActionMenuNode = null;
+              openConfigMenuNode = menuOpen ? node.node_id : null;
+            }
+          );
+          if (openConfigMenuNode === node.node_id) {
+            const cfgMenu = cfgDropdown.querySelector(".action-menu");
+            const cfgTrigger = cfgDropdown.querySelector("button");
+            cfgMenu.classList.add("open");
+            requestAnimationFrame(function () { positionActionMenu(cfgTrigger, cfgMenu); });
+          }
+          tdConfig.appendChild(cfgDropdown);
+        } else {
+          tdConfig.textContent = "—";
+        }
+        tr.appendChild(tdConfig);
 
         const tdState = document.createElement("td");
         const stateBadge = document.createElement("span");
@@ -264,6 +286,7 @@ async function refreshDashboard() {
             e.stopPropagation();
             var wasOpen = menu.classList.contains("open");
             document.querySelectorAll(".action-menu.open").forEach(function (m) { m.classList.remove("open"); });
+            openConfigMenuNode = null;
             if (!wasOpen) {
               openActionMenuNode = node.node_id;
               menu.classList.add("open");
@@ -288,7 +311,7 @@ async function refreshDashboard() {
           subRow.style.display = expanded ? "table-row" : "none";
 
           const subTd = document.createElement("td");
-          subTd.colSpan = 7;
+          subTd.colSpan = 8;
 
           const detail = document.createElement("div");
           detail.className = "error-detail";
@@ -373,6 +396,7 @@ document.addEventListener("DOMContentLoaded", function () {
         m.classList.remove("open");
       });
       openActionMenuNode = null;
+      openConfigMenuNode = null;
     }
   });
 

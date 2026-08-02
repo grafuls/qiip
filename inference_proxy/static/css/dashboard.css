@@ -402,6 +402,9 @@ td button:focus-visible {
 .btn-retry { color: var(--warning); border-color: var(--warning); }
 .btn-retry:hover:not(:disabled) { background: var(--warning); color: #fff; border-color: var(--warning); }
 
+.btn-config { color: var(--secondary); border-color: var(--secondary); }
+.btn-config:hover:not(:disabled) { background: var(--secondary); color: #fff; border-color: var(--secondary); }
+
 /* --- Action group dropdown --- */
 .action-group {
   display: inline-flex;
@@ -446,7 +449,7 @@ td button:focus-visible {
   cursor: pointer;
 }
 
-.action-menu button:hover:not(:disabled) { background: var(--bg); }
+.action-menu button:hover:not(:disabled) { background: var(--bg); color: var(--text); }
 .action-menu button:disabled { opacity: 0.35; cursor: not-allowed; }
 
 .btn-action-trigger {
