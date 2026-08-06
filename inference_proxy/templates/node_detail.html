@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>{{ node_id }} — QIIP Node Detail</title>
+    <title>{{ node_id }} - QIIP Node Detail</title>
     <meta name="description" content="Node detail, provisioning status, and runtime configuration for {{ node_id }} on QIIP.">
     <link rel="icon" type="image/svg+xml" href="{{ static_asset_url(request, 'img/qiip.svg') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -156,6 +156,7 @@
         const POLL_INTERVAL_MS = {{ poll_interval * 1000 }};
         const NODE_ID = {{ node_id | tojson }};
     </script>
+    <script src="{{ static_asset_url(request, 'js/confirm_dialog.js') }}"></script>
     <script src="{{ static_asset_url(request, 'js/config_download.js') }}"></script>
     <script src="{{ static_asset_url(request, 'js/setup_selection.js') }}"></script>
     <script src="{{ static_asset_url(request, 'js/node_detail.js') }}"></script>

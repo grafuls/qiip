@@ -28,7 +28,9 @@ const ACTION_CONFIG = {
     },
     confirm: false,
     confirmMsg: null,
+    danger: false,
     label: "Setup Node",
+    pendingLabel: "Starting…",
     css: "btn-setup",
     successMsg: (nodeId) => `Setup started for ${nodeId}`,
   },
@@ -39,7 +41,9 @@ const ACTION_CONFIG = {
     confirm: true,
     confirmMsg: (nodeId) =>
       `Teardown node ${nodeId}? This will drain connections and stop the container.`,
+    danger: true,
     label: "Teardown",
+    pendingLabel: "Tearing down…",
     css: "btn-teardown",
     successMsg: (nodeId) => `Teardown started for ${nodeId}`,
   },
@@ -49,7 +53,9 @@ const ACTION_CONFIG = {
     body: (nodeId, node) => ({ hostname: nodeId, managed: node ? node.managed !== false : true }),
     confirm: false,
     confirmMsg: null,
+    danger: false,
     label: "Retry",
+    pendingLabel: "Retrying…",
     css: "btn-retry",
     successMsg: (nodeId) => `Retry started for ${nodeId}`,
   },
@@ -59,7 +65,9 @@ const ACTION_CONFIG = {
     body: null,
     confirm: true,
     confirmMsg: (nodeId) => `Cancel provisioning for ${nodeId}?`,
+    danger: true,
     label: "Cancel",
+    pendingLabel: "Cancelling…",
     css: "btn-cancel",
     successMsg: (nodeId) => `Cancelled provisioning for ${nodeId}`,
   },
@@ -70,7 +78,9 @@ const ACTION_CONFIG = {
     confirm: true,
     confirmMsg: (nodeId) =>
       `Force teardown ${nodeId}? This will immediately stop the container without draining.`,
+    danger: true,
     label: "Force Teardown",
+    pendingLabel: "Forcing…",
     css: "btn-force-teardown",
     successMsg: (nodeId) => `Teardown started for ${nodeId}`,
   },
@@ -84,11 +94,20 @@ let dashboardPollInFlight = false;
 let dashboardRequestSequence = 0;
 let dashboardLastRenderedSequence = 0;
 
-async function handleAction(action, nodeId, node) {
+async function handleAction(action, nodeId, node, onStart) {
   const config = ACTION_CONFIG[action];
   if (!config) return;
   if (inFlightNodes.has(nodeId)) return;
-  if (config.confirm && !window.confirm(config.confirmMsg(nodeId))) return;
+  if (config.confirm) {
+    const ok = await confirmDialog({
+      title: config.label,
+      message: config.confirmMsg(nodeId),
+      confirmLabel: config.label,
+      danger: config.danger,
+    });
+    if (!ok) return;
+  }
+  if (onStart) onStart();
   inFlightNodes.add(nodeId);
   const options = { method: config.method };
   if (config.body) {
@@ -131,10 +150,10 @@ function renderQuadsStatus(data) {
   badge.className = "badge";
   if (data.status === "connected") {
     badge.classList.add("badge-healthy");
-    badge.textContent = `QUADS: connected — ${relativeTime(data.last_sync)} ago`;
+    badge.textContent = `QUADS: connected (${relativeTime(data.last_sync)} ago)`;
   } else if (data.status === "stale") {
     badge.classList.add("badge-draining");
-    badge.textContent = `QUADS: stale — last sync ${relativeTime(data.last_sync)} ago`;
+    badge.textContent = `QUADS: stale (last sync ${relativeTime(data.last_sync)} ago)`;
   } else {
     badge.classList.add("badge-unhealthy");
     badge.textContent = "QUADS: unavailable";
@@ -153,9 +172,14 @@ function createActionButton(action, nodeId, node) {
     if (inFlightNodes.has(nodeId)) return;
     btn.disabled = true;
     try {
-      await handleAction(action, nodeId, node);
+      await handleAction(action, nodeId, node, function () {
+        btn.textContent = config.pendingLabel;
+        btn.setAttribute("aria-busy", "true");
+      });
     } finally {
       btn.disabled = inFlightNodes.has(nodeId);
+      btn.textContent = config.label;
+      btn.removeAttribute("aria-busy");
     }
   });
   return btn;
@@ -381,7 +405,7 @@ async function refreshDashboard() {
     lastUpdatedEl.className = "last-updated";
   } catch (err) {
     if (requestSequence >= dashboardLastRenderedSequence) {
-      warningEl.textContent = "Update failed — retrying...";
+      warningEl.textContent = "Update failed. Retrying…";
       warningEl.className = "poll-warning";
     }
   } finally {

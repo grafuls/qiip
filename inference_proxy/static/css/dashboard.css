@@ -26,6 +26,11 @@
   --font-display: 'Outfit', 'Manrope', system-ui, -apple-system, sans-serif;
   --font-sans: 'Manrope', system-ui, -apple-system, sans-serif;
   --font-mono: 'IBM Plex Mono', 'SF Mono', Consolas, monospace;
+  /* Text-on-accent-fill colors, chosen per-swatch to clear WCAG AA (4.5:1) against solid buttons/toasts. */
+  --on-primary: #FFFFFF;
+  --on-danger: #FFFFFF;
+  --on-warning: var(--text);
+  --on-success: var(--text);
 }
 
 [data-theme="dark"] {
@@ -48,6 +53,11 @@
   --disabled: #566472;
   --shadow-sm: 0 1px 2px rgba(2, 10, 11, 0.4);
   --shadow-md: 0 8px 20px -4px rgba(2, 10, 11, 0.55), 0 2px 6px -2px rgba(2, 10, 11, 0.4);
+  /* Dark theme's accent swatches are all light/bright, so on-accent text is dark ink everywhere. */
+  --on-primary: #0A1114;
+  --on-danger: #0A1114;
+  --on-warning: #0A1114;
+  --on-success: #0A1114;
 }
 
 *,
@@ -388,12 +398,13 @@ h1 {
 .setup-form button {
   padding: 0.5rem 1rem;
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   border: none;
   border-radius: var(--radius);
   font-size: 0.8125rem;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
   transition: background 0.15s, transform 0.1s;
 }
 
@@ -515,6 +526,7 @@ td button {
   font-size: 0.6875rem;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.15s;
   color: var(--text-light);
 }
@@ -527,19 +539,21 @@ td button:hover:not(:disabled) {
 
 td button:active:not(:disabled) { transform: scale(0.96); }
 td button:disabled { opacity: 0.35; cursor: not-allowed; }
+td button[aria-busy="true"],
+.btn-action-trigger[aria-busy="true"] { cursor: progress; }
 
 .btn-setup { color: var(--primary); border-color: var(--primary); }
-.btn-setup:hover:not(:disabled) { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn-setup:hover:not(:disabled) { background: var(--primary); color: var(--on-primary); border-color: var(--primary); }
 
 .btn-teardown,
 .btn-cancel,
 .btn-force-teardown { color: var(--danger); border-color: var(--danger); }
 .btn-teardown:hover:not(:disabled),
 .btn-cancel:hover:not(:disabled),
-.btn-force-teardown:hover:not(:disabled) { background: var(--danger); color: #fff; border-color: var(--danger); }
+.btn-force-teardown:hover:not(:disabled) { background: var(--danger); color: var(--on-danger); border-color: var(--danger); }
 
 .btn-retry { color: var(--warning); border-color: var(--warning); }
-.btn-retry:hover:not(:disabled) { background: var(--warning); color: #fff; border-color: var(--warning); }
+.btn-retry:hover:not(:disabled) { background: var(--warning); color: var(--on-warning); border-color: var(--warning); }
 
 .btn-config { color: var(--text); border-color: var(--border-strong); }
 .btn-config:hover:not(:disabled) { background: var(--text); color: var(--surface); border-color: var(--text); }
@@ -620,7 +634,6 @@ td button:disabled { opacity: 0.35; cursor: not-allowed; }
   border-radius: var(--radius);
   font-size: 0.8125rem;
   font-weight: 600;
-  color: #fff;
   max-width: 22rem;
   opacity: 0;
   transform: translateY(0.5rem);
@@ -630,10 +643,83 @@ td button:disabled { opacity: 0.35; cursor: not-allowed; }
 }
 
 .toast-visible { opacity: 1; transform: translateY(0); }
-.toast-success { background: var(--success); }
-.toast-error { background: var(--danger); }
-.toast-warning { background: var(--warning); }
-.toast-info { background: var(--primary); }
+.toast-success { background: var(--success); color: var(--on-success); }
+.toast-error { background: var(--danger); color: var(--on-danger); }
+.toast-warning { background: var(--warning); color: var(--on-warning); }
+.toast-info { background: var(--primary); color: var(--on-primary); }
+
+/* --- Confirm dialog --- */
+.confirm-dialog {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 0;
+  margin: auto;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  max-width: 26rem;
+  width: calc(100% - 2rem);
+  color: var(--text);
+}
+
+.confirm-dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+[data-theme="dark"] .confirm-dialog::backdrop { background: rgba(0, 0, 0, 0.65); }
+
+.confirm-dialog-body { padding: 1.5rem; margin: 0; }
+
+.confirm-dialog-title {
+  font-family: var(--font-display);
+  font-size: 1.0625rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+  letter-spacing: -0.01em;
+}
+
+.confirm-dialog-message {
+  font-size: 0.875rem;
+  color: var(--text-light);
+  line-height: 1.5;
+  margin: 0 0 1.5rem;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.625rem;
+}
+
+.confirm-dialog-cancel,
+.confirm-dialog-confirm {
+  padding: 0.5rem 1rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.15s, background 0.15s, transform 0.1s;
+}
+
+.confirm-dialog-cancel {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+}
+.confirm-dialog-cancel:hover { background: var(--bg); border-color: var(--text); }
+.confirm-dialog-cancel:active { transform: scale(0.97); }
+
+.confirm-dialog-confirm {
+  background: var(--primary);
+  color: var(--on-primary);
+  border: 1px solid var(--primary);
+}
+.confirm-dialog-confirm:hover { background: var(--primary-hover); }
+.confirm-dialog-confirm:active { transform: scale(0.97); }
+
+.confirm-dialog-confirm.is-danger {
+  background: var(--danger);
+  color: var(--on-danger);
+  border-color: var(--danger);
+}
+.confirm-dialog-confirm.is-danger:hover { filter: brightness(0.92); }
 
 /* --- Log viewer --- */
 .log-viewer {
@@ -704,4 +790,6 @@ footer p { margin: 0; }
   .setup-form input[type="text"] { transition: none; }
   .setup-form button { transition: none; }
   tbody tr { transition: none; }
+  .confirm-dialog-cancel,
+  .confirm-dialog-confirm { transition: none; }
 }

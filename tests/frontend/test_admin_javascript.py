@@ -301,6 +301,7 @@ class Element {
   appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  removeAttribute(name) { delete this.attributes[name]; }
   getAttribute(name) { return this.attributes[name] || null; }
   remove() {}
   querySelector() { return null; }
@@ -345,6 +346,7 @@ const sandbox = {
     createTextNode(text) { const node = new Element("text"); node.textContent = text; return node; },
   },
   window: { confirm() { return true; } },
+  confirmDialog: async function () { return true; },
   requestAnimationFrame() {},
   setTimeout(callback, delay) {
     const timer = { callback, delay, active: true };
@@ -549,7 +551,7 @@ installDetailFetch([{
     assert result == {
         "sourceCount": 2,
         "done": True,
-        "status": "status unavailable — reload to retry",
+        "status": "status unavailable, reload to retry",
         "activeTimers": 0,
     }
 
@@ -704,7 +706,7 @@ sandbox.fetch = async function (url, options) {
     assert "Not downloaded" in result["texts"]
     assert "Unsupported" in result["texts"]
     assert "Unknown runtime" in result["texts"]
-    assert "<img src=x onerror=attack()> — org/exact" in result["texts"]
+    assert "<img src=x onerror=attack()> - org/exact" in result["texts"]
     assert result["downloadButtons"] == 1
     assert result["downloadPosts"] == 0
 
@@ -872,7 +874,7 @@ def test_force_power_actions_always_require_confirmation(action: str) -> None:
     result = _run_node_detail_scenario(
         f"""
 let requestCount = 0;
-sandbox.window.confirm = function () {{ return false; }};
+sandbox.confirmDialog = async function () {{ return false; }};
 sandbox.fetch = async function () {{ requestCount += 1; return {{ ok: true }}; }};
 (async function () {{
   await sandbox.handlePowerAction({json.dumps(action)});
@@ -932,6 +934,7 @@ class Element {
   appendChild(child) { this.children.push(child); child.parentNode = this; return child; }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  removeAttribute(name) { delete this.attributes[name]; }
   getAttribute(name) { return this.attributes[name] || null; }
   getBoundingClientRect() { return { top: 20, right: 20 }; }
   async click() {
@@ -965,6 +968,7 @@ const sandbox = {
     body: { appendChild(child) { return child; }, removeChild(child) {} },
   },
   window: { confirm() { return true; }, location: { origin: "http://localhost:8080" } },
+  confirmDialog: async function () { return true; },
   URL: { createObjectURL() { return "blob:test"; }, revokeObjectURL() {} },
   Blob: function () {},
   requestAnimationFrame(callback) { callback(); },
