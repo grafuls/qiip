@@ -28,7 +28,10 @@ async def dashboard(
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
-        context={"poll_interval": settings.dashboard.poll_interval, "active_page": "dashboard"},
+        context={
+            "poll_interval": settings.dashboard.poll_interval,
+            "active_page": "dashboard",
+        },
     )
 
 
