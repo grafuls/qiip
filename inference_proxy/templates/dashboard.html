@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>QIIP — Node Fleet Dashboard</title>
+    <title>QIIP - Node Fleet Dashboard</title>
     <meta name="description" content="Operations dashboard for QIIP: monitor inference nodes, provisioning status, and fleet health.">
     <link rel="icon" type="image/svg+xml" href="{{ static_asset_url(request, 'img/qiip.svg') }}">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -89,6 +89,7 @@
     </footer>
 
     <script>const POLL_INTERVAL_MS = {{ poll_interval * 1000 }};</script>
+    <script src="{{ static_asset_url(request, 'js/confirm_dialog.js') }}"></script>
     <script src="{{ static_asset_url(request, 'js/config_download.js') }}"></script>
     <script src="{{ static_asset_url(request, 'js/setup_selection.js') }}"></script>
     <script src="{{ static_asset_url(request, 'js/dashboard.js') }}"></script>

@@ -82,7 +82,7 @@
 .bubble-user {
   margin-left: auto;
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 .bubble-assistant {
@@ -95,6 +95,7 @@
 .bubble-error {
   color: var(--danger);
 }
+
 
 [data-theme="dark"] .bubble-user {
   color: #0A1114;
@@ -153,7 +154,7 @@
   height: 40px;
   border-radius: var(--radius);
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary);
   border: none;
   cursor: pointer;
   font-size: 0.875rem;

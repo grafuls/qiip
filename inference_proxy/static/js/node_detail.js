@@ -46,45 +46,54 @@ function renderStatusMessage(container, message, className) {
 var ACTION_CONFIG = {
   setup: {
     method: "POST", url: function () { return "/admin/nodes/setup"; },
-    body: setupActionBody, confirm: false,
-    label: "Setup Node", css: "btn-setup",
+    body: setupActionBody, confirm: false, danger: false,
+    label: "Setup Node", pendingLabel: "Starting…", css: "btn-setup",
     successMsg: function (id) { return "Setup started for " + id; },
   },
   teardown: {
     method: "DELETE", url: function (id) { return "/admin/nodes/" + id; },
-    body: null, confirm: true,
+    body: null, confirm: true, danger: true,
     confirmMsg: function (id) { return "Teardown " + id + "? This will drain connections and stop the container."; },
-    label: "Teardown", css: "btn-teardown",
+    label: "Teardown", pendingLabel: "Tearing down…", css: "btn-teardown",
     successMsg: function (id) { return "Teardown started for " + id; },
   },
   retry: {
     method: "POST", url: function () { return "/admin/nodes/setup"; },
     body: function (id, node) {
       return { hostname: id, managed: node ? node.managed !== false : true };
-    }, confirm: false,
-    label: "Retry", css: "btn-retry",
+    }, confirm: false, danger: false,
+    label: "Retry", pendingLabel: "Retrying…", css: "btn-retry",
     successMsg: function (id) { return "Retry started for " + id; },
   },
   cancel: {
     method: "DELETE", url: function (id) { return "/admin/nodes/" + id; },
-    body: null, confirm: true,
+    body: null, confirm: true, danger: true,
     confirmMsg: function (id) { return "Cancel provisioning for " + id + "?"; },
-    label: "Cancel", css: "btn-cancel",
+    label: "Cancel", pendingLabel: "Cancelling…", css: "btn-cancel",
     successMsg: function (id) { return "Cancelled provisioning for " + id; },
   },
   force_teardown: {
     method: "DELETE", url: function (id) { return "/admin/nodes/" + id + "?force=true"; },
-    body: null, confirm: true,
+    body: null, confirm: true, danger: true,
     confirmMsg: function (id) { return "Force teardown " + id + "? This will immediately stop the container without draining."; },
-    label: "Force Teardown", css: "btn-force-teardown",
+    label: "Force Teardown", pendingLabel: "Forcing…", css: "btn-force-teardown",
     successMsg: function (id) { return "Teardown started for " + id; },
   },
 };
 
-async function handleAction(action, nodeId, node) {
+async function handleAction(action, nodeId, node, onStart) {
   var config = ACTION_CONFIG[action];
   if (!config) return;
-  if (config.confirm && !window.confirm(config.confirmMsg(nodeId))) return;
+  if (config.confirm) {
+    var ok = await confirmDialog({
+      title: config.label,
+      message: config.confirmMsg(nodeId),
+      confirmLabel: config.label,
+      danger: config.danger,
+    });
+    if (!ok) return;
+  }
+  if (onStart) onStart();
   var options = { method: config.method };
   if (config.body) {
     var body = config.body(nodeId, node);
@@ -137,7 +146,16 @@ function createActionsDropdown(nodeId, enabledActions, node) {
         btn.addEventListener("click", async function () {
           btn.disabled = true;
           menu.classList.remove("open");
-          try { await handleAction(action, nodeId, node); } finally { btn.disabled = false; }
+          try {
+            await handleAction(action, nodeId, node, function () {
+              btn.textContent = config.pendingLabel;
+              btn.setAttribute("aria-busy", "true");
+            });
+          } finally {
+            btn.disabled = false;
+            btn.textContent = config.label;
+            btn.removeAttribute("aria-busy");
+          }
         });
       }
       menu.appendChild(btn);
@@ -349,7 +367,7 @@ async function refreshDetail() {
     var degraded = nodesResp.headers.get("X-Inference-Proxy-Data-Degraded");
     if (degraded === "provisioning-tasks") {
       lastUpdatedEl.textContent = "Updated " + new Date().toLocaleTimeString() +
-        " — task/error details unavailable";
+        " (task/error details unavailable)";
       lastUpdatedEl.className = "poll-warning";
     } else {
       lastUpdatedEl.textContent = "Updated " + new Date().toLocaleTimeString();
@@ -357,7 +375,7 @@ async function refreshDetail() {
     }
   } catch (err) {
     markLogTaskStateUnavailable();
-    lastUpdatedEl.textContent = "Update failed — retrying...";
+    lastUpdatedEl.textContent = "Update failed. Retrying…";
   }
 }
 
@@ -442,7 +460,7 @@ function scheduleLogReconnect() {
   if (logReconnectStartedAt === null) logReconnectStartedAt = now;
   var elapsed = now - logReconnectStartedAt;
   if (elapsed >= LOG_RECONNECT_MAX_ELAPSED_MS) {
-    finishLogStream("status unavailable — reload to retry", "badge badge-failed");
+    finishLogStream("status unavailable, reload to retry", "badge badge-failed");
     return;
   }
 
@@ -453,7 +471,7 @@ function scheduleLogReconnect() {
     LOG_RECONNECT_MAX_ELAPSED_MS - elapsed,
   );
   var status = document.getElementById("logs-status");
-  status.textContent = logTaskStateKnown ? "reconnecting" : "status unavailable — retrying";
+  status.textContent = logTaskStateKnown ? "reconnecting" : "status unavailable, retrying";
   status.className = "badge badge-in-progress";
   logReconnectTimer = setTimeout(function () {
     logReconnectTimer = null;
@@ -550,7 +568,7 @@ function renderDownloadCell(td, modelName, catalogSet, downloadMap) {
     btn.type = "button";
     btn.className = "badge badge-failed";
     btn.style.cursor = "pointer";
-    btn.textContent = "Failed — Retry";
+    btn.textContent = "Failed, retry";
     btn.addEventListener("click", function () { triggerDownload(modelName, td); });
     td.appendChild(btn);
   } else {
@@ -758,7 +776,7 @@ async function loadRecommendations() {
         var sources = m.gguf_sources || [];
         var tdSource = document.createElement("td");
         tdSource.textContent = sources.length ? sources.map(function (source) {
-          return (source.provider ? source.provider + " — " : "") + source.repo;
+          return (source.provider ? source.provider + " - " : "") + source.repo;
         }).join(", ") : "—";
         row.appendChild(tdSource);
         var tdCat = document.createElement("td"); tdCat.textContent = m.category || "—"; row.appendChild(tdCat);
@@ -844,11 +862,11 @@ var currentPowerState = null;
 var powerControlsState = "unknown";
 
 var POWER_ACTIONS = [
-  { action: "On", label: "Power On", css: "btn-setup", confirm: false },
-  { action: "ForceOff", label: "Force Off", css: "btn-teardown", confirm: true,
+  { action: "On", label: "Power On", pendingLabel: "Powering on…", css: "btn-setup", confirm: false, danger: false },
+  { action: "ForceOff", label: "Force Off", pendingLabel: "Forcing off…", css: "btn-teardown", confirm: true, danger: true,
     confirmMsg: "Force off " + NODE_ID + "? This will immediately cut power." },
-  { action: "GracefulRestart", label: "Graceful Restart", css: "btn-cancel", confirm: false },
-  { action: "ForceRestart", label: "Force Restart", css: "btn-cancel", confirm: true,
+  { action: "GracefulRestart", label: "Graceful Restart", pendingLabel: "Restarting…", css: "btn-cancel", confirm: false, danger: false },
+  { action: "ForceRestart", label: "Force Restart", pendingLabel: "Restarting…", css: "btn-cancel", confirm: true, danger: true,
     confirmMsg: "Force restart " + NODE_ID + "? This will immediately reset the node." },
 ];
 
@@ -876,19 +894,27 @@ function renderPowerButtons() {
         btn.disabled = true;
         btn.title = "Power state is temporarily unavailable; controls are disabled.";
       }
-      btn.addEventListener("click", function () { handlePowerAction(pa.action); });
+      btn.addEventListener("click", function () { handlePowerAction(pa.action, btn); });
       container.appendChild(btn);
     })(POWER_ACTIONS[i]);
   }
 }
 
-async function handlePowerAction(action) {
+async function handlePowerAction(action, triggerBtn) {
   var config;
   for (var i = 0; i < POWER_ACTIONS.length; i++) {
     if (POWER_ACTIONS[i].action === action) { config = POWER_ACTIONS[i]; break; }
   }
   if (!config) return;
-  if (config.confirm && !window.confirm(config.confirmMsg)) return;
+  if (config.confirm) {
+    var ok = await confirmDialog({
+      title: config.label,
+      message: config.confirmMsg,
+      confirmLabel: config.label,
+      danger: config.danger,
+    });
+    if (!ok) return;
+  }
 
   var el = document.querySelector("#power-state span");
   var prevClass = el.className;
@@ -896,9 +922,13 @@ async function handlePowerAction(action) {
 
   var btns = document.querySelectorAll("#power-actions button");
   for (var j = 0; j < btns.length; j++) btns[j].disabled = true;
+  if (triggerBtn) {
+    triggerBtn.textContent = config.pendingLabel;
+    triggerBtn.setAttribute("aria-busy", "true");
+  }
 
   el.className = "badge badge-unknown";
-  el.textContent = "Power: ...";
+  el.textContent = "Power: …";
 
   try {
     var resp = await fetch("/admin/nodes/" + encodeURIComponent(NODE_ID) + "/power", {
@@ -908,19 +938,21 @@ async function handlePowerAction(action) {
     });
     if (resp.ok) {
       showToast("Power action sent: " + config.label, "success");
-      refreshPowerState();
+      refreshPowerState(); // rebuilds #power-actions from scratch, so no manual label/disabled restore needed here
     } else {
       var data = await resp.json().catch(function () { return { detail: "HTTP " + resp.status }; });
       showToast(data.detail || "HTTP " + resp.status, "error");
       el.className = prevClass;
       el.textContent = prevText;
       for (var k = 0; k < btns.length; k++) btns[k].disabled = false;
+      if (triggerBtn) { triggerBtn.textContent = config.label; triggerBtn.removeAttribute("aria-busy"); }
     }
   } catch (err) {
     showToast(config.label + " failed: " + err.message, "error");
     el.className = prevClass;
     el.textContent = prevText;
     for (var k = 0; k < btns.length; k++) btns[k].disabled = false;
+    if (triggerBtn) { triggerBtn.textContent = config.label; triggerBtn.removeAttribute("aria-busy"); }
   }
 }
 
