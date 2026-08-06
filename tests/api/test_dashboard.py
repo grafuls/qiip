@@ -365,6 +365,15 @@ class TestNodeDetailPage:
         detail_pos = response.text.index("node_detail.js")
         assert setup_pos < detail_pos
 
+    def test_llamacpp_relaunch_js_loaded_before_node_detail_js(
+        self, client: TestClient
+    ) -> None:
+        """The relaunch controller is available before node_detail.js runs."""
+        response = client.get("/dashboard/nodes/test-node")
+        controller_pos = response.text.index("llamacpp_relaunch.js")
+        detail_pos = response.text.index("node_detail.js")
+        assert controller_pos < detail_pos
+
     def test_node_detail_contains_engine_and_artifact_controls(
         self, client: TestClient
     ) -> None:
@@ -378,7 +387,7 @@ class TestNodeDetailPage:
         assert 'id="artifact-select"' in response.text
         assert 'colspan="10"' in response.text
 
-    def test_node_detail_contains_read_only_llamacpp_runtime_card(
+    def test_node_detail_contains_llamacpp_runtime_editor(
         self, client: TestClient
     ) -> None:
         response = client.get("/dashboard/nodes/test-node")
@@ -386,9 +395,22 @@ class TestNodeDetailPage:
         assert 'id="llamacpp-runtime-panel" hidden' in response.text
         assert 'id="llamacpp-runtime-status"' in response.text
         assert 'aria-live="polite"' in response.text
+        assert 'id="llamacpp-relaunch-form"' in response.text
+        assert 'id="llamacpp-sizing"' in response.text
+        assert 'id="llamacpp-fit-target"' in response.text
+        assert 'id="llamacpp-context-per-slot"' in response.text
+        assert 'id="llamacpp-parallel-slots"' in response.text
+        assert 'id="llamacpp-cache-type"' in response.text
+        assert 'class="runtime-input-unit runtime-cache-input"' in response.text
+        assert "<span>K/V</span>" in response.text
+        assert 'id="llamacpp-estimator-overrun" type="checkbox"' in response.text
+        assert "Attempt launch if estimate exceeds target" in response.text
+        assert 'id="llamacpp-relaunch-submit"' in response.text
+        assert 'id="llamacpp-relaunch-reset"' in response.text
         assert 'id="llamacpp-runtime-values" class="runtime-grid"' in response.text
         assert "<dl" in response.text
         assert 'id="llamacpp-runtime-min-free"' in response.text
+        assert 'id="llamacpp-runtime-estimator"' in response.text
         assert 'id="llamacpp-runtime-min-headroom"' in response.text
         assert "runtime-summary" not in response.text
         assert 'id="llamacpp-runtime-gpus"' in response.text
