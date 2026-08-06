@@ -16,7 +16,7 @@ _DASHBOARD_JS = _ROOT / "inference_proxy/static/js/dashboard.js"
 _NODE_DETAIL_JS = _ROOT / "inference_proxy/static/js/node_detail.js"
 
 
-def _run_node(harness: str) -> dict[str, Any]:
+def _run_node_raw(harness: str) -> object:
     node = shutil.which("node")
     if node is None:
         pytest.fail(
@@ -32,8 +32,18 @@ def _run_node(harness: str) -> dict[str, Any]:
         timeout=3,
     )
     assert result.returncode == 0, result.stderr
-    parsed: object = json.loads(result.stdout)
+    return json.loads(result.stdout)
+
+
+def _run_node(harness: str) -> dict[str, Any]:
+    parsed = _run_node_raw(harness)
     assert isinstance(parsed, dict)
+    return parsed
+
+
+def _run_node_yaml(harness: str) -> str:
+    parsed = _run_node_raw(harness)
+    assert isinstance(parsed, str)
     return parsed
 
 
@@ -153,6 +163,55 @@ class TestGeneratePiConfig:
         assert base_url.endswith("/v1")
 
 
+class TestGenerateOmpConfig:
+    """generateOmpConfig produces valid OMP models.yaml configuration."""
+
+    def test_structure(self) -> None:
+        result = _run_node_yaml(
+            _harness(
+                "http://proxy.example.com:8080",
+                "meta-llama/Llama-3-8B",
+                "generateOmpConfig",
+            )
+        )
+        assert "providers:" in result
+        assert "  qiip:" in result
+        assert "    baseUrl: http://proxy.example.com:8080/v1" in result
+        assert "    auth: none" in result
+        assert "    api: openai-completions" in result
+        assert "      - id: meta-llama/Llama-3-8B" in result
+
+    def test_base_url_includes_v1(self) -> None:
+        result = _run_node_yaml(
+            _harness(
+                "http://gpu01.example.com:8000",
+                "test-model",
+                "generateOmpConfig",
+            )
+        )
+        assert "/v1" in result
+
+    def test_trailing_slash_stripped(self) -> None:
+        result = _run_node_yaml(
+            _harness(
+                "http://proxy.example.com:8080/",
+                "test-model",
+                "generateOmpConfig",
+            )
+        )
+        assert "baseUrl: http://proxy.example.com:8080/v1" in result
+
+    def test_special_chars_quoted(self) -> None:
+        result = _run_node_yaml(
+            _harness(
+                "http://proxy.example.com:8080",
+                "model: evil #comment",
+                "generateOmpConfig",
+            )
+        )
+        assert '"model: evil #comment"' in result
+
+
 class TestConfigFileContents:
     """config_download.js is present and contains expected functions."""
 
@@ -164,6 +223,7 @@ class TestConfigFileContents:
         [
             "generateOpenCodeConfig",
             "generatePiConfig",
+            "generateOmpConfig",
             "downloadConfigFile",
             "createConfigDropdown",
         ],
