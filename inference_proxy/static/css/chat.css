@@ -96,6 +96,11 @@
   color: var(--danger);
 }
 
+
+[data-theme="dark"] .bubble-user {
+  color: #0A1114;
+}
+
 /* --- Streaming cursor --- */
 .streaming-cursor::after {
   content: '|';
