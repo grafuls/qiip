@@ -25,11 +25,11 @@
 
     var cancelBtn = document.createElement("button");
     cancelBtn.type = "button";
-    cancelBtn.className = "btn btn-neutral";
+    cancelBtn.className = "confirm-dialog-cancel";
 
     var confirmBtn = document.createElement("button");
     confirmBtn.type = "button";
-    confirmBtn.className = "btn btn-primary";
+    confirmBtn.className = "confirm-dialog-confirm";
 
     actions.appendChild(cancelBtn);
     actions.appendChild(confirmBtn);
@@ -59,7 +59,7 @@
     dialogEl.message.textContent = opts.message || "";
     cancelBtn.textContent = opts.cancelLabel || "Cancel";
     confirmBtn.textContent = opts.confirmLabel || "Confirm";
-    confirmBtn.className = "btn " + (opts.danger ? "btn-danger" : "btn-primary");
+    confirmBtn.className = "confirm-dialog-confirm" + (opts.danger ? " is-danger" : "");
 
     return new Promise(function (resolve) {
       function cleanup(result) {

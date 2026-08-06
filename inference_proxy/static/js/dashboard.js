@@ -31,7 +31,7 @@ const ACTION_CONFIG = {
     danger: false,
     label: "Setup Node",
     pendingLabel: "Starting…",
-    css: "btn-primary",
+    css: "btn-setup",
     successMsg: (nodeId) => `Setup started for ${nodeId}`,
   },
   teardown: {
@@ -44,7 +44,7 @@ const ACTION_CONFIG = {
     danger: true,
     label: "Teardown",
     pendingLabel: "Tearing down…",
-    css: "btn-danger",
+    css: "btn-teardown",
     successMsg: (nodeId) => `Teardown started for ${nodeId}`,
   },
   retry: {
@@ -56,7 +56,7 @@ const ACTION_CONFIG = {
     danger: false,
     label: "Retry",
     pendingLabel: "Retrying…",
-    css: "btn-warning",
+    css: "btn-retry",
     successMsg: (nodeId) => `Retry started for ${nodeId}`,
   },
   cancel: {
@@ -68,7 +68,7 @@ const ACTION_CONFIG = {
     danger: true,
     label: "Cancel",
     pendingLabel: "Cancelling…",
-    css: "btn-danger",
+    css: "btn-cancel",
     successMsg: (nodeId) => `Cancelled provisioning for ${nodeId}`,
   },
   force_teardown: {
@@ -81,7 +81,7 @@ const ACTION_CONFIG = {
     danger: true,
     label: "Force Teardown",
     pendingLabel: "Forcing…",
-    css: "btn-danger",
+    css: "btn-force-teardown",
     successMsg: (nodeId) => `Teardown started for ${nodeId}`,
   },
 };

@@ -47,14 +47,14 @@ var ACTION_CONFIG = {
   setup: {
     method: "POST", url: function () { return "/admin/nodes/setup"; },
     body: setupActionBody, confirm: false, danger: false,
-    label: "Setup Node", pendingLabel: "Starting…", css: "btn-primary",
+    label: "Setup Node", pendingLabel: "Starting…", css: "btn-setup",
     successMsg: function (id) { return "Setup started for " + id; },
   },
   teardown: {
     method: "DELETE", url: function (id) { return "/admin/nodes/" + id; },
     body: null, confirm: true, danger: true,
     confirmMsg: function (id) { return "Teardown " + id + "? This will drain connections and stop the container."; },
-    label: "Teardown", pendingLabel: "Tearing down…", css: "btn-danger",
+    label: "Teardown", pendingLabel: "Tearing down…", css: "btn-teardown",
     successMsg: function (id) { return "Teardown started for " + id; },
   },
   retry: {
@@ -62,21 +62,21 @@ var ACTION_CONFIG = {
     body: function (id, node) {
       return { hostname: id, managed: node ? node.managed !== false : true };
     }, confirm: false, danger: false,
-    label: "Retry", pendingLabel: "Retrying…", css: "btn-warning",
+    label: "Retry", pendingLabel: "Retrying…", css: "btn-retry",
     successMsg: function (id) { return "Retry started for " + id; },
   },
   cancel: {
     method: "DELETE", url: function (id) { return "/admin/nodes/" + id; },
     body: null, confirm: true, danger: true,
     confirmMsg: function (id) { return "Cancel provisioning for " + id + "?"; },
-    label: "Cancel", pendingLabel: "Cancelling…", css: "btn-danger",
+    label: "Cancel", pendingLabel: "Cancelling…", css: "btn-cancel",
     successMsg: function (id) { return "Cancelled provisioning for " + id; },
   },
   force_teardown: {
     method: "DELETE", url: function (id) { return "/admin/nodes/" + id + "?force=true"; },
     body: null, confirm: true, danger: true,
     confirmMsg: function (id) { return "Force teardown " + id + "? This will immediately stop the container without draining."; },
-    label: "Force Teardown", pendingLabel: "Forcing…", css: "btn-danger",
+    label: "Force Teardown", pendingLabel: "Forcing…", css: "btn-force-teardown",
     successMsg: function (id) { return "Teardown started for " + id; },
   },
 };
@@ -141,15 +141,34 @@ function buildActionMenu(items) {
   return menu;
 }
 
-function buildDropdownTrigger(label, disabled, title) {
-  var trigger = document.createElement("button");
-  trigger.type = "button";
-  trigger.className = "btn btn-neutral btn-trigger";
-  trigger.textContent = label;
-  trigger.disabled = disabled;
-  if (title) trigger.title = title;
-  return trigger;
-}
+  for (var i = 0; i < ALL_ACTIONS.length; i++) {
+    (function (action) {
+      var config = ACTION_CONFIG[action];
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = config.label;
+      btn.className = config.css;
+      var enabled = enabledActions.indexOf(action) !== -1;
+      btn.disabled = !enabled;
+      if (enabled) {
+        btn.addEventListener("click", async function () {
+          btn.disabled = true;
+          menu.classList.remove("open");
+          try {
+            await handleAction(action, nodeId, node, function () {
+              btn.textContent = config.pendingLabel;
+              btn.setAttribute("aria-busy", "true");
+            });
+          } finally {
+            btn.disabled = false;
+            btn.textContent = config.label;
+            btn.removeAttribute("aria-busy");
+          }
+        });
+      }
+      menu.appendChild(btn);
+    })(ALL_ACTIONS[i]);
+  }
 
 function attachDropdownToggle(trigger, menu) {
   trigger.addEventListener("click", function (e) {
@@ -883,11 +902,11 @@ var currentPowerState = null;
 var powerControlsState = "unknown";
 
 var POWER_ACTIONS = [
-  { action: "On", label: "Power On", pendingLabel: "Powering on…", css: "btn-primary", confirm: false, danger: false },
-  { action: "ForceOff", label: "Force Off", pendingLabel: "Forcing off…", css: "btn-danger", confirm: true, danger: true,
+  { action: "On", label: "Power On", pendingLabel: "Powering on…", css: "btn-setup", confirm: false, danger: false },
+  { action: "ForceOff", label: "Force Off", pendingLabel: "Forcing off…", css: "btn-teardown", confirm: true, danger: true,
     confirmMsg: "Force off " + NODE_ID + "? This will immediately cut power." },
-  { action: "GracefulRestart", label: "Graceful Restart", pendingLabel: "Restarting…", css: "btn-warning", confirm: false, danger: false },
-  { action: "ForceRestart", label: "Force Restart", pendingLabel: "Restarting…", css: "btn-danger", confirm: true, danger: true,
+  { action: "GracefulRestart", label: "Graceful Restart", pendingLabel: "Restarting…", css: "btn-cancel", confirm: false, danger: false },
+  { action: "ForceRestart", label: "Force Restart", pendingLabel: "Restarting…", css: "btn-cancel", confirm: true, danger: true,
     confirmMsg: "Force restart " + NODE_ID + "? This will immediately reset the node." },
 ];
 
@@ -906,29 +925,24 @@ function renderPowerButtons() {
   } else {
     visible = ["On", "ForceOff", "GracefulRestart", "ForceRestart"];
   }
-
-  var isUnknown = powerControlsState === "unknown";
-  var items = POWER_ACTIONS.filter(function (pa) { return visible.indexOf(pa.action) !== -1; })
-    .map(function (pa) {
-      return {
-        label: pa.label,
-        variant: pa.css,
-        disabled: false,
-        onClick: function (btn) { handlePowerAction(pa.action, btn); },
-      };
-    });
-
-  var menu = buildActionMenu(items);
-  var trigger = buildDropdownTrigger(
-    "Power",
-    isUnknown,
-    isUnknown ? "Power state is temporarily unavailable; controls are disabled." : null
-  );
-  attachDropdownToggle(trigger, menu);
-  container.appendChild(buildDropdownGroup(trigger, menu));
+  for (var i = 0; i < POWER_ACTIONS.length; i++) {
+    (function (pa) {
+      if (visible.indexOf(pa.action) === -1) return;
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = pa.css;
+      btn.textContent = pa.label;
+      if (powerControlsState === "unknown") {
+        btn.disabled = true;
+        btn.title = "Power state is temporarily unavailable; controls are disabled.";
+      }
+      btn.addEventListener("click", function () { handlePowerAction(pa.action, btn); });
+      container.appendChild(btn);
+    })(POWER_ACTIONS[i]);
+  }
 }
 
-async function handlePowerAction(action, actionBtn) {
+async function handlePowerAction(action, triggerBtn) {
   var config;
   for (var i = 0; i < POWER_ACTIONS.length; i++) {
     if (POWER_ACTIONS[i].action === action) { config = POWER_ACTIONS[i]; break; }
@@ -950,9 +964,9 @@ async function handlePowerAction(action, actionBtn) {
 
   var btns = document.querySelectorAll("#power-actions button");
   for (var j = 0; j < btns.length; j++) btns[j].disabled = true;
-  if (actionBtn) {
-    actionBtn.textContent = config.pendingLabel;
-    actionBtn.setAttribute("aria-busy", "true");
+  if (triggerBtn) {
+    triggerBtn.textContent = config.pendingLabel;
+    triggerBtn.setAttribute("aria-busy", "true");
   }
 
   el.className = "badge badge-unknown";
@@ -973,14 +987,14 @@ async function handlePowerAction(action, actionBtn) {
       el.className = prevClass;
       el.textContent = prevText;
       for (var k = 0; k < btns.length; k++) btns[k].disabled = false;
-      if (actionBtn) { actionBtn.textContent = config.label; actionBtn.removeAttribute("aria-busy"); }
+      if (triggerBtn) { triggerBtn.textContent = config.label; triggerBtn.removeAttribute("aria-busy"); }
     }
   } catch (err) {
     showToast(config.label + " failed: " + err.message, "error");
     el.className = prevClass;
     el.textContent = prevText;
     for (var k = 0; k < btns.length; k++) btns[k].disabled = false;
-    if (actionBtn) { actionBtn.textContent = config.label; actionBtn.removeAttribute("aria-busy"); }
+    if (triggerBtn) { triggerBtn.textContent = config.label; triggerBtn.removeAttribute("aria-busy"); }
   }
 }
 
