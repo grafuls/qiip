@@ -152,28 +152,8 @@
 #send-btn {
   width: 40px;
   height: 40px;
-  border-radius: var(--radius);
-  background: var(--primary);
-  color: var(--on-primary);
-  border: none;
-  cursor: pointer;
-  font-size: 0.875rem;
-  font-weight: 600;
+  justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s, transform 0.1s;
-}
-
-#send-btn:hover:not(:disabled) {
-  background: var(--primary-hover);
-}
-
-#send-btn:active:not(:disabled) {
-  transform: scale(0.94);
-}
-
-#send-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* --- Markdown in assistant bubbles --- */
@@ -326,11 +306,6 @@
   .streaming-cursor::after {
     animation: none;
   }
-
-  #send-btn {
-    transition: none;
-  }
-
   #chat-input {
     transition: none;
   }

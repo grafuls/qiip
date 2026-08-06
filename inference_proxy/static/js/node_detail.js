@@ -47,14 +47,14 @@ var ACTION_CONFIG = {
   setup: {
     method: "POST", url: function () { return "/admin/nodes/setup"; },
     body: setupActionBody, confirm: false, danger: false,
-    label: "Setup Node", pendingLabel: "Starting…", css: "btn-setup",
+    label: "Setup Node", pendingLabel: "Starting…", css: "btn-primary",
     successMsg: function (id) { return "Setup started for " + id; },
   },
   teardown: {
     method: "DELETE", url: function (id) { return "/admin/nodes/" + id; },
     body: null, confirm: true, danger: true,
     confirmMsg: function (id) { return "Teardown " + id + "? This will drain connections and stop the container."; },
-    label: "Teardown", pendingLabel: "Tearing down…", css: "btn-teardown",
+    label: "Teardown", pendingLabel: "Tearing down…", css: "btn-danger",
     successMsg: function (id) { return "Teardown started for " + id; },
   },
   retry: {
@@ -62,21 +62,21 @@ var ACTION_CONFIG = {
     body: function (id, node) {
       return { hostname: id, managed: node ? node.managed !== false : true };
     }, confirm: false, danger: false,
-    label: "Retry", pendingLabel: "Retrying…", css: "btn-retry",
+    label: "Retry", pendingLabel: "Retrying…", css: "btn-warning",
     successMsg: function (id) { return "Retry started for " + id; },
   },
   cancel: {
     method: "DELETE", url: function (id) { return "/admin/nodes/" + id; },
     body: null, confirm: true, danger: true,
     confirmMsg: function (id) { return "Cancel provisioning for " + id + "?"; },
-    label: "Cancel", pendingLabel: "Cancelling…", css: "btn-cancel",
+    label: "Cancel", pendingLabel: "Cancelling…", css: "btn-danger",
     successMsg: function (id) { return "Cancelled provisioning for " + id; },
   },
   force_teardown: {
     method: "DELETE", url: function (id) { return "/admin/nodes/" + id + "?force=true"; },
     body: null, confirm: true, danger: true,
     confirmMsg: function (id) { return "Force teardown " + id + "? This will immediately stop the container without draining."; },
-    label: "Force Teardown", pendingLabel: "Forcing…", css: "btn-force-teardown",
+    label: "Force Teardown", pendingLabel: "Forcing…", css: "btn-danger",
     successMsg: function (id) { return "Teardown started for " + id; },
   },
 };
@@ -120,48 +120,38 @@ async function handleAction(action, nodeId, node, onStart) {
 
 var ALL_ACTIONS = ["setup", "teardown", "retry", "cancel", "force_teardown"];
 
-function createActionsDropdown(nodeId, enabledActions, node) {
-  var group = document.createElement("div");
-  group.className = "action-group";
-
-  var trigger = document.createElement("button");
-  trigger.type = "button";
-  trigger.className = "btn-action-trigger";
-  trigger.textContent = "Actions ▾";
-  if (enabledActions.length === 0) trigger.disabled = true;
-
+// ponytail: shared dropdown chrome (trigger + menu) reused by node actions and power controls
+function buildActionMenu(items) {
   var menu = document.createElement("div");
   menu.className = "action-menu";
+  items.forEach(function (item) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-sm " + item.variant;
+    btn.textContent = item.label;
+    btn.disabled = item.disabled;
+    if (!item.disabled) {
+      btn.addEventListener("click", function () {
+        menu.classList.remove("open");
+        item.onClick(btn);
+      });
+    }
+    menu.appendChild(btn);
+  });
+  return menu;
+}
 
-  for (var i = 0; i < ALL_ACTIONS.length; i++) {
-    (function (action) {
-      var config = ACTION_CONFIG[action];
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = config.label;
-      btn.className = config.css;
-      var enabled = enabledActions.indexOf(action) !== -1;
-      btn.disabled = !enabled;
-      if (enabled) {
-        btn.addEventListener("click", async function () {
-          btn.disabled = true;
-          menu.classList.remove("open");
-          try {
-            await handleAction(action, nodeId, node, function () {
-              btn.textContent = config.pendingLabel;
-              btn.setAttribute("aria-busy", "true");
-            });
-          } finally {
-            btn.disabled = false;
-            btn.textContent = config.label;
-            btn.removeAttribute("aria-busy");
-          }
-        });
-      }
-      menu.appendChild(btn);
-    })(ALL_ACTIONS[i]);
-  }
+function buildDropdownTrigger(label, disabled, title) {
+  var trigger = document.createElement("button");
+  trigger.type = "button";
+  trigger.className = "btn btn-neutral btn-trigger";
+  trigger.textContent = label;
+  trigger.disabled = disabled;
+  if (title) trigger.title = title;
+  return trigger;
+}
 
+function attachDropdownToggle(trigger, menu) {
   trigger.addEventListener("click", function (e) {
     e.stopPropagation();
     var wasOpen = menu.classList.contains("open");
@@ -169,14 +159,44 @@ function createActionsDropdown(nodeId, enabledActions, node) {
     if (!wasOpen) {
       menu.classList.add("open");
       var rect = trigger.getBoundingClientRect();
-      menu.style.top = (rect.top - menu.offsetHeight) + "px";
+      menu.style.top = rect.bottom + "px";
       menu.style.left = (rect.right - menu.offsetWidth) + "px";
     }
   });
+}
 
+function buildDropdownGroup(trigger, menu) {
+  var group = document.createElement("div");
+  group.className = "action-group";
   group.appendChild(trigger);
   group.appendChild(menu);
   return group;
+}
+
+function createActionsDropdown(nodeId, enabledActions, node) {
+  var items = ALL_ACTIONS.map(function (action) {
+    var config = ACTION_CONFIG[action];
+    return {
+      label: config.label,
+      variant: config.css,
+      disabled: enabledActions.indexOf(action) === -1,
+      onClick: function (btn) {
+        btn.disabled = true;
+        handleAction(action, nodeId, node, function () {
+          btn.textContent = config.pendingLabel;
+          btn.setAttribute("aria-busy", "true");
+        }).finally(function () {
+          btn.disabled = false;
+          btn.textContent = config.label;
+          btn.removeAttribute("aria-busy");
+        });
+      },
+    };
+  });
+  var menu = buildActionMenu(items);
+  var trigger = buildDropdownTrigger("Actions", enabledActions.length === 0, null);
+  attachDropdownToggle(trigger, menu);
+  return buildDropdownGroup(trigger, menu);
 }
 
 function stepBadgeClass(step) {
@@ -272,7 +292,8 @@ async function refreshDetail() {
     var node = nodes.find(function (n) { return n.node_id === NODE_ID; });
     if (!node) {
       stateEl.textContent = "Node not found";
-      renderTableMessage(infoBody, 10, "Node not found in registry");
+      renderTableMessage(infoBody, 9, "Node not found in registry");
+      document.getElementById("node-actions").textContent = "";
       document.getElementById("config-download-panel").style.display = "none";
       renderLlamaCppRuntime(null);
     } else {
@@ -293,22 +314,22 @@ async function refreshDetail() {
       var sb = document.createElement("span"); sb.className = "badge badge-" + node.state; sb.textContent = node.state;
       tdSt.appendChild(sb); tr.appendChild(tdSt);
 
-      var tdCo = document.createElement("td"); tdCo.textContent = node.state === "available" ? "—" : node.active_connections; tr.appendChild(tdCo);
+      var tdCo = document.createElement("td"); tdCo.className = "num"; tdCo.textContent = node.state === "available" ? "—" : node.active_connections; tr.appendChild(tdCo);
 
       var tdCb = document.createElement("td");
       if (node.state === "available") { tdCb.textContent = "—"; }
       else { var cb = document.createElement("span"); cb.className = "badge badge-" + node.circuit_breaker_state; cb.textContent = node.circuit_breaker_state; tdCb.appendChild(cb); }
       tr.appendChild(tdCb);
 
-      var tdRq = document.createElement("td"); tdRq.textContent = node.state === "available" ? "—" : (perNode[node.node_id] || 0); tr.appendChild(tdRq);
+      var tdRq = document.createElement("td"); tdRq.className = "num"; tdRq.textContent = node.state === "available" ? "—" : (perNode[node.node_id] || 0); tr.appendChild(tdRq);
 
-      var tdAc = document.createElement("td");
       var enabledActions = node.actions || [];
       if (!setupSelection.isValid()) {
         enabledActions = enabledActions.filter(function (a) { return a !== "setup"; });
       }
-      tdAc.appendChild(createActionsDropdown(node.node_id, enabledActions, node));
-      tr.appendChild(tdAc);
+      var nodeActionsContainer = document.getElementById("node-actions");
+      nodeActionsContainer.textContent = "";
+      nodeActionsContainer.appendChild(createActionsDropdown(node.node_id, enabledActions, node));
 
       infoBody.appendChild(tr);
 
@@ -574,7 +595,7 @@ function renderDownloadCell(td, modelName, catalogSet, downloadMap) {
   } else {
     var btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "btn-setup";
+    btn.className = "btn btn-sm btn-primary";
     btn.textContent = "Download";
     btn.addEventListener("click", function () { triggerDownload(modelName, td); });
     td.appendChild(btn);
@@ -862,19 +883,21 @@ var currentPowerState = null;
 var powerControlsState = "unknown";
 
 var POWER_ACTIONS = [
-  { action: "On", label: "Power On", pendingLabel: "Powering on…", css: "btn-setup", confirm: false, danger: false },
-  { action: "ForceOff", label: "Force Off", pendingLabel: "Forcing off…", css: "btn-teardown", confirm: true, danger: true,
+  { action: "On", label: "Power On", pendingLabel: "Powering on…", css: "btn-primary", confirm: false, danger: false },
+  { action: "ForceOff", label: "Force Off", pendingLabel: "Forcing off…", css: "btn-danger", confirm: true, danger: true,
     confirmMsg: "Force off " + NODE_ID + "? This will immediately cut power." },
-  { action: "GracefulRestart", label: "Graceful Restart", pendingLabel: "Restarting…", css: "btn-cancel", confirm: false, danger: false },
-  { action: "ForceRestart", label: "Force Restart", pendingLabel: "Restarting…", css: "btn-cancel", confirm: true, danger: true,
+  { action: "GracefulRestart", label: "Graceful Restart", pendingLabel: "Restarting…", css: "btn-warning", confirm: false, danger: false },
+  { action: "ForceRestart", label: "Force Restart", pendingLabel: "Restarting…", css: "btn-danger", confirm: true, danger: true,
     confirmMsg: "Force restart " + NODE_ID + "? This will immediately reset the node." },
 ];
 
 function renderPowerButtons() {
   var container = document.getElementById("power-actions");
   container.textContent = "";
-  container.hidden = powerControlsState === "unconfigured";
-  if (container.hidden) return;
+  var unconfigured = powerControlsState === "unconfigured";
+  container.hidden = unconfigured;
+  if (unconfigured) return;
+
   var visible;
   if (currentPowerState === "On") {
     visible = ["ForceOff", "GracefulRestart", "ForceRestart"];
@@ -883,24 +906,29 @@ function renderPowerButtons() {
   } else {
     visible = ["On", "ForceOff", "GracefulRestart", "ForceRestart"];
   }
-  for (var i = 0; i < POWER_ACTIONS.length; i++) {
-    (function (pa) {
-      if (visible.indexOf(pa.action) === -1) return;
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = pa.css;
-      btn.textContent = pa.label;
-      if (powerControlsState === "unknown") {
-        btn.disabled = true;
-        btn.title = "Power state is temporarily unavailable; controls are disabled.";
-      }
-      btn.addEventListener("click", function () { handlePowerAction(pa.action, btn); });
-      container.appendChild(btn);
-    })(POWER_ACTIONS[i]);
-  }
+
+  var isUnknown = powerControlsState === "unknown";
+  var items = POWER_ACTIONS.filter(function (pa) { return visible.indexOf(pa.action) !== -1; })
+    .map(function (pa) {
+      return {
+        label: pa.label,
+        variant: pa.css,
+        disabled: false,
+        onClick: function (btn) { handlePowerAction(pa.action, btn); },
+      };
+    });
+
+  var menu = buildActionMenu(items);
+  var trigger = buildDropdownTrigger(
+    "Power",
+    isUnknown,
+    isUnknown ? "Power state is temporarily unavailable; controls are disabled." : null
+  );
+  attachDropdownToggle(trigger, menu);
+  container.appendChild(buildDropdownGroup(trigger, menu));
 }
 
-async function handlePowerAction(action, triggerBtn) {
+async function handlePowerAction(action, actionBtn) {
   var config;
   for (var i = 0; i < POWER_ACTIONS.length; i++) {
     if (POWER_ACTIONS[i].action === action) { config = POWER_ACTIONS[i]; break; }
@@ -922,9 +950,9 @@ async function handlePowerAction(action, triggerBtn) {
 
   var btns = document.querySelectorAll("#power-actions button");
   for (var j = 0; j < btns.length; j++) btns[j].disabled = true;
-  if (triggerBtn) {
-    triggerBtn.textContent = config.pendingLabel;
-    triggerBtn.setAttribute("aria-busy", "true");
+  if (actionBtn) {
+    actionBtn.textContent = config.pendingLabel;
+    actionBtn.setAttribute("aria-busy", "true");
   }
 
   el.className = "badge badge-unknown";
@@ -945,14 +973,14 @@ async function handlePowerAction(action, triggerBtn) {
       el.className = prevClass;
       el.textContent = prevText;
       for (var k = 0; k < btns.length; k++) btns[k].disabled = false;
-      if (triggerBtn) { triggerBtn.textContent = config.label; triggerBtn.removeAttribute("aria-busy"); }
+      if (actionBtn) { actionBtn.textContent = config.label; actionBtn.removeAttribute("aria-busy"); }
     }
   } catch (err) {
     showToast(config.label + " failed: " + err.message, "error");
     el.className = prevClass;
     el.textContent = prevText;
     for (var k = 0; k < btns.length; k++) btns[k].disabled = false;
-    if (triggerBtn) { triggerBtn.textContent = config.label; triggerBtn.removeAttribute("aria-busy"); }
+    if (actionBtn) { actionBtn.textContent = config.label; actionBtn.removeAttribute("aria-busy"); }
   }
 }
 
