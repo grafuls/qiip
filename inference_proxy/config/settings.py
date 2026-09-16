@@ -253,6 +253,18 @@ class ProvisioningSettings(BaseModel):
     log_max_bytes_per_host: int = Field(default=1_048_576, ge=1)
     log_max_entry_bytes: int = Field(default=16_384, ge=16)
     log_max_completed_hosts: int = Field(default=64, ge=1)
+    log_db_path: Path = Path("data/provisioning-logs.sqlite3")
+    log_retention_days: float = Field(default=30, gt=0)
+    log_storage_max_bytes: int = Field(default=268_435_456, ge=65_536)
+    log_attempt_max_bytes: int = Field(default=33_554_432, ge=16_384)
+    log_max_attempts: int = Field(default=1000, ge=1)
+    log_remote_root: str = "/var/lib/qiip/provisioning-logs"
+    log_remote_retention_days: float = Field(default=7, gt=0)
+    log_remote_max_bytes: int = Field(default=134_217_728, ge=65_536)
+    log_remote_attempt_max_bytes: int = Field(default=16_777_216, ge=16_384)
+    log_remote_max_attempts: int = Field(default=32, ge=1)
+    log_reconnect_attempts: int = Field(default=3, ge=0, le=20)
+    log_poll_interval: float = Field(default=1, gt=0)
     nfs_mount_point: str = "/srv/hf-cache"
     nvidia_driver_version: str = DEFAULT_NVIDIA_DRIVER_VERSION
     nvidia_driver_sha256: str = DEFAULT_NVIDIA_DRIVER_SHA256
@@ -261,6 +273,19 @@ class ProvisioningSettings(BaseModel):
     llamacpp_source_url: str = DEFAULT_LLAMACPP_SOURCE_URL
     llamacpp_setup_timeout: float = Field(default=7200.0, gt=0)
     llamacpp_fit_target_mib: int = Field(default=512, ge=1)
+
+    @field_validator("log_remote_root")
+    @classmethod
+    def log_root_is_absolute(cls, value: str) -> str:
+        if (
+            not value.startswith("/")
+            or ".." in Path(value).parts
+            or any(ord(c) < 32 for c in value)
+        ):
+            raise ValueError(
+                "provisioning.log_remote_root must be an absolute path without traversal"
+            )
+        return value.rstrip("/") or "/"
 
     @field_validator("nvidia_driver_sha256")
     @classmethod

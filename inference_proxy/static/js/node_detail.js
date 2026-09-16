@@ -733,6 +733,7 @@ var logReconnectAttempts = 0;
 var logReconnectStartedAt = null;
 var logSeenEntries = new Set();
 var logStreamStarted = false;
+var logResumeCursor = null;
 var LOG_RECONNECT_BASE_MS = 1000;
 var LOG_RECONNECT_MAX_DELAY_MS = 30000;
 var LOG_RECONNECT_MAX_ELAPSED_MS = 5 * 60 * 1000;
@@ -792,6 +793,7 @@ function resetLogStreamState() {
   logReconnectAttempts = 0;
   logReconnectStartedAt = null;
   logSeenEntries = new Set();
+  logResumeCursor = null;
   logStreamStarted = false;
 }
 
@@ -834,6 +836,9 @@ function connectLogStream() {
   var logUrl = READ_ONLY
     ? "/fleet/nodes/" + encodeURIComponent(NODE_ID) + "/logs"
     : "/admin/provisioning/" + encodeURIComponent(NODE_ID) + "/logs";
+  if (!READ_ONLY && logResumeCursor) {
+    logUrl += "?attempt_id=" + encodeURIComponent(logResumeCursor.attempt) + "&after=" + logResumeCursor.after;
+  }
   var es = new EventSource(logUrl);
   logSource = es;
   logStreamStarted = true;
@@ -845,6 +850,9 @@ function connectLogStream() {
   es.addEventListener("message", function (ev) {
     try {
       var entry = JSON.parse(ev.data);
+      if (entry.attempt_id && Number.isInteger(entry.seq)) {
+        logResumeCursor = { attempt: entry.attempt_id, after: entry.seq + 1 };
+      }
       var entryKey = JSON.stringify(entry);
       if (logSeenEntries.has(entryKey)) return;
       logSeenEntries.add(entryKey);
@@ -870,6 +878,12 @@ function connectLogStream() {
     } catch (_) {}
   });
 
+  es.addEventListener("complete", function () {
+    finishLogStream("ended", "badge badge-complete");
+  });
+  es.addEventListener("unavailable", function () {
+    finishLogStream("logs evicted by retention", "badge badge-failed");
+  });
   es.addEventListener("error", function () {
     es.close();
     logSource = null;

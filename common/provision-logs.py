@@ -1,0 +1,429 @@
+#!/usr/bin/env python3
+"""Node recorder. Standard library only; launched with the uploaded log_store.py.
+
+Workers have no SSH-owned pipes. A disconnect stops retrieval, never recording.
+Commands are sent to the worker's stdin and are never written into the log DB.
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import re
+import selectors
+import signal
+import subprocess
+import sys
+import time
+from contextlib import suppress
+from pathlib import Path
+
+from log_store import AttemptLogStore, timestamp
+
+
+def open_store(config):
+    return AttemptLogStore(
+        Path(config["root"]) / "attempts.sqlite3",
+        max_bytes=config["max_bytes"] // 2,
+        attempt_max_bytes=config["attempt_max_bytes"],
+        max_attempts=config["max_attempts"],
+        retention_days=config["retention_days"],
+        max_record_bytes=config["max_record_bytes"],
+    )
+
+
+def prune_raw_logs(config, store):
+    root = Path(config["root"])
+    paths = sorted(
+        (
+            p
+            for p in root.glob("*.engine.log")
+            if re.fullmatch(r"[a-f0-9]{32}\.engine\.log", p.name)
+        ),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    cutoff = time.time() - config["retention_days"] * 86400
+    for index, path in enumerate(paths):
+        if index >= config["max_attempts"] - 1 or path.stat().st_mtime < cutoff:
+            with contextlib.suppress(KeyError):
+                store.issue(
+                    path.name.split(".")[0], "Raw engine tail evicted by node retention"
+                )
+            path.unlink()
+
+
+def save_phase(store, attempt, phase, **changes):
+    # Workers for one attempt are sequential at the setup/start boundary.
+    with store._db() as db:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT metadata FROM attempts WHERE id=?", (attempt,)
+        ).fetchone()
+        metadata = json.loads(row[0])
+        metadata.setdefault("phases", {}).setdefault(phase, {}).update(changes)
+        store._update(db, attempt, metadata)
+
+
+def worker(config):
+    store = open_store(config)
+    attempt, phase = config["attempt_id"], config["phase"]
+    stage = config["stage"]
+    current_stage = stage
+    selector = selectors.DefaultSelector()
+    processes = []
+    engine_path = Path(config["engine_log"]) if config.get("engine_log") else None
+    command_done = False
+    cancelled = False
+    last_command_output = time.monotonic()
+    deadline = time.monotonic() + config["timeout"]
+    collection_deadline = deadline + config["health_timeout"]
+
+    def record(msg, source, level="info"):
+        store.append(
+            attempt,
+            msg,
+            source=source,
+            stage=current_stage,
+            level=level,
+            stream=source.split(".")[-1],
+        )
+
+    def emit(source, raw):
+        nonlocal current_stage
+        message = raw.decode("utf-8", errors="replace")
+        if source == "journal":
+            try:
+                item = json.loads(message)
+                store.append(
+                    attempt,
+                    message,
+                    source="journal",
+                    stage=stage,
+                    stream="journal",
+                    journal_cursor=item.get("__CURSOR"),
+                )
+            except (ValueError, AttributeError):
+                record(message, "journal", "warning")
+                store.issue(attempt, "Malformed or truncated journal record")
+        else:
+            marker = re.search(r"\[STEP:(\w+):(START|OK|WARN|FAIL)\]", message)
+            if source == "setup.stdout" and marker:
+                current_stage = marker.group(1)
+            record(message, source, "warning" if source.endswith("stderr") else "info")
+            if source == "journal.stderr":
+                store.issue(
+                    attempt,
+                    "Service journal reported an error; collection may be incomplete",
+                    source="journal",
+                )
+
+    try:
+        if engine_path:
+            engine_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        command = config.pop("command")
+        environment = dict(os.environ, QIIP_LOG_CONFIG=json.dumps(config))
+        proc = subprocess.Popen(
+            ["bash", "-c", command],
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            start_new_session=True,
+        )
+        processes.append(proc)
+        for source, pipe in (
+            (stage + ".stdout", proc.stdout),
+            (stage + ".stderr", proc.stderr),
+        ):
+            os.set_blocking(pipe.fileno(), False)
+            selector.register(pipe, selectors.EVENT_READ, [source, bytearray()])
+        save_phase(store, attempt, phase, status="running", pid=proc.pid)
+        # Cursor-based journal catch-up is done on-node before rejoining follow.
+        # journalctl returns an error when an expired cursor cannot be sought.
+        cursor = store.get(attempt).get("journal_cursor")
+        journal_args = [
+            "journalctl",
+            "--no-pager",
+            "--output=json",
+            "--follow",
+            "--unit=vllm.service",
+            "--unit=llamacpp.service",
+            "--unit=nvidia-fabricmanager.service",
+        ]
+        journal_args += (
+            ["--after-cursor=" + cursor]
+            if cursor
+            else ["--since=" + store.get(attempt)["started_at"]]
+        )
+        try:
+            journal = subprocess.Popen(
+                journal_args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            processes.append(journal)
+            for source, pipe in (
+                ("journal", journal.stdout),
+                ("journal.stderr", journal.stderr),
+            ):
+                os.set_blocking(pipe.fileno(), False)
+                selector.register(pipe, selectors.EVENT_READ, [source, bytearray()])
+        except OSError as exc:
+            store.issue(
+                attempt, "Service journal unavailable: " + str(exc), source="journal"
+            )
+
+        while True:
+            for key, _ in selector.select(0.1):
+                source, pending = key.data
+                chunk = os.read(key.fd, 8192)
+                if chunk and source.startswith(stage + "."):
+                    last_command_output = time.monotonic()
+                pending.extend(chunk)
+                while b"\n" in pending or len(pending) >= config["max_record_bytes"]:
+                    newline = pending.find(b"\n")
+                    length = min(
+                        newline if newline >= 0 else len(pending),
+                        config["max_record_bytes"],
+                    )
+                    emit(source, bytes(pending[:length]))
+                    del pending[: length + (1 if newline == length else 0)]
+                    if newline < 0 or newline > length:
+                        store.issue(
+                            attempt, "Long remote line split by record byte limit"
+                        )
+                if not chunk:
+                    if pending:
+                        emit(source, bytes(pending))
+                    selector.unregister(key.fileobj)
+                    key.fileobj.close()
+            now = time.monotonic()
+            if store.get(attempt).get("cancel_command"):
+                cancelled = True
+                with suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGTERM)
+                save_phase(store, attempt, phase, status="complete", exit_status=130)
+                store.issue(attempt, "Remote command cancelled by gateway")
+                break
+            pipes_open = any(
+                key.data[0].startswith(stage + ".")
+                for key in selector.get_map().values()
+            )
+            if not command_done and proc.poll() is not None and not pipes_open:
+                command_done = True
+                collection_deadline = now + config["health_timeout"]
+                save_phase(
+                    store,
+                    attempt,
+                    phase,
+                    status="complete",
+                    exit_status=proc.returncode,
+                )
+                if not engine_path:
+                    break
+            if not command_done and (
+                now >= deadline
+                or now - last_command_output >= config["inactivity_timeout"]
+            ):
+                os.killpg(proc.pid, signal.SIGTERM)
+                save_phase(store, attempt, phase, status="complete", exit_status=124)
+                store.issue(
+                    attempt, "Remote command exceeded its total or inactivity deadline"
+                )
+                break
+            if command_done and (
+                store.get(attempt).get("stop_collection") or now >= collection_deadline
+            ):
+                if now >= collection_deadline:
+                    store.issue(attempt, "Node collection deadline reached")
+                break
+        if engine_path and "engine" not in store.get(attempt)["sources"]:
+            store.issue(attempt, "Engine startup log unavailable", source="engine")
+    except Exception as exc:
+        store.issue(attempt, "Node recorder failed: " + str(exc), source="recorder")
+        save_phase(store, attempt, phase, status="complete", exit_status=125)
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+        if cancelled:
+            with suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+        # Preserve bytes already written before stopping the journal/command.
+        # Draining both channels here also covers a failure just before EOF.
+        for key in list(selector.get_map().values()):
+            source, pending = key.data
+            while True:
+                try:
+                    chunk = os.read(key.fd, 8192)
+                except BlockingIOError:
+                    store.issue(
+                        attempt,
+                        "Source pipe still open at collection end",
+                        source=source,
+                    )
+                    break
+                if not chunk:
+                    break
+                pending.extend(chunk)
+                while b"\n" in pending or len(pending) >= config["max_record_bytes"]:
+                    newline = pending.find(b"\n")
+                    length = min(
+                        newline if newline >= 0 else len(pending),
+                        config["max_record_bytes"],
+                    )
+                    emit(source, bytes(pending[:length]))
+                    del pending[: length + (1 if newline == length else 0)]
+                    if newline < 0 or newline > length:
+                        store.issue(
+                            attempt, "Long remote line split by record byte limit"
+                        )
+            if pending:
+                emit(source, bytes(pending))
+            key.fileobj.close()
+        selector.close()
+        if engine_path:
+            store.update(attempt, stop_collection=True)
+        if len(processes) > 1 and processes[1].returncode not in (0, -signal.SIGTERM):
+            store.issue(
+                attempt, "Service journal unavailable (nonzero exit)", source="journal"
+            )
+        save_phase(store, attempt, phase, recording=False)
+        store.update(
+            attempt,
+            status="complete"
+            if store.get(attempt).get("stop_collection")
+            else "recorded",
+        )
+
+
+def engine_sink():
+    """Keep startup evidence and a bounded raw engine tail, including after setup.
+
+    The engine writes to a pipe, so rotation cannot race an independent file
+    reader or discard unread output. After collection ends only the raw tail is
+    maintained; its writer exits naturally with the engine.
+    """
+    config = json.loads(os.environ["QIIP_LOG_CONFIG"])
+    store = open_store(config)
+    path = Path(config["engine_log"])
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with path.open("wb", buffering=0) as output:
+        size = 0
+        raw_limit = max(1, config["max_bytes"] // (2 * config["max_attempts"]))
+        while True:
+            chunk = sys.stdin.buffer.readline(config["max_record_bytes"])
+            if not chunk:
+                break
+            try:
+                attempt = store.get(config["attempt_id"])
+                recording = not attempt.get("stop_collection")
+                if recording:
+                    store.append(
+                        config["attempt_id"],
+                        chunk.decode("utf-8", errors="replace").rstrip("\n"),
+                        source="engine",
+                        stage="start",
+                        stream=config["engine"],
+                    )
+                    if not chunk.endswith(b"\n"):
+                        store.issue(
+                            config["attempt_id"],
+                            "Long engine line split by record byte limit",
+                        )
+            except KeyError:
+                recording = False
+            if not path.exists():
+                # Retention may evict a tail while its engine still has the
+                # pipe open. Close the inode and drain without growing storage.
+                break
+            if size + len(chunk) > min(config["attempt_max_bytes"], raw_limit):
+                output.seek(0)
+                output.truncate()
+                size = 0
+                if recording:
+                    store.issue(
+                        config["attempt_id"],
+                        "Raw engine log rotated by node byte limit",
+                    )
+            chunk = chunk[-raw_limit:]
+            output.write(chunk)
+            size += len(chunk)
+    # Never SIGPIPE an otherwise healthy engine because its evidence expired.
+    while sys.stdin.buffer.read(8192):
+        pass
+
+
+def main():
+    action = sys.argv[1]
+    if action == "engine":
+        engine_sink()
+        return
+    config = json.loads(sys.stdin.read())
+    if action == "worker":
+        worker(config)
+        return
+    store = open_store(config)
+    attempt = config["attempt_id"]
+    if action == "launch":
+        try:
+            store.get(attempt)
+        except KeyError:
+            prune_raw_logs(config, store)
+            store.create(
+                config["hostname"],
+                engine=config["engine"],
+                model=config["model"],
+                bundle_version=config["bundle_version"],
+                attempt_id=attempt,
+            )
+        phase = config["phase"]
+        metadata = store.get(attempt)
+        if phase not in metadata.get("phases", {}):
+            store.update(
+                attempt, status="running", stop_collection=False, cancel_command=False
+            )
+            save_phase(store, attempt, phase, status="launching", recording=True)
+            proc = subprocess.Popen(
+                [sys.executable, str(Path(__file__).resolve()), "worker"],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            # communicate() waits for the worker; only send and close stdin.
+            proc.stdin.write(json.dumps(config).encode())
+            proc.stdin.close()
+    elif action in {"finish", "cancel"}:
+        store.update(
+            attempt,
+            stop_collection=True,
+            cancel_command=action == "cancel",
+            status="complete",
+            finished_at=timestamp(),
+        )
+        deadline = time.monotonic() + 5
+        while (
+            any(
+                p.get("recording")
+                for p in store.get(attempt).get("phases", {}).values()
+            )
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.1)
+    elif action != "read":
+        raise ValueError("Unknown recorder action")
+    try:
+        page = store.read(attempt, after=config.get("after", 0), limit=128)
+        print(json.dumps(page))
+    except KeyError:
+        print(json.dumps({"unavailable": "Remote attempt evicted or unavailable"}))
+
+
+if __name__ == "__main__":
+    os.umask(0o077)
+    main()

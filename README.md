@@ -826,6 +826,18 @@ Provisioning resource and retention controls:
 | `INFERENCE_PROXY_PROVISIONING__LOG_MAX_BYTES_PER_HOST` | `1048576` | Retained message bytes per host operation |
 | `INFERENCE_PROXY_PROVISIONING__LOG_MAX_ENTRY_BYTES` | `16384` | Maximum bytes in one retained log message |
 | `INFERENCE_PROXY_PROVISIONING__LOG_MAX_COMPLETED_HOSTS` | `64` | Completed host-operation buffers retained, oldest first |
+| `INFERENCE_PROXY_PROVISIONING__LOG_DB_PATH` | `data/provisioning-logs.sqlite3` | Durable gateway attempt database; use persistent local storage |
+| `INFERENCE_PROXY_PROVISIONING__LOG_RETENTION_DAYS` | `30` | Retention of gateway attempt history |
+| `INFERENCE_PROXY_PROVISIONING__LOG_STORAGE_MAX_BYTES` | `268435456` | Gateway retained record payload budget |
+| `INFERENCE_PROXY_PROVISIONING__LOG_ATTEMPT_MAX_BYTES` | `33554432` | Gateway record payload budget per attempt |
+| `INFERENCE_PROXY_PROVISIONING__LOG_MAX_ATTEMPTS` | `1000` | Gateway attempt manifests retained |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_ROOT` | `/var/lib/qiip/provisioning-logs` | Node database and bounded engine tails |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_RETENTION_DAYS` | `7` | Node attempt retention |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_MAX_BYTES` | `134217728` | Node payload budget, half for records and half for raw tails |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_ATTEMPT_MAX_BYTES` | `16777216` | Node record and raw-tail limit per attempt, subject to total budgets |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_MAX_ATTEMPTS` | `32` | Node attempt manifests and raw tails retained |
+| `INFERENCE_PROXY_PROVISIONING__LOG_RECONNECT_ATTEMPTS` | `3` | Consecutive automatic retrieval retries after SSH errors |
+| `INFERENCE_PROXY_PROVISIONING__LOG_POLL_INTERVAL` | `1` | Seconds between node log retrieval requests |
 
 Managed llama.cpp provisioning builds a verified source tag with CUDA enabled
 for the NVIDIA GPU attached to the node. It has five gateway settings:
@@ -1177,3 +1189,67 @@ uv run --frozen mypy inference_proxy tests
 ## License
 
 Open Source, crafted with :heart: via [GPLv3](LICENSE)
+
+
+### Durable provisioning evidence
+
+Each setup, relaunch, and teardown receives a UUID and a SHA-256 identity of its
+setup bundle. Setup stdout/stderr, launch stdout/stderr, engine startup output,
+and available `vllm`, `llamacpp`, and NVIDIA Fabric Manager journal records are
+stored on the node and retrieved into the gateway database. Every record carries
+the hostname, attempt, engine, model selection (null until known for automatic
+selection), bundle version, stage, source, timestamp, and sequence. Node timestamps
+represent capture time; journal JSON also contains the original journal timestamp
+and cursor. Gateway messages use gateway time.
+
+The node recorder requires Python 3.9+ with SQLite and write access to the remote
+log root. It is uploaded with the setup bundle. Recording survives loss of the
+SSH connection; reconnects retrieve by sequence and commit the retrieval cursor
+with each record. A lost launch acknowledgement never causes a second setup or
+engine launch. Explicit teardown cancellation signals the detached command group
+and retains its final output. If completion cannot be established within the deadline, the
+attempt fails with an explicit collection warning. Recorded commands retain the
+configured SSH total and inactivity deadlines; llama.cpp setup retains its longer
+setup timeout. This feature retrieves evidence;
+it does not reconcile or resume a provisioning process after a gateway restart.
+
+On the node detail page, **Provisioning history** lists attempts independently of
+the current node state. Select an attempt to search all retained messages, filter
+by source, retrieve missed node output, or download a gzip-compressed JSONL bundle
+containing its manifest, records, and an export summary that reports concurrent
+rotation during download. Failed stages and their output appear in the
+summary; unavailable sources, sequence gaps, and retention losses remain visible.
+The live stream also resumes by attempt and sequence.
+
+Administrative API (existing admin authentication and JSON request requirements):
+
+- `GET /admin/provisioning/{hostname}/attempts?limit=100&offset=0`
+- `GET /admin/provisioning/{hostname}/attempts/{id}/logs?q=error&source=setup.stderr&after=0&limit=500`
+- `POST /admin/provisioning/{hostname}/attempts/{id}/collect` with JSON `{}`
+- `GET /admin/provisioning/{hostname}/attempts/{id}/bundle`
+- `GET /admin/provisioning/{hostname}/logs?attempt_id={id}&after=0` (SSE; supports `Last-Event-ID: {id}:{seq}`)
+
+Offsets are inclusive sequence positions; use `next_offset` for the next page.
+Search is a case-insensitive literal substring match, including `%` and `_`.
+Retrieval reports unavailable sources in the returned manifest while preserving
+previously collected data. Restarted gateway attempts are marked `interrupted`;
+retrieving their evidence does not claim that provisioning succeeded.
+
+Byte limits bound UTF-8 JSON record payloads, plus bounded raw tails on nodes;
+allow extra filesystem space for SQLite pages, indexes, manifests, and the
+transient rollback journal. Prefix rotation retains monotonic sequence numbers
+and dropped-record counts. Age/count retention runs at store initialization,
+attempt creation, and history listing. Active attempts are protected from manifest
+eviction; their record payloads still rotate. Expired manifests are counted in
+`evicted_attempts` (gateway-wide), and requesting an evicted attempt returns 404.
+Raw-tail capacity is divided across the configured node attempt count, keeping
+runtime output bounded after startup collection ends. Existing pre-upgrade logs
+are not imported. Keep the gateway database on one persistent local volume for
+its owning gateway process; separate gateway replicas do not share this history.
+
+Controlled verification lives in `tests/provisioning/test_attempt_logs.py`: it
+runs the uploaded recorder and shipped setup/launch boundaries with fixture
+installers and a fake engine. It exercises lost acknowledgements, stream
+interruption, restart, concurrent readers, retries, record/raw-file rotation, and
+missing remote/journal sources. These checks do not establish success rates or
+failure causes on real fleet hardware.
