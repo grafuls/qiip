@@ -120,6 +120,14 @@ class SSHClient:
         self._streaming_command_timeout = settings.streaming_command_timeout
         self._streaming_inactivity_timeout = settings.streaming_inactivity_timeout
 
+    @property
+    def command_timeout(self) -> float:
+        return self._streaming_command_timeout
+
+    @property
+    def inactivity_timeout(self) -> float:
+        return self._streaming_inactivity_timeout
+
     async def run_streaming(
         self,
         host: str,
@@ -281,6 +289,8 @@ class SSHClient:
         host: str,
         command: str,
         timeout: float = 60.0,
+        *,
+        log_label: str | None = None,
     ) -> tuple[str, str, int]:
         """Run *command* on *host*, return ``(stdout, stderr, exit_status)``.
 
@@ -289,7 +299,7 @@ class SSHClient:
         ``RemoteCommandError`` on non-zero exit.
         ``asyncio.TimeoutError`` bubbles to caller.
         """
-        log = logger.bind(host=host, command=command)
+        log = logger.bind(host=host, command=log_label or command)
         log.debug("ssh_run_start")
         try:
             async with asyncssh.connect(

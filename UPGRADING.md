@@ -672,3 +672,25 @@ Then verify the live deployment:
 - A setup dry run or disposable host confirms NFS, driver, uv, vLLM, FlashInfer, LLMFit, and firewall expectations before fleet rollout.
 
 Retain the previous launcher and environment until these checks pass, but do not send the retired settings alongside the new ones indefinitely. Migration warnings are temporary compatibility aids, not permanent configuration aliases.
+
+
+## Durable provisioning attempt logs (#122)
+
+Provisioning now stores evidence in `data/provisioning-logs.sqlite3` by default.
+Place this file on a persistent local volume writable by the gateway service;
+include it in backups. The existing in-memory log settings still bound live
+buffers. New `PROVISIONING__LOG_*` settings in `.env.example` configure durable
+retention, node/gateway byte budgets, and retrieval intervals.
+
+New setup attempts upload the node recorder and require node Python 3.9+ with
+SQLite. The SSH account needs access to `/var/lib/qiip/provisioning-logs` and the
+relevant service journals. Missing journals are reported in the attempt manifest.
+Attempts started before upgrading have no durable history. After restart, use
+**Provisioning history → Retrieve from node** to recover missed evidence; the
+operation remains marked interrupted until an operator assesses its outcome.
+
+Managed engine starts now retain a bounded, attempt-specific raw engine tail in
+the node log directory. Startup validation reads that same file. Direct script
+invocations retain their usual `/var/log/*-serve.log` destinations. Downloaded
+bundles contain a JSONL manifest followed by records and may include sensitive
+model/tool output; they remain behind the existing administrative authorization.
