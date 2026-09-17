@@ -504,6 +504,7 @@ repeated `{version}` placeholders, matching the shipped default release URL
 option to the default value previously failed validation; mirrors and custom
 URLs with a single `{version}` keep working.
 
+<<<<<<< HEAD
 ### 26. Durable provisioning attempt logs
 
 Provisioning now stores evidence in `data/provisioning-logs.sqlite3` by default.
@@ -532,6 +533,8 @@ invocations retain their usual `/var/log/*-serve.log` destinations. Downloaded
 bundles contain a JSONL manifest followed by records and may include sensitive
 model/tool output; they remain behind the existing administrative authorization.
 
+=======
+>>>>>>> upstream/main
 ## Artifact Sources and Mirror Policy
 
 There is no single global mirror switch. Each source has a different trust and configuration boundary.
