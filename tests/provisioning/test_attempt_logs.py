@@ -409,16 +409,14 @@ async def test_engine_sink_rotation_bounds_raw_and_durable_output(
     assert collector is not None
     raw_path = ssh.root / "logs" / f"{attempt}.engine.log"
     # Exercise exactly the pipe consumer invoked by the shipped launch scripts.
-    await collector._request(
-        attempt,
-        "launch",
-        phase="engine-rotation",
+    async for _ in collector.run(
+        "host1",
+        "for i in {1..80}; do printf '%s %0900d\\n' \"$i\" 0; done | python3 common/provision-logs.py engine",
         stage="start",
-        command="for i in {1..80}; do printf '%s %0900d\\n' \"$i\" 0; done | python3 common/provision-logs.py engine",
         timeout=5,
         engine_log=str(raw_path),
-    )
-    await asyncio.sleep(0.5)
+    ):
+        pass  # Wait for the pipe consumer to commit and the command to exit.
     await collector.collect(attempt, finish=True)
     assert raw_path.stat().st_size <= 16384
     assert store.get(attempt)["remote_dropped_records"] > 0
