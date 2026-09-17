@@ -51,7 +51,7 @@ Clients ──► NGINX ──► Inference Proxy  ──► vLLM Node A
 - **Hardware-aware model recommendations** -- runs llmfit via SSH on a target host to produce ranked, runtime-normalized recommendations with fit levels, throughput, memory estimates, and typed GGUF sources; auto-installs the binary on first use
 - **Request metrics** -- per-model and per-node counters exposed via `/admin/metrics`
 - **Admin authentication** -- HTTP Basic credentials or a signed-in admin-role session (local-admin form or Google OAuth) on all `/admin/*` endpoints; browser pages gate with a sign-in page instead of 401ing
-- **Fleet sign-in gate** -- anonymous visitors to the fleet dashboard get a sign-in page with two options: **Sign in with Local Admin** (in-page username/password form that establishes a signed session cookie — no browser Basic challenge popup; HTTP Basic still works for scripts and SSE) and **Sign in with Google Auth** (same flow as the profile page)
+- **Fleet sign-in gate** -- anonymous visitors to the fleet dashboard get a sign-in page with two choices: **Local Admin** (a collapsible option that expands to an in-page username/password form establishing a signed session cookie — no browser Basic challenge popup; HTTP Basic still works for scripts and SSE) and **Google Auth** (same flow as the profile page)
 - **Admin roles** -- the HTTP Basic admin user (bootstrap authority) can grant or revoke the admin role to Google-authenticated users on the token dashboard (`/dashboard/tokens`); role admins then reach the admin surface through their session and see admin-only servers
 - **Admin-only inference servers** -- admin-defined adopted OpenAI-compatible servers (URL-based, self-setup semantics, no provisioning steps). At `/v1` they are routable only to bearer tokens of admin-role users or the full-access trust list (HTTP Basic covers UI surfaces only; `/v1` is Bearer-only), never listed on the non-admin fleet page or public `/v1/models`, and appear bold with an `admin_only` badge in the admin fleet view. Token usage from admin-only servers is tracked on the token summary pages exactly like any other node
 - **Google OAuth (SSO)** -- open `/profile` to sign in with a Google account (optional hosted-domain allowlist); sessions ride a signed cookie
@@ -99,6 +99,9 @@ Clients ──► NGINX ──► Inference Proxy  ──► vLLM Node A
   - [Run tests](#run-tests)
   - [Lint and format](#lint-and-format)
   - [Type check](#type-check)
+- [Durable provisioning evidence](#durable-provisioning-evidence)
+- [Troubleshooting](#troubleshooting)
+  - [Reading provisioning logs offline](#reading-provisioning-logs-offline)
 - [Technology Stack](#technology-stack)
 - [License](#license)
 
@@ -145,10 +148,17 @@ git clone https://github.com/quadsproject/qiip.git && cd qiip
 # Install dependencies
 uv sync
 
-# Copy and edit configuration
-cp .env.example .env
-# Set the required INFERENCE_PROXY_ADMIN__USERNAME and
-# INFERENCE_PROXY_ADMIN__PASSWORD values in .env
+# Copy and edit configuration. YAML is the primary configuration format;
+# create a conf/ directory in the gateway's working directory (or set
+# INFERENCE_PROXY_CONF_DIR to a directory such as /etc/qiip/conf).
+mkdir -p conf
+cp conf/qiip.yml.example conf/qiip.yml
+cp conf/auth.yml.example conf/auth.yml
+cp conf/plugins.yml.example conf/plugins.yml
+# Set the required admin.username and admin.password values in
+# conf/qiip.yml, and huggingface.cache_dir (required).
+# Environment variables with the INFERENCE_PROXY_ prefix override any
+# value in the YAML files, so secrets can stay in the environment or .env.
 
 # Run the gateway
 uv run uvicorn inference_proxy.main:create_app --factory --host 0.0.0.0 --port 5000
@@ -164,6 +174,9 @@ form or Google OAuth) and never show a native Basic challenge. HTTP Basic
 sends base64-encoded credentials --not encryption --on every request. A trusted
 work LAN may use HTTP; use a TLS terminator whenever that network path is not
 trusted.
+
+Optional TLS termination (rootless Podman container or RPM nginx, self-signed
+certificate bootstrap): see [nginx/nginx.md](nginx/nginx.md).
 
 ### Verify it's running
 
@@ -319,11 +332,11 @@ curl -u "$INFERENCE_PROXY_ADMIN__USERNAME:$INFERENCE_PROXY_ADMIN__PASSWORD" \
 ```
 
 The fleet page (`/dashboard`) is available to every authenticated viewer:
-anonymous visitors receive a sign-in page with **Sign in with Local Admin**
-(an in-page username/password form that creates a signed admin session; the
-browser native Basic prompt is no longer used, though HTTP Basic requests and
-SSE still pass through unchanged) and **Sign in with Google Auth** (the same
-flow as the profile page).
+anonymous visitors receive a sign-in page with **Local Admin**
+(a collapsible choice that expands to an in-page username/password form
+creating a signed admin session; the browser native Basic prompt is no longer
+used, though HTTP Basic requests and SSE still pass through unchanged) and
+**Google Auth** (the same flow as the profile page).
 Signed-in non-admin users see the fleet with admin-only servers removed, no
 operational actions, and nodes owned by another user excluded (ownership is
 private: `/v1/models` and the endpoint picker treat it the same way); node
@@ -529,11 +542,46 @@ before upgrading inference clients.
 
 ## Configuration
 
-All settings are loaded from environment variables with the prefix
-`INFERENCE_PROXY_` and double-underscore nesting for nested groups. A `.env`
-file is also supported. The checked-in [.env.example](.env.example) is the
-exhaustive environment-variable reference; this section explains the settings
-whose interactions or security properties need more context.
+Configuration is loaded from modular YAML files in a `conf/` directory
+(`conf/qiip.yml`, `conf/auth.yml`, `conf/plugins.yml`), mirroring the
+[QUADS conf/ layout](https://github.com/quadsproject/quads/tree/development/conf).
+The directory is taken from `INFERENCE_PROXY_CONF_DIR` and defaults to `conf/`
+relative to the working directory. Copy the checked-in examples
+(`conf/*.yml.example`) and edit them. Load precedence, highest first:
+
+1. Settings passed to the app constructor
+2. `INFERENCE_PROXY_*` environment variables
+3. YAML files in `INFERENCE_PROXY_CONF_DIR` (merged in filename order)
+4. `.env` file
+5. Built-in defaults
+
+This keeps existing deployments working unchanged: a host that only sets
+environment variables is unaffected, secrets can stay in exported environment
+variables or `.env`, and YAML always wins over a stale `.env` for values it
+actually sets. A `null` in YAML means unset, so the environment, `.env`, or
+the built-in default still applies (the shipped examples use `null` for
+secrets, so copying them cannot clobber a secret a host keeps in `.env`; the
+admin password is an empty string on purpose and must be set in
+`conf/qiip.yml`). Unrecognized section names fail startup, while unrecognized
+keys inside a section are ignored (matching today's handling of unknown
+environment variables). The checked-in
+[.env.example](.env.example) remains the exhaustive environment-variable
+reference. The rest of this section explains the settings whose interactions
+or security properties need more context.
+
+Existing `.env`-based hosts can migrate in one shot with a tested one-time
+script shipped with this feature (see the pull request for
+`qiip-env-to-conf.py`): it converts every well-formed
+`INFERENCE_PROXY_GROUP__FIELD` value into the matching YAML file(s), skips
+retired groups with a warning, writes the conf directory `0700` and files
+`0600`, and leaves the `.env` untouched. Environment variables still win after
+the migration, so exported or unit-managed values continue to apply; remove
+migrated keys from `.env` once the YAML files are trusted, but keep the file
+present: the packaged `systemd/inference-proxy.service` reads
+`EnvironmentFile=/opt/inference-proxy/.env`, so an empty or comment-only
+`.env` is the safe end state. Restart the gateway afterwards
+(`sudo systemctl restart inference-proxy` with the packaged unit, otherwise
+restart whatever supervises the process).
 
 ### Upgrade requirements
 
@@ -589,7 +637,7 @@ the signed user id and expiry.
 | `INFERENCE_PROXY_OAUTH__CLIENT_SECRET` | required (to enable) | Google OAuth 2.0 client secret, stored as a masked secret |
 | `INFERENCE_PROXY_OAUTH__REDIRECT_URI` | required (to enable) | Absolute `http(s)://` callback URI, e.g. `https://gateway.example.com/auth/callback` |
 | `INFERENCE_PROXY_OAUTH__ALLOWED_DOMAINS` | `[]` | JSON array of hosted domains allowed to sign in; empty allows any Google account |
-| `INFERENCE_PROXY_OAUTH__ALLOWED_REDIRECT_HOSTS` | `[]` | JSON array of extra hostnames that may start an OAuth flow (multi-name deployments behind one wildcard cert, e.g. `["inference-proxy.scalelab.redhat.com"]`); the callback returns to the hostname used to sign in. Hosts outside the list fall back to `REDIRECT_URI`, so single-name deployments are unchanged |
+| `INFERENCE_PROXY_OAUTH__ALLOWED_REDIRECT_HOSTS` | `[]` | JSON array of extra hostnames that may start an OAuth flow (multi-name deployments behind one wildcard cert, e.g. `["inference-proxy.scalelab.example.com"]`); the callback returns to the hostname used to sign in. Hosts outside the list fall back to `REDIRECT_URI`, so single-name deployments are unchanged |
 | `INFERENCE_PROXY_AUTH__DB_PATH` | `data/qiip.db` | SQLite file holding users, token digests, and usage |
 | `INFERENCE_PROXY_AUTH__SESSION_SECRET` | required for browser sign-in | Long random secret signing the session cookie (local-admin form and Google OAuth) |
 | `INFERENCE_PROXY_AUTH__SESSION_COOKIE` | `qiip_session` | Session cookie name (alphanumeric plus `_` and `-`) |
@@ -791,8 +839,9 @@ power, SSH, or installation work and name the allowlist setting to update.
 
 QIIP uses a QUADS-style plugin architecture: category interfaces (currently
 `auth`), built-in implementations, and an optional external plugin directory.
-Plugins are configured through environment variables only (a YAML config may
-follow later).
+Plugins are configured in `conf/plugins.yml` (see the checked-in example); the
+`plugins:` section maps 1:1 onto the settings model, and environment variables
+with the `INFERENCE_PROXY_` prefix still override it for legacy setups.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -826,6 +875,18 @@ Provisioning resource and retention controls:
 | `INFERENCE_PROXY_PROVISIONING__LOG_MAX_BYTES_PER_HOST` | `1048576` | Retained message bytes per host operation |
 | `INFERENCE_PROXY_PROVISIONING__LOG_MAX_ENTRY_BYTES` | `16384` | Maximum bytes in one retained log message |
 | `INFERENCE_PROXY_PROVISIONING__LOG_MAX_COMPLETED_HOSTS` | `64` | Completed host-operation buffers retained, oldest first |
+| `INFERENCE_PROXY_PROVISIONING__LOG_DB_PATH` | `data/provisioning-logs.sqlite3` | Durable gateway attempt database; use persistent local storage |
+| `INFERENCE_PROXY_PROVISIONING__LOG_RETENTION_DAYS` | `30` | Retention of gateway attempt history |
+| `INFERENCE_PROXY_PROVISIONING__LOG_STORAGE_MAX_BYTES` | `268435456` | Gateway retained record payload budget |
+| `INFERENCE_PROXY_PROVISIONING__LOG_ATTEMPT_MAX_BYTES` | `33554432` | Gateway record payload budget per attempt |
+| `INFERENCE_PROXY_PROVISIONING__LOG_MAX_ATTEMPTS` | `1000` | Gateway attempt manifests retained |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_ROOT` | `/var/lib/qiip/provisioning-logs` | Node database and bounded engine tails |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_RETENTION_DAYS` | `7` | Node attempt retention |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_MAX_BYTES` | `134217728` | Node payload budget, half for records and half for raw tails |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_ATTEMPT_MAX_BYTES` | `16777216` | Node record and raw-tail limit per attempt, subject to total budgets |
+| `INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_MAX_ATTEMPTS` | `32` | Node attempt manifests and raw tails retained |
+| `INFERENCE_PROXY_PROVISIONING__LOG_RECONNECT_ATTEMPTS` | `3` | Consecutive automatic retrieval retries after SSH errors |
+| `INFERENCE_PROXY_PROVISIONING__LOG_POLL_INTERVAL` | `1` | Seconds between node log retrieval requests |
 
 Managed llama.cpp provisioning builds a verified source tag with CUDA enabled
 for the NVIDIA GPU attached to the node. It has five gateway settings:
@@ -1155,6 +1216,142 @@ uv run --frozen ruff format .
 ```bash
 uv run --frozen mypy inference_proxy tests
 ```
+
+## Durable provisioning evidence
+
+Each setup, relaunch, and teardown receives a UUID and a SHA-256 identity of its
+setup bundle. Setup stdout/stderr, launch stdout/stderr, engine startup output,
+and available `vllm`, `llamacpp`, and NVIDIA Fabric Manager journal records are
+stored on the node and retrieved into the gateway database. Every record carries
+the hostname, attempt, engine, model selection (null until known for automatic
+selection), bundle version, stage, source, timestamp, and sequence. Node timestamps
+represent capture time; journal JSON also contains the original journal timestamp
+and cursor. Gateway messages use gateway time.
+
+Configure the durable-log settings under `provisioning:` in `conf/qiip.yml`
+(see `conf/qiip.yml.example`). The gateway requires a writable persistent
+`log_db_path`; startup fails if this database cannot be opened, rather than
+silently losing durable history. The gateway payload budget must cover one
+attempt. Half the node budget is reserved for SQLite records, so the node total
+must be at least twice its per-attempt record budget.
+
+The node recorder requires Python 3.9+ with SQLite and write access to the remote
+log root. It is uploaded with the setup bundle. Recording survives loss of the
+SSH connection; reconnects retrieve by sequence and commit the retrieval cursor
+with each record. A lost launch acknowledgement never causes a second setup or
+engine launch. Explicit teardown cancellation signals the detached command group
+and retains its final output. Gateway shutdown stops retrieval and leaves the
+node command and recorder running; the attempt is marked interrupted locally.
+If completion cannot be established within the deadline, the
+attempt fails with an explicit collection warning. Recorded commands retain the
+configured SSH total and inactivity deadlines; llama.cpp setup retains its longer
+setup timeout. This feature retrieves evidence;
+it does not reconcile or resume a provisioning process after a gateway restart.
+
+On the node detail page, **Provisioning history** lists attempts independently of
+the current node state. Select an attempt to search all retained messages, filter
+by source, retrieve missed node output, or download a gzip-compressed JSONL bundle
+containing its manifest, records, and an export summary that reports concurrent
+rotation during download. Failed stages and their output appear in the
+summary; unavailable sources, sequence gaps, and retention losses remain visible.
+The live stream also resumes by attempt and sequence. The engine pipe consumer
+batches output for up to 100 ms or 64 KiB before committing. Catchable recorder
+failures and SIGINT/SIGTERM stop recording and drain the pipe. SIGKILL, an OOM
+kill, or node loss cannot run that drain; those events can interrupt the engine
+and require operator recovery.
+
+Administrative API (existing admin authentication and JSON request requirements):
+
+- `GET /admin/provisioning/{hostname}/attempts?limit=100&offset=0`
+- `GET /admin/provisioning/{hostname}/attempts/{id}/logs?q=error&source=setup.stderr&after=0&limit=500`
+- `POST /admin/provisioning/{hostname}/attempts/{id}/collect` with JSON `{}`
+- `GET /admin/provisioning/{hostname}/attempts/{id}/bundle`
+- `GET /admin/provisioning/{hostname}/logs?attempt_id={id}&after=0` (SSE; supports `Last-Event-ID: {id}:{seq}`)
+
+Offsets are inclusive sequence positions; use `next_offset` for the next page.
+Search is a case-insensitive literal substring match, including `%` and `_`.
+Retrieval reports unavailable sources in the returned manifest while preserving
+previously collected data. Restarted gateway attempts are marked `interrupted`;
+retrieving their evidence does not claim that provisioning succeeded.
+
+Byte limits bound UTF-8 JSON record payloads, plus bounded raw tails on nodes;
+allow extra filesystem space for SQLite pages, indexes, manifests, and the
+SQLite WAL (long-lived readers may delay checkpointing). New stores use full
+auto-vacuum. A pre-existing SQLite file with auto-vacuum disabled requires an
+explicit rebuild to enable page reclamation; this upgrade does not rebuild it
+during startup. Prefix rotation retains monotonic sequence numbers
+and dropped-record counts. Age/count retention runs at store initialization,
+attempt creation, and before history snapshots when expired/excess rows exist.
+History snapshots use read transactions; WAL allows writers to proceed while
+readers inspect a snapshot. Active attempts are protected from manifest
+eviction and do not consume the completed-attempt count budget; their record
+payloads still rotate. Expired manifests are counted in
+`evicted_attempts` (gateway-wide), and requesting an evicted attempt returns 404.
+Raw-tail capacity is divided across the configured node attempt count, keeping
+runtime output bounded after startup collection ends. Existing pre-upgrade logs
+are not imported. Keep the gateway database on one persistent local volume for
+its owning gateway process; separate gateway replicas do not share this history.
+
+Controlled verification lives in `tests/provisioning/test_attempt_logs.py`: it
+runs the uploaded recorder and shipped setup/launch boundaries with fixture
+installers and a fake engine. It exercises lost acknowledgements, stream
+interruption, restart, concurrent readers, retries, record/raw-file rotation, and
+missing remote/journal sources. These checks do not establish success rates or
+failure causes on real fleet hardware.
+
+## Troubleshooting
+
+### Reading provisioning logs offline
+
+When the gateway is down, use the SQLite CLI to read its persistent database.
+The default path is `data/provisioning-logs.sqlite3`; substitute your configured
+`INFERENCE_PROXY_PROVISIONING__LOG_DB_PATH` if different. Open it read-only to
+avoid accidentally creating or modifying a database. First list attempts:
+
+```bash
+sqlite3 -readonly -header -column data/provisioning-logs.sqlite3 \
+  "SELECT id, hostname, json_extract(metadata,'$.started_at') AS started_at,
+          json_extract(metadata,'$.status') AS status,
+          json_extract(metadata,'$.failure_summary') AS failure_summary,
+          dropped AS dropped_records
+   FROM attempts ORDER BY created DESC;"
+```
+
+Replace `ATTEMPT_ID` below with an ID from that list to read one attempt in
+sequence order. Sequence numbers are local to each attempt:
+
+```bash
+sqlite3 -readonly data/provisioning-logs.sqlite3 \
+  "SELECT json_extract(payload,'$.ts') || ' [' ||
+          json_extract(payload,'$.source') || '] ' || json_extract(payload,'$.msg')
+   FROM records WHERE attempt='ATTEMPT_ID' ORDER BY seq;"
+```
+
+For a JSONL export preserving all record metadata, use `SELECT payload` (each
+row is already JSON). The companion manifest includes source availability,
+issues, and retention counters, which distinguish missing evidence from an
+empty log:
+
+```bash
+sqlite3 -readonly data/provisioning-logs.sqlite3 \
+  "SELECT payload FROM records WHERE attempt='ATTEMPT_ID' ORDER BY seq;" \
+  | jq -c . > provisioning-attempt.jsonl
+sqlite3 -readonly data/provisioning-logs.sqlite3 \
+  "SELECT json_object('metadata',json(metadata),'next_seq',next_seq,
+                      'remote_cursor',remote_cursor,'dropped_records',dropped,
+                      'retained_bytes',bytes)
+   FROM attempts WHERE id='ATTEMPT_ID';" \
+  | jq . > provisioning-attempt-manifest.json
+```
+
+`sqlite3 -readonly data/provisioning-logs.sqlite3 .dump` produces a SQL backup,
+not JSONL. These reads do not require the gateway or network access. If only a
+node's evidence is available, run the same queries on
+`/var/lib/qiip/provisioning-logs/attempts.sqlite3` (or the configured
+`INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_ROOT` plus `/attempts.sqlite3`). The
+node also keeps bounded `<attempt-id>.engine.log` raw tails alongside that
+database. Copy the database while its writers are stopped, or use SQLite's
+`.backup` command for a consistent snapshot of a live database.
 
 ## Technology Stack
 

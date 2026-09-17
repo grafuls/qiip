@@ -17,6 +17,11 @@ _TEST_ADMIN_USERNAME = "test-admin"
 _TEST_ADMIN_PASSWORD = "test-password"
 os.environ.setdefault("INFERENCE_PROXY_ADMIN__USERNAME", _TEST_ADMIN_USERNAME)
 os.environ.setdefault("INFERENCE_PROXY_ADMIN__PASSWORD", _TEST_ADMIN_PASSWORD)
+# Keep the suite hermetic: without this, a checkout with live conf/*.yml
+# (or an exported INFERENCE_PROXY_CONF_DIR on the runner) would leak into
+# every Settings(_env_file=None) construction. YAML tests override it via
+# monkeypatch before construction.
+os.environ["INFERENCE_PROXY_CONF_DIR"] = "/nonexistent-qiip-conf"
 
 from collections.abc import AsyncIterator, Generator
 from unittest.mock import AsyncMock, MagicMock
@@ -49,6 +54,7 @@ from inference_proxy.config.settings import (
     AuthSettings,
     EtcdSettings,
     HuggingFaceSettings,
+    ProvisioningSettings,
     RoutingSettings,
     Settings,
 )
@@ -77,6 +83,9 @@ def test_settings(tmp_path: Path) -> Settings:
             password=SecretStr(_TEST_ADMIN_PASSWORD),
         ),
         huggingface=HuggingFaceSettings(cache_dir=str(_TEST_HF_CACHE)),
+        provisioning=ProvisioningSettings(
+            log_db_path=tmp_path / "provisioning-logs.sqlite3"
+        ),
         auth=AuthSettings(
             db_path=tmp_path / "qiip-test-auth.db",
             session_secret=SecretStr("test-session-secret"),

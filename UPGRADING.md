@@ -12,6 +12,7 @@ The guide separates three kinds of change:
 
 - [Recommended upgrade sequence](#recommended-upgrade-sequence)
 - [Required operator migrations](#required-operator-migrations)
+- [Durable provisioning attempt logs](#26-durable-provisioning-attempt-logs)
 - [Artifact sources and mirror policy](#artifact-sources-and-mirror-policy)
 - [Client-visible compatibility changes](#client-visible-compatibility-changes)
 - [Operational runbooks](#operational-runbooks)
@@ -458,6 +459,78 @@ Pure recurrent-state models (Mamba- and RWKV-family architectures) allocate
 fixed F32 recurrent state, ignore the requested cache types, and emit no
 KV-cache record, so this verification rejects them after health. Such models
 are unsupported by managed llama.cpp provisioning.
+
+### 25. Move gateway configuration to YAML (optional)
+
+Gateway settings can now live in modular YAML files instead of environment
+variables: `conf/qiip.yml`, `conf/auth.yml`, and `conf/plugins.yml`, loaded
+from `INFERENCE_PROXY_CONF_DIR` (default `conf/` relative to the working
+directory). The checked-in `conf/*.yml.example` files are the reference; copy
+them and edit. This migration is optional: environment variables keep working
+and still override the YAML values, so nothing breaks until you move values.
+
+Load precedence, highest first: app/constructor arguments, `INFERENCE_PROXY_*`
+environment variables, YAML conf files (merged in filename order), `.env`,
+built-in defaults. `INFERENCE_PROXY_CONF_DIR` must be visible to the process
+that starts the gateway (shell export, wrapper script, or service unit
+`Environment=`); it is only read from the environment, not from the YAML files.
+
+A one-time migration script (`qiip-env-to-conf.py`, shipped with the
+corresponding pull request, not in the repository) converts an existing
+`.env` into the matching YAML file(s). It converts well-formed
+`INFERENCE_PROXY_GROUP__FIELD` keys only, skips retired groups (for example
+the removed `GATEWAY__*` keys) with a warning, writes the conf directory
+`0700` and the files `0600`, refuses to overwrite existing files without
+`--force`, leaves `.env` untouched, and reports any `INFERENCE_PROXY_*`
+variables still exported in the process environment (those keep winning over
+YAML by design). After reviewing the generated files, restart the gateway
+(`sudo systemctl restart inference-proxy` when deployed with the packaged
+`systemd/inference-proxy.service`, otherwise restart whatever supervises the
+uvicorn process) and remove the migrated keys from `.env` when the YAML is
+trusted. Keep the `.env` file present even when it is empty: the packaged unit
+uses `EnvironmentFile=/opt/inference-proxy/.env`, and a missing file fails the
+unit at start.
+
+Secrets (admin password, OAuth client secret, session secret, HuggingFace
+token, BMC password) can remain in the environment or `.env`; the YAML
+examples keep them as `null`, and `null` means unset, so the environment,
+`.env`, or defaults still apply and a copied example never clobbers a secret.
+The examples set the admin password to an empty value so an unedited copy
+fails startup instead of enabling a known credential.
+
+One validation relaxation: `INFERENCE_PROXY_LLMFIT__INSTALL_URL` now accepts
+repeated `{version}` placeholders, matching the shipped default release URL
+(which uses the version in both the path and the asset name). Setting that
+option to the default value previously failed validation; mirrors and custom
+URLs with a single `{version}` keep working.
+
+### 26. Durable provisioning attempt logs
+
+Provisioning now stores evidence in `data/provisioning-logs.sqlite3` by default.
+Place this file on a persistent local volume writable by the gateway service;
+include it in backups. The existing in-memory log settings still bound live
+buffers. The `provisioning.log_*` keys in `conf/qiip.yml.example` configure durable
+retention, node/gateway byte budgets, and retrieval intervals; matching
+`INFERENCE_PROXY_PROVISIONING__LOG_*` environment variables remain supported.
+The gateway fails startup if the database is not writable. Its payload budget
+must cover one attempt; the node total must cover twice its per-attempt record
+budget because half is reserved for raw tails. The node log root must be a
+dedicated absolute directory, not `/`.
+
+New setup attempts upload the node recorder and require node Python 3.9+ with
+SQLite. The SSH account needs access to `/var/lib/qiip/provisioning-logs` and the
+relevant service journals. Missing journals are reported in the attempt manifest.
+Pre-upgrade logs are not imported and no backfill is performed.
+Gateway shutdown leaves detached node commands running; only explicit teardown
+cancellation sends the node a cancel request. After restart, use
+**Provisioning history → Retrieve from node** to recover missed evidence; the
+operation remains marked interrupted until an operator assesses its outcome.
+
+Managed engine starts now retain a bounded, attempt-specific raw engine tail in
+the node log directory. Startup validation reads that same file. Direct script
+invocations retain their usual `/var/log/*-serve.log` destinations. Downloaded
+bundles contain a JSONL manifest followed by records and may include sensitive
+model/tool output; they remain behind the existing administrative authorization.
 
 ## Artifact Sources and Mirror Policy
 
