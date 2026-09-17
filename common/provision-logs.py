@@ -60,18 +60,21 @@ def worker(config):
     engine_path = Path(config["engine_log"]) if config.get("engine_log") else None
     command_done = False
     cancelled = False
+    timed_out = False
     last_command_output = time.monotonic()
     deadline = time.monotonic() + config["timeout"]
     collection_deadline = deadline + config["health_timeout"]
+    records = []
 
     def record(msg, source, level="info"):
-        store.append(
-            attempt,
-            msg,
-            source=source,
-            stage=current_stage,
-            level=level,
-            stream=source.split(".")[-1],
+        records.append(
+            dict(
+                msg=msg,
+                source=source,
+                stage=current_stage,
+                level=level,
+                stream=source.split(".")[-1],
+            )
         )
 
     def emit(source, raw):
@@ -80,13 +83,14 @@ def worker(config):
         if source == "journal":
             try:
                 item = json.loads(message)
-                store.append(
-                    attempt,
-                    message,
-                    source="journal",
-                    stage=stage,
-                    stream="journal",
-                    journal_cursor=item.get("__CURSOR"),
+                records.append(
+                    dict(
+                        msg=message,
+                        source="journal",
+                        stage=stage,
+                        stream="journal",
+                        journal_cursor=item.get("__CURSOR"),
+                    )
                 )
             except (ValueError, AttributeError):
                 record(message, "journal", "warning")
@@ -180,6 +184,8 @@ def worker(config):
                         emit(source, bytes(pending))
                     selector.unregister(key.fileobj)
                     key.fileobj.close()
+            store.append_many(attempt, records)
+            records.clear()
             now = time.monotonic()
             if store.get(attempt).get("cancel_command"):
                 cancelled = True
@@ -207,6 +213,7 @@ def worker(config):
                 now >= deadline
                 or now - last_command_output >= config["inactivity_timeout"]
             ):
+                timed_out = True
                 with suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGTERM)
                 store.update_phase(attempt, phase, status="complete", exit_status=124)
@@ -232,9 +239,13 @@ def worker(config):
                 try:
                     process.wait(timeout=2)
                 except subprocess.TimeoutExpired:
-                    process.kill()
+                    if process is processes[0]:
+                        with suppress(ProcessLookupError):
+                            os.killpg(process.pid, signal.SIGKILL)
+                    else:
+                        process.kill()
                     process.wait()
-        if cancelled:
+        if cancelled or timed_out:
             with suppress(ProcessLookupError):
                 os.killpg(proc.pid, signal.SIGKILL)
         # Preserve bytes already written before stopping the journal/command.
@@ -270,6 +281,7 @@ def worker(config):
                 emit(source, bytes(pending))
             key.fileobj.close()
         selector.close()
+        store.append_many(attempt, records)
         if engine_path:
             store.update(attempt, stop_collection=True)
         if len(processes) > 1 and processes[1].returncode not in (0, -signal.SIGTERM):
@@ -288,11 +300,21 @@ def worker(config):
 def engine_sink():
     """Keep draining the engine pipe even if recording or raw-tail storage fails."""
     store = None
+    previous_handlers = {}
+
+    def stop_recording(signum, frame):
+        raise SystemExit(f"Recorder received signal {signum}")
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        previous_handlers[sig] = signal.signal(sig, stop_recording)
     try:
         config = json.loads(os.environ["QIIP_LOG_CONFIG"])
         store = open_store(config)
         capture_engine_output(config, store)
-    except Exception as exc:
+    except BaseException as exc:
+        # Repeated catchable signals must not close the pipe during the drain.
+        for sig in previous_handlers:
+            signal.signal(sig, signal.SIG_IGN)
         if store is not None:
             with suppress(Exception):
                 store.issue(
@@ -305,60 +327,98 @@ def engine_sink():
             print("Engine logging stopped: " + str(exc), file=sys.stderr)
     # Never SIGPIPE an otherwise healthy engine because its evidence expired
     # or the recorder failed, including during initialization or file close.
-    while sys.stdin.buffer.read(8192):
-        pass
+    for sig in previous_handlers:
+        signal.signal(sig, signal.SIG_IGN)
+    try:
+        while sys.stdin.buffer.read(8192):
+            pass
+    finally:
+        for sig, handler in previous_handlers.items():
+            signal.signal(sig, handler)
 
 
 def capture_engine_output(config, store):
-    """Keep startup evidence and a bounded raw engine tail, including after setup.
-
-    The engine writes to a pipe, so rotation cannot race an independent file
-    reader or discard unread output. After collection ends only the raw tail is
-    maintained; its writer exits naturally with the engine.
-    """
+    """Drain up to 64 KiB / 100 ms of output per durable transaction."""
     path = Path(config["engine_log"])
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with path.open("wb", buffering=0) as output:
-        size = 0
-        raw_limit = max(1, config["max_bytes"] // (2 * config["max_attempts"]))
-        while True:
-            chunk = sys.stdin.buffer.readline(config["max_record_bytes"])
-            if not chunk:
-                break
+    pending = bytearray()
+    batch = []
+    issues = set()
+    buffered = 0
+    flush_at = time.monotonic() + 0.1
+    tail_limit = max(
+        1,
+        min(
+            config["attempt_max_bytes"],
+            config["max_bytes"] // (2 * config["max_attempts"]),
+        ),
+    )
+
+    def line(raw):
+        batch.append(
+            dict(
+                msg=raw.decode("utf-8", errors="replace"),
+                source="engine",
+                stage="start",
+                stream=config["engine"],
+            )
+        )
+
+    def flush():
+        nonlocal buffered, flush_at
+        if batch or issues:
             try:
-                attempt = store.get(config["attempt_id"])
-                recording = not attempt.get("stop_collection")
-                if recording:
-                    store.append(
-                        config["attempt_id"],
-                        chunk.decode("utf-8", errors="replace").rstrip("\n"),
-                        source="engine",
-                        stage="start",
-                        stream=config["engine"],
-                    )
-                    if not chunk.endswith(b"\n"):
-                        store.issue(
-                            config["attempt_id"],
-                            "Long engine line split by record byte limit",
-                        )
+                recording = not store.get(config["attempt_id"]).get("stop_collection")
             except KeyError:
                 recording = False
-            if not path.exists():
-                # Retention may evict a tail while its engine still has the
-                # pipe open. Close the inode and drain without growing storage.
-                break
-            if size + len(chunk) > min(config["attempt_max_bytes"], raw_limit):
-                output.seek(0)
-                output.truncate()
-                size = 0
-                if recording:
-                    store.issue(
-                        config["attempt_id"],
-                        "Raw engine log rotated by node byte limit",
+            if recording:
+                store.append_many(config["attempt_id"], batch)
+                for issue in issues:
+                    store.issue(config["attempt_id"], issue)
+        batch.clear()
+        issues.clear()
+        buffered = 0
+        flush_at = time.monotonic() + 0.1
+
+    with (
+        path.open("wb", buffering=0) as output,
+        selectors.DefaultSelector() as selector,
+    ):
+        selector.register(sys.stdin.buffer, selectors.EVENT_READ)
+        size = 0
+        while True:
+            ready = selector.select(max(0, flush_at - time.monotonic()))
+            if ready:
+                chunk = os.read(sys.stdin.fileno(), 65536)
+                if not chunk:
+                    if pending:
+                        line(bytes(pending))
+                    flush()
+                    return
+                if not path.exists():
+                    return  # The caller continues draining an evicted raw tail.
+                pending.extend(chunk)
+                buffered += len(chunk)
+                while b"\n" in pending or len(pending) >= config["max_record_bytes"]:
+                    newline = pending.find(b"\n")
+                    length = min(
+                        newline if newline >= 0 else len(pending),
+                        config["max_record_bytes"],
                     )
-            chunk = chunk[-raw_limit:]
-            output.write(chunk)
-            size += len(chunk)
+                    line(bytes(pending[:length]))
+                    del pending[: length + (1 if newline == length else 0)]
+                    if newline < 0 or newline > length:
+                        issues.add("Long engine line split by record byte limit")
+                tail = chunk[-tail_limit:]
+                if size + len(tail) > tail_limit:
+                    output.seek(0)
+                    output.truncate()
+                    size = 0
+                    issues.add("Raw engine log rotated by node byte limit")
+                output.write(tail)
+                size += len(tail)
+            if buffered >= 65536 or time.monotonic() >= flush_at:
+                flush()
 
 
 def main():

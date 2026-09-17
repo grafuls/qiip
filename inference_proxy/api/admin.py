@@ -13,6 +13,7 @@ import json
 import zlib
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
+from typing import Any
 
 import structlog
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
@@ -822,11 +823,14 @@ def _attempt_store(provisioner: NodeProvisioner) -> AttemptLogStore:
     return store
 
 
-def _owned_attempt(store: AttemptLogStore, hostname: str, attempt_id: str) -> None:
+def _owned_attempt(
+    store: AttemptLogStore, hostname: str, attempt_id: str
+) -> dict[str, Any]:
     hostname = _validated_hostname(hostname)
     try:
-        if store.get(attempt_id)["hostname"] == hostname:
-            return
+        manifest = store.get(attempt_id)
+        if manifest["hostname"] == hostname:
+            return manifest
     except KeyError:
         pass
     raise HTTPException(
@@ -841,8 +845,11 @@ async def provisioning_attempts(
     offset: int = Query(default=0, ge=0),
     provisioner: NodeProvisioner = Depends(get_provisioner),
 ) -> dict[str, object]:
-    return _attempt_store(provisioner).history(
-        _validated_hostname(hostname), limit=limit, offset=offset
+    return await asyncio.to_thread(
+        _attempt_store(provisioner).history,
+        _validated_hostname(hostname),
+        limit=limit,
+        offset=offset,
     )
 
 
@@ -858,7 +865,14 @@ async def attempt_logs(
 ) -> dict[str, object]:
     store = _attempt_store(provisioner)
     _owned_attempt(store, hostname, attempt_id)
-    return store.read(attempt_id, after=after, query=q, source=source, limit=limit)
+    try:
+        return await asyncio.to_thread(
+            store.read, attempt_id, after=after, query=q, source=source, limit=limit
+        )
+    except KeyError:
+        raise HTTPException(
+            status_code=404, detail="Attempt unavailable or evicted by retention"
+        ) from None
 
 
 @admin_router.post("/provisioning/{hostname}/attempts/{attempt_id}/collect")
@@ -867,8 +881,14 @@ async def collect_attempt_logs(
     attempt_id: str,
     provisioner: NodeProvisioner = Depends(get_provisioner),
 ) -> dict[str, object]:
+    hostname = _validated_hostname(hostname)
     _owned_attempt(_attempt_store(provisioner), hostname, attempt_id)
-    return await provisioner.collect_logs(hostname, attempt_id)
+    try:
+        return await provisioner.collect_logs(hostname, attempt_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=404, detail="Attempt unavailable or evicted by retention"
+        ) from None
 
 
 @admin_router.get("/provisioning/{hostname}/attempts/{attempt_id}/bundle")
@@ -878,8 +898,7 @@ async def download_attempt_logs(
     provisioner: NodeProvisioner = Depends(get_provisioner),
 ) -> StreamingResponse:
     store = _attempt_store(provisioner)
-    _owned_attempt(store, hostname, attempt_id)
-    manifest = store.get(attempt_id)
+    manifest = _owned_attempt(store, hostname, attempt_id)
 
     def generate() -> Iterator[bytes]:
         compressor = zlib.compressobj(wbits=31)
@@ -945,7 +964,9 @@ async def stream_provisioning_logs(
                     status_code=400, detail="Invalid Last-Event-ID"
                 ) from None
         if attempt_id is None:
-            history = store.history(hostname, limit=1)["attempts"]
+            history = (await asyncio.to_thread(store.history, hostname, limit=1))[
+                "attempts"
+            ]
             if not history:
                 raise HTTPException(
                     status_code=404, detail=f"No provisioning log for '{hostname}'"
@@ -958,7 +979,7 @@ async def stream_provisioning_logs(
             cursor = after
             while True:
                 try:
-                    page = store.read(attempt_id, after=cursor)
+                    page = await asyncio.to_thread(store.read, attempt_id, after=cursor)
                 except KeyError:
                     yield 'event: unavailable\ndata: {"reason":"Attempt evicted by retention"}\n\n'
                     return

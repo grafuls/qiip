@@ -422,6 +422,7 @@ class NodeProvisioner:
         self._artifact_index = artifact_index
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._provisioning_tasks: dict[str, _ProvisioningTask] = {}
+        self._explicit_cancel_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def log_buffer(self) -> ProvisioningLogBuffer:
@@ -466,18 +467,50 @@ class NodeProvisioner:
             await self._remote_logs.collect(attempt_id)
         return store.get(attempt_id)
 
-    async def _finish_remote_logs(self, hostname: str) -> None:
-        if self._remote_logs is not None:
-            attempt_id = self._log_buffer.attempts[hostname]
-            if not self._remote_logs.store.get(attempt_id).get("phases"):
+    async def _finish_remote_logs(self, hostname: str, *, cancel: bool = False) -> None:
+        try:
+            attempt_id = self._log_buffer.attempts.get(hostname)
+            if self._remote_logs is None or attempt_id is None:
+                return
+            manifest = await asyncio.to_thread(self._remote_logs.store.get, attempt_id)
+            if not manifest.get("phases"):
                 return
             task = asyncio.current_task()
-            with suppress(SSHConnectionError, TimeoutError):
-                await self._remote_logs.collect(
-                    self._log_buffer.attempts[hostname],
-                    finish=True,
-                    cancel=bool(task and task.cancelling()),
+            # A gateway shutdown stops retrieval, not the detached node worker.
+            interrupted = bool(task and task.cancelling()) and not cancel
+            await self._remote_logs.collect(
+                attempt_id, finish=not interrupted, cancel=cancel
+            )
+        except Exception:
+            logger.warning(
+                "remote_logs_finish_failed", hostname=hostname, exc_info=True
+            )
+
+    def _mark_log_complete(self, hostname: str) -> None:
+        try:
+            task = asyncio.current_task()
+            attempt_id = self._log_buffer.attempts.get(hostname)
+            store = self._log_buffer.store
+            if (
+                task
+                and task.cancelling()
+                and task not in self._explicit_cancel_tasks
+                and store
+                and attempt_id
+            ):
+                store.update(
+                    attempt_id,
+                    status="interrupted",
+                    failure_summary="Gateway collection interrupted; remote command left running",
                 )
+        except Exception:
+            logger.warning(
+                "log_interrupt_status_failed", hostname=hostname, exc_info=True
+            )
+        try:
+            self._log_buffer.mark_complete(hostname)
+        except Exception:
+            logger.warning("log_completion_failed", hostname=hostname, exc_info=True)
 
     def _engine_log_path(self, hostname: str, engine: InferenceEngine) -> str:
         if self._remote_logs is not None:
@@ -1682,14 +1715,20 @@ class NodeProvisioner:
                     owner=owner,
                 )
         except asyncio.CancelledError:
-            self._log(hostname, "error", "Provisioning cancelled by teardown")
+            explicit = asyncio.current_task() in self._explicit_cancel_tasks
+            message = (
+                "Provisioning cancelled by teardown"
+                if explicit
+                else "Gateway collection interrupted; remote command left running"
+            )
+            self._log(hostname, "error", message)
             await self._update_state(
                 hostname,
                 ProvisioningStep.FAILED,
-                failed_step="cancelled",
-                error="Provisioning cancelled by teardown",
+                failed_step="cancelled" if explicit else "interrupted",
+                error=message,
             )
-            self._log_buffer.mark_complete(hostname)
+            self._mark_log_complete(hostname)
             raise
         finally:
             lease.release()
@@ -1880,8 +1919,10 @@ class NodeProvisioner:
                 logger.warning("failed_node_update_failed", hostname=hostname)
             raise
         finally:
-            await self._finish_remote_logs(hostname)
-            self._log_buffer.mark_complete(hostname)
+            await self._finish_remote_logs(
+                hostname, cancel=asyncio.current_task() in self._explicit_cancel_tasks
+            )
+            self._mark_log_complete(hostname)
 
         logger.info("provisioning_complete", hostname=hostname)
 
@@ -2195,10 +2236,8 @@ class NodeProvisioner:
     ) -> None:
         """Tail engine log and feed lines into the provisioning log buffer."""
         if self._remote_logs is not None:
-            while True:
-                with suppress(SSHConnectionError, TimeoutError):
-                    await self._remote_logs.collect(self._log_buffer.attempts[hostname])
-                await asyncio.sleep(self._settings.log_poll_interval)
+            await self._remote_logs.follow(self._log_buffer.attempts[hostname])
+            return
         log_path = self._engine_log_path(hostname, engine)
         try:
             async for _stream, line in self._ssh_client.run_streaming(
@@ -2445,9 +2484,13 @@ class NodeProvisioner:
             return None
 
         task = record.task
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+        self._explicit_cancel_tasks.add(task)
+        try:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        finally:
+            self._explicit_cancel_tasks.discard(task)
 
         if not task.cancelled():
             raise RuntimeError(
@@ -2673,6 +2716,6 @@ class NodeProvisioner:
             raise
         finally:
             await self._finish_remote_logs(hostname)
-            self._log_buffer.mark_complete(hostname)
+            self._mark_log_complete(hostname)
 
         logger.info("teardown_complete", hostname=hostname)

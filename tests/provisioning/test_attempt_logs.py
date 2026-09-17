@@ -10,7 +10,10 @@ from __future__ import annotations
 import asyncio
 import gzip
 import json
+import re
 import shutil
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -27,7 +30,10 @@ from inference_proxy.models.endpoint import EndpointPolicy
 from inference_proxy.models.node import InferenceEngine
 from inference_proxy.provisioning.log_buffer import ProvisioningLogBuffer
 from inference_proxy.provisioning.log_store import AttemptLogStore
-from inference_proxy.provisioning.provisioner import NodeProvisioner
+from inference_proxy.provisioning.provisioner import (
+    NodeProvisioner,
+    ProvisioningIdentity,
+)
 from inference_proxy.provisioning.remote_logs import RemoteLogCollector
 from inference_proxy.provisioning.ssh_client import (
     RemoteCommandError,
@@ -47,6 +53,14 @@ class LocalNodeSSH(SSHClient):
         self.lose_launch = False
         self.fail_reads = 0
         self.launches = 0
+        self.read_faults_injected = 0
+        self.launch_faults_injected = 0
+        self.connections = 0
+
+    @asynccontextmanager
+    async def connection(self, host: str) -> AsyncIterator[None]:
+        self.connections += 1
+        yield
 
     async def run(
         self,
@@ -56,8 +70,9 @@ class LocalNodeSSH(SSHClient):
         *,
         log_label: str | None = None,
     ) -> tuple[str, str, int]:
-        if command.endswith(" read") and self.fail_reads:
+        if log_label == "provisioning log recorder (read)" and self.fail_reads:
             self.fail_reads -= 1
+            self.read_faults_injected += 1
             raise SSHConnectionError(host, "controlled stream interruption")
         proc = await asyncio.create_subprocess_exec(
             "bash",
@@ -73,10 +88,11 @@ class LocalNodeSSH(SSHClient):
             raise RemoteCommandError(
                 host, "controlled recorder", proc.returncode, stderr.decode()
             )
-        if command.endswith(" launch"):
+        if log_label == "provisioning log recorder (launch)":
             self.launches += 1
             if self.lose_launch:
                 self.lose_launch = False
+                self.launch_faults_injected += 1
                 raise SSHConnectionError(host, "controlled lost launch acknowledgement")
         return stdout.decode(), stderr.decode(), 0
 
@@ -182,8 +198,8 @@ async def test_setup_boundary_recovers_lost_ack_and_interruption(
     # privileged installation functions with deterministic fixture operations.
     setup = ssh.root / "auto-vllm/setup.sh"
     text = setup.read_text()
-    text = text.replace(
-        "    step system_update run_system_update",
+    text, injected = re.subn(
+        r"(?m)^    step system_update run_system_update$",
         """    run_system_update() { echo "setup stdout"; echo "setup stderr" >&2; sleep 0.1; }
     install_nvidia_driver() { :; }
     install_cuda_toolkit() { :; }
@@ -194,7 +210,10 @@ async def test_setup_boundary_recovers_lost_ack_and_interruption(
     configure_firewall() { :; }
     install_llmfit() { :; }
     step system_update run_system_update""",
+        text,
     )
+    assert injected == 1, "setup fixture boundary changed; refusing to run installers"
+    assert "install_nvidia_driver() { :; }" in text
     setup.write_text(text)
     provisioner._begin_log("host1", InferenceEngine.VLLM, model="org/model")
     attempt = provisioner.log_buffer.attempts["host1"]
@@ -212,6 +231,8 @@ async def test_setup_boundary_recovers_lost_ack_and_interruption(
     assert "system_update" in steps
     assert any(r["source"] == "journal" for r in page["records"])
     assert ssh.launches == 1
+    assert ssh.launch_faults_injected == 1
+    assert ssh.read_faults_injected == 1
     before = len(page["records"])
     await provisioner.collect_logs("host1", attempt)
     assert len(store.read(attempt)["records"]) == before
@@ -521,11 +542,15 @@ async def test_explicit_gateway_cancellation_stops_detached_setup(
         "echo '[STEP:nvidia_driver:START]'\n"
         "echo before > before-cancel\nsleep 1\necho unsafe > after-cancel\n"
     )
-    task = asyncio.create_task(provisioner.provision("host1", model="org/model"))
+    task = provisioner.fire_background(
+        provisioner.provision("host1", model="org/model"),
+        provisioning_hostname="host1",
+        provisioning_identity=ProvisioningIdentity(InferenceEngine.VLLM),
+    )
     async with asyncio.timeout(3):
         while not (ssh.root / "before-cancel").exists():
             await asyncio.sleep(0.02)
-    task.cancel()
+    await provisioner.cancel_active_provision("host1")
     with pytest.raises(asyncio.CancelledError):
         await task
     await asyncio.sleep(1.1)

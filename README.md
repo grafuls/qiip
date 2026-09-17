@@ -99,6 +99,9 @@ Clients ──► NGINX ──► Inference Proxy  ──► vLLM Node A
   - [Run tests](#run-tests)
   - [Lint and format](#lint-and-format)
   - [Type check](#type-check)
+- [Durable provisioning evidence](#durable-provisioning-evidence)
+- [Troubleshooting](#troubleshooting)
+  - [Reading provisioning logs offline](#reading-provisioning-logs-offline)
 - [Technology Stack](#technology-stack)
 - [License](#license)
 
@@ -145,10 +148,17 @@ git clone https://github.com/quadsproject/qiip.git && cd qiip
 # Install dependencies
 uv sync
 
-# Copy and edit configuration
-cp .env.example .env
-# Set the required INFERENCE_PROXY_ADMIN__USERNAME and
-# INFERENCE_PROXY_ADMIN__PASSWORD values in .env
+# Copy and edit configuration. YAML is the primary configuration format;
+# create a conf/ directory in the gateway's working directory (or set
+# INFERENCE_PROXY_CONF_DIR to a directory such as /etc/qiip/conf).
+mkdir -p conf
+cp conf/qiip.yml.example conf/qiip.yml
+cp conf/auth.yml.example conf/auth.yml
+cp conf/plugins.yml.example conf/plugins.yml
+# Set the required admin.username and admin.password values in
+# conf/qiip.yml, and huggingface.cache_dir (required).
+# Environment variables with the INFERENCE_PROXY_ prefix override any
+# value in the YAML files, so secrets can stay in the environment or .env.
 
 # Run the gateway
 uv run uvicorn inference_proxy.main:create_app --factory --host 0.0.0.0 --port 5000
@@ -164,6 +174,9 @@ form or Google OAuth) and never show a native Basic challenge. HTTP Basic
 sends base64-encoded credentials --not encryption --on every request. A trusted
 work LAN may use HTTP; use a TLS terminator whenever that network path is not
 trusted.
+
+Optional TLS termination (rootless Podman container or RPM nginx, self-signed
+certificate bootstrap): see [nginx/nginx.md](nginx/nginx.md).
 
 ### Verify it's running
 
@@ -529,11 +542,46 @@ before upgrading inference clients.
 
 ## Configuration
 
-All settings are loaded from environment variables with the prefix
-`INFERENCE_PROXY_` and double-underscore nesting for nested groups. A `.env`
-file is also supported. The checked-in [.env.example](.env.example) is the
-exhaustive environment-variable reference; this section explains the settings
-whose interactions or security properties need more context.
+Configuration is loaded from modular YAML files in a `conf/` directory
+(`conf/qiip.yml`, `conf/auth.yml`, `conf/plugins.yml`), mirroring the
+[QUADS conf/ layout](https://github.com/quadsproject/quads/tree/development/conf).
+The directory is taken from `INFERENCE_PROXY_CONF_DIR` and defaults to `conf/`
+relative to the working directory. Copy the checked-in examples
+(`conf/*.yml.example`) and edit them. Load precedence, highest first:
+
+1. Settings passed to the app constructor
+2. `INFERENCE_PROXY_*` environment variables
+3. YAML files in `INFERENCE_PROXY_CONF_DIR` (merged in filename order)
+4. `.env` file
+5. Built-in defaults
+
+This keeps existing deployments working unchanged: a host that only sets
+environment variables is unaffected, secrets can stay in exported environment
+variables or `.env`, and YAML always wins over a stale `.env` for values it
+actually sets. A `null` in YAML means unset, so the environment, `.env`, or
+the built-in default still applies (the shipped examples use `null` for
+secrets, so copying them cannot clobber a secret a host keeps in `.env`; the
+admin password is an empty string on purpose and must be set in
+`conf/qiip.yml`). Unrecognized section names fail startup, while unrecognized
+keys inside a section are ignored (matching today's handling of unknown
+environment variables). The checked-in
+[.env.example](.env.example) remains the exhaustive environment-variable
+reference. The rest of this section explains the settings whose interactions
+or security properties need more context.
+
+Existing `.env`-based hosts can migrate in one shot with a tested one-time
+script shipped with this feature (see the pull request for
+`qiip-env-to-conf.py`): it converts every well-formed
+`INFERENCE_PROXY_GROUP__FIELD` value into the matching YAML file(s), skips
+retired groups with a warning, writes the conf directory `0700` and files
+`0600`, and leaves the `.env` untouched. Environment variables still win after
+the migration, so exported or unit-managed values continue to apply; remove
+migrated keys from `.env` once the YAML files are trusted, but keep the file
+present: the packaged `systemd/inference-proxy.service` reads
+`EnvironmentFile=/opt/inference-proxy/.env`, so an empty or comment-only
+`.env` is the safe end state. Restart the gateway afterwards
+(`sudo systemctl restart inference-proxy` with the packaged unit, otherwise
+restart whatever supervises the process).
 
 ### Upgrade requirements
 
@@ -589,7 +637,7 @@ the signed user id and expiry.
 | `INFERENCE_PROXY_OAUTH__CLIENT_SECRET` | required (to enable) | Google OAuth 2.0 client secret, stored as a masked secret |
 | `INFERENCE_PROXY_OAUTH__REDIRECT_URI` | required (to enable) | Absolute `http(s)://` callback URI, e.g. `https://gateway.example.com/auth/callback` |
 | `INFERENCE_PROXY_OAUTH__ALLOWED_DOMAINS` | `[]` | JSON array of hosted domains allowed to sign in; empty allows any Google account |
-| `INFERENCE_PROXY_OAUTH__ALLOWED_REDIRECT_HOSTS` | `[]` | JSON array of extra hostnames that may start an OAuth flow (multi-name deployments behind one wildcard cert, e.g. `["inference-proxy.scalelab.redhat.com"]`); the callback returns to the hostname used to sign in. Hosts outside the list fall back to `REDIRECT_URI`, so single-name deployments are unchanged |
+| `INFERENCE_PROXY_OAUTH__ALLOWED_REDIRECT_HOSTS` | `[]` | JSON array of extra hostnames that may start an OAuth flow (multi-name deployments behind one wildcard cert, e.g. `["inference-proxy.scalelab.example.com"]`); the callback returns to the hostname used to sign in. Hosts outside the list fall back to `REDIRECT_URI`, so single-name deployments are unchanged |
 | `INFERENCE_PROXY_AUTH__DB_PATH` | `data/qiip.db` | SQLite file holding users, token digests, and usage |
 | `INFERENCE_PROXY_AUTH__SESSION_SECRET` | required for browser sign-in | Long random secret signing the session cookie (local-admin form and Google OAuth) |
 | `INFERENCE_PROXY_AUTH__SESSION_COOKIE` | `qiip_session` | Session cookie name (alphanumeric plus `_` and `-`) |
@@ -791,8 +839,9 @@ power, SSH, or installation work and name the allowlist setting to update.
 
 QIIP uses a QUADS-style plugin architecture: category interfaces (currently
 `auth`), built-in implementations, and an optional external plugin directory.
-Plugins are configured through environment variables only (a YAML config may
-follow later).
+Plugins are configured in `conf/plugins.yml` (see the checked-in example); the
+`plugins:` section maps 1:1 onto the settings model, and environment variables
+with the `INFERENCE_PROXY_` prefix still override it for legacy setups.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -1168,30 +1217,7 @@ uv run --frozen ruff format .
 uv run --frozen mypy inference_proxy tests
 ```
 
-## Technology Stack
-
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| Framework | FastAPI >=0.135 | HTTP framework with native SSE |
-| Server | Uvicorn | ASGI server with uvloop |
-| Validation | Pydantic v2 | Request/response models |
-| Config | pydantic-settings | Type-safe env var loading |
-| HTTP Client | httpx + httpx-sse | Async proxy engine with SSE support |
-| Service Discovery | etcd3gw | etcd v3 HTTP gateway client |
-| Logging | structlog | Structured JSON/console logging |
-| Linter/Formatter | Ruff | Replaces flake8 + black + isort |
-| Type Checker | mypy (strict) | Static type safety |
-| Templates | Jinja2 | Dashboard, node detail, and chat HTML |
-| SSH | asyncssh | Async SSH for node provisioning |
-| Model Hub | huggingface-hub | Model catalog and background downloads |
-| Testing | pytest + pytest-asyncio + pytest-httpx | Async tests with HTTP mocking |
-
-## License
-
-Open Source, crafted with :heart: via [GPLv3](LICENSE)
-
-
-### Durable provisioning evidence
+## Durable provisioning evidence
 
 Each setup, relaunch, and teardown receives a UUID and a SHA-256 identity of its
 setup bundle. Setup stdout/stderr, launch stdout/stderr, engine startup output,
@@ -1202,12 +1228,21 @@ selection), bundle version, stage, source, timestamp, and sequence. Node timesta
 represent capture time; journal JSON also contains the original journal timestamp
 and cursor. Gateway messages use gateway time.
 
+Configure the durable-log settings under `provisioning:` in `conf/qiip.yml`
+(see `conf/qiip.yml.example`). The gateway requires a writable persistent
+`log_db_path`; startup fails if this database cannot be opened, rather than
+silently losing durable history. The gateway payload budget must cover one
+attempt. Half the node budget is reserved for SQLite records, so the node total
+must be at least twice its per-attempt record budget.
+
 The node recorder requires Python 3.9+ with SQLite and write access to the remote
 log root. It is uploaded with the setup bundle. Recording survives loss of the
 SSH connection; reconnects retrieve by sequence and commit the retrieval cursor
 with each record. A lost launch acknowledgement never causes a second setup or
 engine launch. Explicit teardown cancellation signals the detached command group
-and retains its final output. If completion cannot be established within the deadline, the
+and retains its final output. Gateway shutdown stops retrieval and leaves the
+node command and recorder running; the attempt is marked interrupted locally.
+If completion cannot be established within the deadline, the
 attempt fails with an explicit collection warning. Recorded commands retain the
 configured SSH total and inactivity deadlines; llama.cpp setup retains its longer
 setup timeout. This feature retrieves evidence;
@@ -1219,7 +1254,11 @@ by source, retrieve missed node output, or download a gzip-compressed JSONL bund
 containing its manifest, records, and an export summary that reports concurrent
 rotation during download. Failed stages and their output appear in the
 summary; unavailable sources, sequence gaps, and retention losses remain visible.
-The live stream also resumes by attempt and sequence.
+The live stream also resumes by attempt and sequence. The engine pipe consumer
+batches output for up to 100 ms or 64 KiB before committing. Catchable recorder
+failures and SIGINT/SIGTERM stop recording and drain the pipe. SIGKILL, an OOM
+kill, or node loss cannot run that drain; those events can interrupt the engine
+and require operator recovery.
 
 Administrative API (existing admin authentication and JSON request requirements):
 
@@ -1237,9 +1276,14 @@ retrieving their evidence does not claim that provisioning succeeded.
 
 Byte limits bound UTF-8 JSON record payloads, plus bounded raw tails on nodes;
 allow extra filesystem space for SQLite pages, indexes, manifests, and the
-transient rollback journal. Prefix rotation retains monotonic sequence numbers
+SQLite WAL (long-lived readers may delay checkpointing). New stores use full
+auto-vacuum. A pre-existing SQLite file with auto-vacuum disabled requires an
+explicit rebuild to enable page reclamation; this upgrade does not rebuild it
+during startup. Prefix rotation retains monotonic sequence numbers
 and dropped-record counts. Age/count retention runs at store initialization,
-attempt creation, and history listing. Active attempts are protected from manifest
+attempt creation, and before history snapshots when expired/excess rows exist.
+History snapshots use read transactions; WAL allows writers to proceed while
+readers inspect a snapshot. Active attempts are protected from manifest
 eviction and do not consume the completed-attempt count budget; their record
 payloads still rotate. Expired manifests are counted in
 `evicted_attempts` (gateway-wide), and requesting an evicted attempt returns 404.
@@ -1308,3 +1352,25 @@ node's evidence is available, run the same queries on
 node also keeps bounded `<attempt-id>.engine.log` raw tails alongside that
 database. Copy the database while its writers are stopped, or use SQLite's
 `.backup` command for a consistent snapshot of a live database.
+
+## Technology Stack
+
+| Component | Technology | Purpose |
+|-----------|-----------|---------|
+| Framework | FastAPI >=0.135 | HTTP framework with native SSE |
+| Server | Uvicorn | ASGI server with uvloop |
+| Validation | Pydantic v2 | Request/response models |
+| Config | pydantic-settings | Type-safe env var loading |
+| HTTP Client | httpx + httpx-sse | Async proxy engine with SSE support |
+| Service Discovery | etcd3gw | etcd v3 HTTP gateway client |
+| Logging | structlog | Structured JSON/console logging |
+| Linter/Formatter | Ruff | Replaces flake8 + black + isort |
+| Type Checker | mypy (strict) | Static type safety |
+| Templates | Jinja2 | Dashboard, node detail, and chat HTML |
+| SSH | asyncssh | Async SSH for node provisioning |
+| Model Hub | huggingface-hub | Model catalog and background downloads |
+| Testing | pytest + pytest-asyncio + pytest-httpx | Async tests with HTTP mocking |
+
+## License
+
+Open Source, crafted with :heart: via [GPLv3](LICENSE)

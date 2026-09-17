@@ -7,6 +7,7 @@ import json
 import runpy
 import subprocess
 import sys
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
@@ -28,17 +29,76 @@ from inference_proxy.provisioning.remote_logs import RemoteLogCollector
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_engine_sink_batches_and_flushes_before_eof(tmp_path: Path) -> None:
+    consumer_script = """
+import json, os, runpy, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1] + '/inference_proxy/provisioning')
+recorder = runpy.run_path(sys.argv[1] + '/common/provision-logs.py')
+root = Path(sys.argv[2])
+config = dict(root=str(root), max_bytes=4194304, attempt_max_bytes=2097152,
+              max_attempts=2, retention_days=7, max_record_bytes=1024,
+              attempt_id='b' * 32, engine='vllm', engine_log=str(root / 'engine.log'))
+store = recorder['open_store'](config)
+store.create('host1', attempt_id=config['attempt_id'])
+counts = dict(get=0, commits=0)
+original_get, original_append = store.get, store.append_many
+def get(*args, **kwargs):
+    counts['get'] += 1
+    return original_get(*args, **kwargs)
+def append(*args, **kwargs):
+    result = original_append(*args, **kwargs)
+    counts['commits'] += 1
+    (root / 'committed').touch()
+    return result
+store.get, store.append_many = get, append
+recorder['engine_sink'].__globals__['open_store'] = lambda config: store
+os.environ['QIIP_LOG_CONFIG'] = json.dumps(config)
+recorder['engine_sink']()
+print(json.dumps(counts))
+"""
+    with subprocess.Popen(
+        [sys.executable, "-c", consumer_script, str(ROOT), str(tmp_path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    ) as consumer:
+        try:
+            assert consumer.stdin is not None
+            consumer.stdin.write(b"first line\n")
+            consumer.stdin.flush()
+            deadline = time.monotonic() + 3
+            while not (tmp_path / "committed").exists():
+                assert time.monotonic() < deadline, (
+                    "no timed flush while pipe stayed open"
+                )
+                time.sleep(0.01)
+            output, errors = consumer.communicate(b"engine output\n" * 2000, timeout=10)
+            assert consumer.returncode == 0, errors.decode()
+        finally:
+            if consumer.poll() is None:
+                consumer.kill()
+    counts = json.loads(output)
+    assert 2 <= counts["commits"] < 20
+    assert counts["get"] == counts["commits"]
+    store = AttemptLogStore(tmp_path / "attempts.sqlite3")
+    assert len(store.read("b" * 32, limit=3000)["records"]) == 2001
+
+
 @pytest.fixture
 def recorder(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setitem(sys.modules, "log_store", log_store)
     return runpy.run_path(str(ROOT / "common/provision-logs.py"))
 
 
-@pytest.mark.parametrize("fault", ["open", "get", "append", "raw"])
+@pytest.mark.parametrize(
+    "fault",
+    ["open", "get", "append_many", "raw", "interrupt", "exit", "sigint", "sigterm"],
+)
 def test_recorder_fault_keeps_engine_pipe_draining(tmp_path: Path, fault: str) -> None:
     """A real producer with default SIGPIPE must survive its recorder failing."""
     consumer_script = """
-import json, os, runpy, sqlite3, sys
+import json, os, runpy, signal, sqlite3, sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1] + '/inference_proxy/provisioning')
 recorder = runpy.run_path(sys.argv[1] + '/common/provision-logs.py')
@@ -49,12 +109,20 @@ config = dict(root=str(root), max_bytes=65536, attempt_max_bytes=16384,
 store = recorder['open_store'](config)
 store.create('host1', attempt_id=config['attempt_id'])
 def fail(*args, **kwargs):
+    if fault in ('sigint', 'sigterm'):
+        os.kill(os.getpid(), signal.SIGINT if fault == 'sigint' else signal.SIGTERM)
+    if fault == 'interrupt':
+        raise KeyboardInterrupt()
+    if fault == 'exit':
+        raise SystemExit('injected exit')
     raise sqlite3.OperationalError('injected recorder storage fault')
 if fault == 'open':
     recorder['engine_sink'].__globals__['open_store'] = fail
 else:
-    if fault in ('get', 'append'):
+    if fault in ('get', 'append_many'):
         setattr(store, fault, fail)
+    elif fault in ('interrupt', 'exit', 'sigint', 'sigterm'):
+        store.append_many = fail
     else:
         (root / 'blocked').write_text('not a directory')
         config['engine_log'] = str(root / 'blocked' / 'engine.log')
@@ -125,9 +193,17 @@ def test_history_survives_eviction_after_its_snapshot(
 
     @contextmanager
     def evict_after_read() -> Iterator[Any]:
+        read_snapshot = False
+
+        def trace(statement: str) -> None:
+            nonlocal read_snapshot
+            read_snapshot |= "SELECT * FROM attempts WHERE hostname" in statement
+
         with original_db() as db:
+            db.set_trace_callback(trace)
             yield db
-        other_writer.history("host1")
+        if read_snapshot:
+            other_writer.history("host1")
 
     monkeypatch.setattr(store, "_db", evict_after_read)
     result = store.history("host1")
@@ -137,7 +213,8 @@ def test_history_survives_eviction_after_its_snapshot(
 
 
 @pytest.mark.parametrize("missing", [1, 4])
-def test_unavailable_suffix_marker_does_not_overstate_gap(
+@pytest.mark.asyncio
+async def test_unavailable_suffix_marker_does_not_overstate_gap(
     tmp_path: Path, missing: int
 ) -> None:
     store = AttemptLogStore(tmp_path / "logs.sqlite3")
@@ -148,7 +225,7 @@ def test_unavailable_suffix_marker_does_not_overstate_gap(
     )
     remote = dict(store.get(attempt), next_seq=missing + 1, dropped_records=missing)
     page = dict(records=[], attempt=remote, has_more=False)
-    collector._ingest(attempt, page)
+    await collector._ingest(attempt, page)
     records = store.read(attempt)["records"]
     marker = records[-1]
     assert marker["remote_seq"] == missing
@@ -159,7 +236,7 @@ def test_unavailable_suffix_marker_does_not_overstate_gap(
         assert any(
             f"1..{missing - 1}" in issue for issue in store.get(attempt)["issues"]
         )
-    collector._ingest(attempt, page)
+    await collector._ingest(attempt, page)
     assert store.read(attempt)["records"] == records
 
 
@@ -231,7 +308,7 @@ def test_timeout_remains_124_when_process_group_already_exited(
     assert manifest["phases"]["setup"]["recording"] is False
     assert any("deadline" in issue for issue in manifest["issues"])
     assert not any("Node recorder failed" in issue for issue in manifest["issues"])
-    killpg.assert_called_once()
+    assert killpg.call_count == 2  # SIGTERM deadline, then final group SIGKILL.
 
 
 def test_phase_updates_and_appends_preserve_concurrent_metadata(tmp_path: Path) -> None:

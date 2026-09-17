@@ -70,7 +70,7 @@ class RemoteLogCollector:
                 config["hostname"],
                 command,
                 timeout=30,
-                log_label="provisioning log recorder",
+                log_label=f"provisioning log recorder ({action})",
             )
         except RemoteCommandError as exc:
             # The transport command can contain environment secrets. Do not
@@ -91,45 +91,58 @@ class RemoteLogCollector:
                 config["hostname"], f"Node logs unavailable: {exc}"
             ) from None
 
-    def _ingest(self, attempt_id: str, page: dict[str, Any]) -> list[dict[str, Any]]:
-        added = []
-        for record in page["records"]:
-            entry = self.store.append(
-                attempt_id,
-                record["msg"],
-                level=record["level"],
-                source=record["source"],
-                stage=record["stage"],
-                ts=record["ts"],
-                remote_seq=record["seq"],
-                stream=record["stream"],
-            )
-            if entry is not None:
-                added.append(entry)
-                host = entry["hostname"]
-                if self.buffer.attempts.get(host) == attempt_id:
-                    self.buffer.append(
-                        host,
-                        entry["level"],
-                        entry["msg"],
-                        stream=entry["stream"],
-                        persist=False,
-                    )
+    async def _ingest(
+        self, attempt_id: str, page: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        added = await asyncio.to_thread(self._ingest_page, attempt_id, page)
+        for entry in added:
+            host = entry["hostname"]
+            if self.buffer.attempts.get(host) == attempt_id:
+                self.buffer.append(
+                    host,
+                    entry["level"],
+                    entry["msg"],
+                    stream=entry["stream"],
+                    persist=False,
+                )
+        return added
+
+    def _ingest_page(
+        self, attempt_id: str, page: dict[str, Any]
+    ) -> list[dict[str, Any]]:
+        added = self.store.append_many(
+            attempt_id,
+            [
+                dict(
+                    msg=record["msg"],
+                    level=record["level"],
+                    source=record["source"],
+                    stage=record["stage"],
+                    ts=record["ts"],
+                    remote_seq=record["seq"],
+                    stream=record["stream"],
+                )
+                for record in page["records"]
+            ],
+        )
         remote = page["attempt"]
+        issues = []
+        for issue in remote["issues"]:
+            message = "Node: " + issue
+            if message not in issues:
+                issues.append(message[:2048])
+        if remote["dropped_records"]:
+            message = "Node retention evicted records; consult remote_dropped_records"
+            if message not in issues:
+                issues.append(message)
         self.store.update(
             attempt_id,
             remote_status=remote["status"],
             remote_phases=remote.get("phases", {}),
             remote_sources=remote["sources"],
             remote_dropped_records=remote["dropped_records"],
+            issues=issues[-32:],
         )
-        for issue in remote["issues"]:
-            self.store.issue(attempt_id, "Node: " + issue)
-        if remote["dropped_records"]:
-            self.store.issue(
-                attempt_id,
-                "Node retention evicted records; consult remote_dropped_records",
-            )
         # An empty retained suffix still needs an explicit gap and cursor advance.
         if (
             not page["has_more"]
@@ -157,7 +170,7 @@ class RemoteLogCollector:
                 for _ in range(128):
                     page = await self._request(attempt_id, action)
                     action = "read"
-                    added.extend(self._ingest(attempt_id, page))
+                    added.extend(await self._ingest(attempt_id, page))
                     if not page["has_more"]:
                         return added
                 self.store.issue(
@@ -169,6 +182,18 @@ class RemoteLogCollector:
                     attempt_id, "Remote logs unavailable: " + str(exc), source="remote"
                 )
                 raise
+
+    async def follow(self, attempt_id: str) -> None:
+        """Poll through one SSH connection, reconnecting only after a failure."""
+        hostname = (await asyncio.to_thread(self.store.get, attempt_id))["hostname"]
+        while True:
+            try:
+                async with self.ssh.connection(hostname):
+                    while True:
+                        await self.collect(attempt_id)
+                        await asyncio.sleep(self.settings.log_poll_interval)
+            except (SSHConnectionError, TimeoutError):
+                await asyncio.sleep(self.settings.log_poll_interval)
 
     async def run(
         self,
@@ -206,7 +231,7 @@ class RemoteLogCollector:
         while True:
             try:
                 records = (
-                    self._ingest(attempt_id, page)
+                    await self._ingest(attempt_id, page)
                     if page is not None
                     else await self.collect(attempt_id)
                 )
@@ -214,7 +239,9 @@ class RemoteLogCollector:
                 failures = 0
                 # API collection and the health follower may advance the remote
                 # cursor concurrently. Parse committed rows using our own offset.
-                parsed = self.store.read(attempt_id, after=parse_offset)
+                parsed = await asyncio.to_thread(
+                    self.store.read, attempt_id, after=parse_offset
+                )
                 parse_offset = parsed["next_offset"]
                 records = parsed["records"]
                 for entry in records:
