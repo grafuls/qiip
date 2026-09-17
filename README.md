@@ -1240,7 +1240,8 @@ allow extra filesystem space for SQLite pages, indexes, manifests, and the
 transient rollback journal. Prefix rotation retains monotonic sequence numbers
 and dropped-record counts. Age/count retention runs at store initialization,
 attempt creation, and history listing. Active attempts are protected from manifest
-eviction; their record payloads still rotate. Expired manifests are counted in
+eviction and do not consume the completed-attempt count budget; their record
+payloads still rotate. Expired manifests are counted in
 `evicted_attempts` (gateway-wide), and requesting an evicted attempt returns 404.
 Raw-tail capacity is divided across the configured node attempt count, keeping
 runtime output bounded after startup collection ends. Existing pre-upgrade logs
@@ -1253,3 +1254,57 @@ installers and a fake engine. It exercises lost acknowledgements, stream
 interruption, restart, concurrent readers, retries, record/raw-file rotation, and
 missing remote/journal sources. These checks do not establish success rates or
 failure causes on real fleet hardware.
+
+## Troubleshooting
+
+### Reading provisioning logs offline
+
+When the gateway is down, use the SQLite CLI to read its persistent database.
+The default path is `data/provisioning-logs.sqlite3`; substitute your configured
+`INFERENCE_PROXY_PROVISIONING__LOG_DB_PATH` if different. Open it read-only to
+avoid accidentally creating or modifying a database. First list attempts:
+
+```bash
+sqlite3 -readonly -header -column data/provisioning-logs.sqlite3 \
+  "SELECT id, hostname, json_extract(metadata,'$.started_at') AS started_at,
+          json_extract(metadata,'$.status') AS status,
+          json_extract(metadata,'$.failure_summary') AS failure_summary,
+          dropped AS dropped_records
+   FROM attempts ORDER BY created DESC;"
+```
+
+Replace `ATTEMPT_ID` below with an ID from that list to read one attempt in
+sequence order. Sequence numbers are local to each attempt:
+
+```bash
+sqlite3 -readonly data/provisioning-logs.sqlite3 \
+  "SELECT json_extract(payload,'$.ts') || ' [' ||
+          json_extract(payload,'$.source') || '] ' || json_extract(payload,'$.msg')
+   FROM records WHERE attempt='ATTEMPT_ID' ORDER BY seq;"
+```
+
+For a JSONL export preserving all record metadata, use `SELECT payload` (each
+row is already JSON). The companion manifest includes source availability,
+issues, and retention counters, which distinguish missing evidence from an
+empty log:
+
+```bash
+sqlite3 -readonly data/provisioning-logs.sqlite3 \
+  "SELECT payload FROM records WHERE attempt='ATTEMPT_ID' ORDER BY seq;" \
+  | jq -c . > provisioning-attempt.jsonl
+sqlite3 -readonly data/provisioning-logs.sqlite3 \
+  "SELECT json_object('metadata',json(metadata),'next_seq',next_seq,
+                      'remote_cursor',remote_cursor,'dropped_records',dropped,
+                      'retained_bytes',bytes)
+   FROM attempts WHERE id='ATTEMPT_ID';" \
+  | jq . > provisioning-attempt-manifest.json
+```
+
+`sqlite3 -readonly data/provisioning-logs.sqlite3 .dump` produces a SQL backup,
+not JSONL. These reads do not require the gateway or network access. If only a
+node's evidence is available, run the same queries on
+`/var/lib/qiip/provisioning-logs/attempts.sqlite3` (or the configured
+`INFERENCE_PROXY_PROVISIONING__LOG_REMOTE_ROOT` plus `/attempts.sqlite3`). The
+node also keeps bounded `<attempt-id>.engine.log` raw tails alongside that
+database. Copy the database while its writers are stopped, or use SQLite's
+`.backup` command for a consistent snapshot of a live database.

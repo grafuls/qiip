@@ -7,7 +7,6 @@ Commands are sent to the worker's stdin and are never written into the log DB.
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import re
@@ -35,35 +34,20 @@ def open_store(config):
 
 def prune_raw_logs(config, store):
     root = Path(config["root"])
-    paths = sorted(
-        (
-            p
-            for p in root.glob("*.engine.log")
-            if re.fullmatch(r"[a-f0-9]{32}\.engine\.log", p.name)
-        ),
-        key=lambda p: p.stat().st_mtime,
-        reverse=True,
-    )
+    paths = []
+    for path in root.glob("*.engine.log"):
+        if re.fullmatch(r"[a-f0-9]{32}\.engine\.log", path.name):
+            with suppress(FileNotFoundError):
+                paths.append((path.stat().st_mtime, path))
+    paths.sort(key=lambda item: item[0], reverse=True)
     cutoff = time.time() - config["retention_days"] * 86400
-    for index, path in enumerate(paths):
-        if index >= config["max_attempts"] - 1 or path.stat().st_mtime < cutoff:
-            with contextlib.suppress(KeyError):
+    for index, (modified, path) in enumerate(paths):
+        if index >= config["max_attempts"] - 1 or modified < cutoff:
+            with suppress(KeyError):
                 store.issue(
                     path.name.split(".")[0], "Raw engine tail evicted by node retention"
                 )
-            path.unlink()
-
-
-def save_phase(store, attempt, phase, **changes):
-    # Workers for one attempt are sequential at the setup/start boundary.
-    with store._db() as db:
-        db.execute("BEGIN IMMEDIATE")
-        row = db.execute(
-            "SELECT metadata FROM attempts WHERE id=?", (attempt,)
-        ).fetchone()
-        metadata = json.loads(row[0])
-        metadata.setdefault("phases", {}).setdefault(phase, {}).update(changes)
-        store._update(db, attempt, metadata)
+            path.unlink(missing_ok=True)
 
 
 def worker(config):
@@ -138,7 +122,7 @@ def worker(config):
         ):
             os.set_blocking(pipe.fileno(), False)
             selector.register(pipe, selectors.EVENT_READ, [source, bytearray()])
-        save_phase(store, attempt, phase, status="running", pid=proc.pid)
+        store.update_phase(attempt, phase, status="running", pid=proc.pid)
         # Cursor-based journal catch-up is done on-node before rejoining follow.
         # journalctl returns an error when an expired cursor cannot be sought.
         cursor = store.get(attempt).get("journal_cursor")
@@ -201,7 +185,7 @@ def worker(config):
                 cancelled = True
                 with suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGTERM)
-                save_phase(store, attempt, phase, status="complete", exit_status=130)
+                store.update_phase(attempt, phase, status="complete", exit_status=130)
                 store.issue(attempt, "Remote command cancelled by gateway")
                 break
             pipes_open = any(
@@ -211,8 +195,7 @@ def worker(config):
             if not command_done and proc.poll() is not None and not pipes_open:
                 command_done = True
                 collection_deadline = now + config["health_timeout"]
-                save_phase(
-                    store,
+                store.update_phase(
                     attempt,
                     phase,
                     status="complete",
@@ -224,8 +207,9 @@ def worker(config):
                 now >= deadline
                 or now - last_command_output >= config["inactivity_timeout"]
             ):
-                os.killpg(proc.pid, signal.SIGTERM)
-                save_phase(store, attempt, phase, status="complete", exit_status=124)
+                with suppress(ProcessLookupError):
+                    os.killpg(proc.pid, signal.SIGTERM)
+                store.update_phase(attempt, phase, status="complete", exit_status=124)
                 store.issue(
                     attempt, "Remote command exceeded its total or inactivity deadline"
                 )
@@ -240,7 +224,7 @@ def worker(config):
             store.issue(attempt, "Engine startup log unavailable", source="engine")
     except Exception as exc:
         store.issue(attempt, "Node recorder failed: " + str(exc), source="recorder")
-        save_phase(store, attempt, phase, status="complete", exit_status=125)
+        store.update_phase(attempt, phase, status="complete", exit_status=125)
     finally:
         for process in processes:
             if process.poll() is None:
@@ -292,7 +276,7 @@ def worker(config):
             store.issue(
                 attempt, "Service journal unavailable (nonzero exit)", source="journal"
             )
-        save_phase(store, attempt, phase, recording=False)
+        store.update_phase(attempt, phase, recording=False)
         store.update(
             attempt,
             status="complete"
@@ -302,14 +286,36 @@ def worker(config):
 
 
 def engine_sink():
+    """Keep draining the engine pipe even if recording or raw-tail storage fails."""
+    store = None
+    try:
+        config = json.loads(os.environ["QIIP_LOG_CONFIG"])
+        store = open_store(config)
+        capture_engine_output(config, store)
+    except Exception as exc:
+        if store is not None:
+            with suppress(Exception):
+                store.issue(
+                    config["attempt_id"],
+                    "Engine log recorder failed: " + str(exc),
+                    source="engine",
+                )
+        # Even reporting the failure can fail (e.g. a full log filesystem).
+        with suppress(Exception):
+            print("Engine logging stopped: " + str(exc), file=sys.stderr)
+    # Never SIGPIPE an otherwise healthy engine because its evidence expired
+    # or the recorder failed, including during initialization or file close.
+    while sys.stdin.buffer.read(8192):
+        pass
+
+
+def capture_engine_output(config, store):
     """Keep startup evidence and a bounded raw engine tail, including after setup.
 
     The engine writes to a pipe, so rotation cannot race an independent file
     reader or discard unread output. After collection ends only the raw tail is
     maintained; its writer exits naturally with the engine.
     """
-    config = json.loads(os.environ["QIIP_LOG_CONFIG"])
-    store = open_store(config)
     path = Path(config["engine_log"])
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with path.open("wb", buffering=0) as output:
@@ -353,9 +359,6 @@ def engine_sink():
             chunk = chunk[-raw_limit:]
             output.write(chunk)
             size += len(chunk)
-    # Never SIGPIPE an otherwise healthy engine because its evidence expired.
-    while sys.stdin.buffer.read(8192):
-        pass
 
 
 def main():
@@ -387,7 +390,7 @@ def main():
             store.update(
                 attempt, status="running", stop_collection=False, cancel_command=False
             )
-            save_phase(store, attempt, phase, status="launching", recording=True)
+            store.update_phase(attempt, phase, status="launching", recording=True)
             proc = subprocess.Popen(
                 [sys.executable, str(Path(__file__).resolve()), "worker"],
                 stdin=subprocess.PIPE,

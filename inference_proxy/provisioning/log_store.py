@@ -63,7 +63,26 @@ class AttemptLogStore:
                     name TEXT PRIMARY KEY, value INTEGER NOT NULL
                 );
                 INSERT OR IGNORE INTO statistics VALUES ('evicted_attempts', 0);
+                CREATE TRIGGER IF NOT EXISTS record_bytes_insert
+                AFTER INSERT ON records BEGIN
+                    UPDATE statistics SET value=value+NEW.bytes WHERE name='retained_bytes';
+                END;
+                CREATE TRIGGER IF NOT EXISTS record_bytes_delete
+                AFTER DELETE ON records BEGIN
+                    UPDATE statistics SET value=value-OLD.bytes WHERE name='retained_bytes';
+                END;
             """)
+            db.execute("BEGIN IMMEDIATE")
+            if (
+                db.execute(
+                    "SELECT value FROM statistics WHERE name='retained_bytes'"
+                ).fetchone()
+                is None
+            ):
+                # One-time backfill for databases created before byte accounting.
+                db.execute(
+                    "INSERT INTO statistics SELECT 'retained_bytes', coalesce(sum(bytes),0) FROM records"
+                )
             self._prune(db)
 
     @contextmanager
@@ -105,6 +124,7 @@ class AttemptLogStore:
             finished_at=None,
         )
         with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT INTO attempts(id,hostname,created,metadata) VALUES(?,?,?,?)",
                 (attempt_id, hostname, time.time(), json.dumps(metadata)),
@@ -119,25 +139,30 @@ class AttemptLogStore:
             ).fetchone()
             if row is None:
                 raise KeyError(attempt_id)
-            result: dict[str, Any] = json.loads(row["metadata"])
-            result.update(
-                next_seq=row["next_seq"],
-                remote_cursor=row["remote_cursor"],
-                dropped_records=row["dropped"],
-                retained_bytes=row["bytes"],
-            )
-            result["incomplete"] = bool(result["issues"] or row["dropped"])
-            return result
+            return self._manifest(row)
+
+    @staticmethod
+    def _manifest(row: sqlite3.Row) -> dict[str, Any]:
+        result: dict[str, Any] = json.loads(row["metadata"])
+        result.update(
+            next_seq=row["next_seq"],
+            remote_cursor=row["remote_cursor"],
+            dropped_records=row["dropped"],
+            retained_bytes=row["bytes"],
+        )
+        result["incomplete"] = bool(result["issues"] or row["dropped"])
+        return result
 
     def history(
         self, hostname: str, *, limit: int = 100, offset: int = 0
     ) -> dict[str, Any]:
         with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
             self._prune(db)
-            ids = [
-                r[0]
-                for r in db.execute(
-                    "SELECT id FROM attempts WHERE hostname=? ORDER BY created DESC LIMIT ? OFFSET ?",
+            attempts = [
+                self._manifest(row)
+                for row in db.execute(
+                    "SELECT * FROM attempts WHERE hostname=? ORDER BY created DESC LIMIT ? OFFSET ?",
                     (hostname, limit, offset),
                 )
             ]
@@ -147,9 +172,20 @@ class AttemptLogStore:
             evicted = db.execute(
                 "SELECT value FROM statistics WHERE name='evicted_attempts'"
             ).fetchone()[0]
-        return dict(
-            attempts=[self.get(i) for i in ids], total=total, evicted_attempts=evicted
-        )
+        return dict(attempts=attempts, total=total, evicted_attempts=evicted)
+
+    def update_phase(self, attempt_id: str, phase: str, **changes: Any) -> None:
+        """Atomically merge a node worker's phase state with current metadata."""
+        with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT metadata FROM attempts WHERE id=?", (attempt_id,)
+            ).fetchone()
+            if row is None:
+                raise KeyError(attempt_id)
+            metadata = json.loads(row[0])
+            metadata.setdefault("phases", {}).setdefault(phase, {}).update(changes)
+            self._update(db, attempt_id, metadata)
 
     def update(self, attempt_id: str, **fields: Any) -> None:
         if isinstance(fields.get("failure_summary"), str):
@@ -270,8 +306,10 @@ class AttemptLogStore:
             )
             self._rotate(db, attempt_id, self.attempt_max_bytes)
             total = db.execute(
-                "SELECT coalesce(sum(bytes),0) FROM attempts"
+                "SELECT value FROM statistics WHERE name='retained_bytes'"
             ).fetchone()[0]
+            if total <= self.max_bytes:
+                return entry
             for candidate in db.execute(
                 "SELECT id, bytes FROM attempts WHERE bytes>0 ORDER BY created"
             ).fetchall():
@@ -313,15 +351,18 @@ class AttemptLogStore:
             "SELECT id,created,metadata FROM attempts ORDER BY created DESC"
         ).fetchall()
         cutoff = time.time() - self.retention_days * 86400
-        for index, row in enumerate(rows):
+        kept = 0
+        for row in rows:
             metadata = json.loads(row["metadata"])
-            if (row["created"] < cutoff or index >= self.max_attempts) and metadata[
-                "status"
-            ] != "running":
+            if metadata["status"] == "running":
+                continue
+            if row["created"] < cutoff or kept >= self.max_attempts:
                 db.execute("DELETE FROM attempts WHERE id=?", (row["id"],))
                 db.execute(
                     "UPDATE statistics SET value=value+1 WHERE name='evicted_attempts'"
                 )
+            else:
+                kept += 1
 
     def read(
         self,
@@ -360,6 +401,7 @@ class AttemptLogStore:
 
     def interrupt_running(self) -> None:
         with self._db() as db:
+            db.execute("BEGIN IMMEDIATE")
             for row in db.execute("SELECT id,metadata FROM attempts").fetchall():
                 metadata = json.loads(row["metadata"])
                 if metadata["status"] == "running":

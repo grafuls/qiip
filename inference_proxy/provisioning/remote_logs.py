@@ -135,10 +135,9 @@ class RemoteLogCollector:
             not page["has_more"]
             and remote["next_seq"] > self.store.get(attempt_id)["remote_cursor"]
         ):
-            cursor = self.store.get(attempt_id)["remote_cursor"]
             self.store.append(
                 attempt_id,
-                f"Remote records {cursor}..{remote['next_seq'] - 1} unavailable",
+                "Remote collection reached an unavailable suffix",
                 source="collector",
                 level="warning",
                 remote_seq=remote["next_seq"] - 1,

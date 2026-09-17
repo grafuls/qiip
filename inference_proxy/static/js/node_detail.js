@@ -737,6 +737,7 @@ var logResumeCursor = null;
 var LOG_RECONNECT_BASE_MS = 1000;
 var LOG_RECONNECT_MAX_DELAY_MS = 30000;
 var LOG_RECONNECT_MAX_ELAPSED_MS = 5 * 60 * 1000;
+var LOG_SEEN_ENTRY_LIMIT = 1000;
 
 function isTerminalTask(task) {
   return ["complete", "failed", "teardown_complete"].indexOf(task.current_step) !== -1;
@@ -851,11 +852,17 @@ function connectLogStream() {
     try {
       var entry = JSON.parse(ev.data);
       if (entry.attempt_id && Number.isInteger(entry.seq)) {
+        if (logResumeCursor && logResumeCursor.attempt === entry.attempt_id && entry.seq < logResumeCursor.after) return;
         logResumeCursor = { attempt: entry.attempt_id, after: entry.seq + 1 };
+      } else {
+        // Legacy streams and retention warnings have no durable sequence.
+        var entryKey = JSON.stringify(entry);
+        if (logSeenEntries.has(entryKey)) return;
+        logSeenEntries.add(entryKey);
+        if (logSeenEntries.size > LOG_SEEN_ENTRY_LIMIT) {
+          logSeenEntries.delete(logSeenEntries.values().next().value);
+        }
       }
-      var entryKey = JSON.stringify(entry);
-      if (logSeenEntries.has(entryKey)) return;
-      logSeenEntries.add(entryKey);
       logReceivedAny = true;
       var line = document.createElement("div");
       line.className = "log-line";
