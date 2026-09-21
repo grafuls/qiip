@@ -115,6 +115,11 @@ provisioning:
   # Reconnect attempts: 0..20. Poll interval and retention days must be positive.
   log_reconnect_attempts: 3
   log_poll_interval: 1
+  # Automatic failure snapshots. Bounds apply separately to each source and
+  # to the complete SSH collection, including retrieval. Output uses log budgets.
+  diagnostics_source_timeout: 3
+  diagnostics_timeout: 25
+  diagnostics_source_max_bytes: 16384
   nfs_mount_point: /srv/hf-cache
   # The default NVIDIA driver and llama.cpp versions ship with a verified
   # SHA-256; changing a version requires configuring its matching digest.
