@@ -88,6 +88,8 @@ elif name == "sudo":
     if command == "tee":
         content = sys.stdin.read()
         if rest[0].startswith(str(root)): pathlib.Path(rest[0]).write_text(content)
+    if command == "cp":
+        if rest[-1].startswith(str(root)): pathlib.Path(rest[-1]).write_bytes(pathlib.Path(rest[0]).read_bytes())
     if command in ("mkdir", "install"):
         if command == "mkdir" or "-d" in rest: pathlib.Path(rest[-1]).mkdir(parents=True, exist_ok=True)
     if command == "rm":

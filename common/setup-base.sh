@@ -133,7 +133,7 @@ GPU_MODULE_ROOT="${GPU_MODULE_ROOT:-/sys/module}"
 require_driver_reboot() {
     local reason="$1"
     sudo mkdir -p "$DRIVER_STATE_DIR"
-    cat "$BOOT_ID_FILE" | sudo tee "${DRIVER_STATE_DIR}/driver-reboot" >/dev/null
+    sudo cp "$BOOT_ID_FILE" "${DRIVER_STATE_DIR}/driver-reboot"
     resume_required reboot_required "${reason}; reboot the node, then retry setup"
 }
 
