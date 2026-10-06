@@ -5,14 +5,36 @@
 # VRAM, OS/ABI), never GPU marketing names.
 
 # Profile-relevant constants (single source of truth)
-PROFILE_CUDA_TOOLKIT_VERSION="13.0"  # matches torch 2.11.0 CUDA-13.0 wheels in auto-vllm/uv.lock
+PROFILE_DEFAULT_CUDA_TOOLKIT_VERSION="13.0"  # matches torch 2.11.0 CUDA-13.0 wheels in auto-vllm/uv.lock
+PROFILE_CUDA_TOOLKIT_VERSION="$PROFILE_DEFAULT_CUDA_TOOLKIT_VERSION"
 # CUDA 13.0 removed Maxwell/Pascal/Volta (offline compilation and libraries);
 # 12.x is the last series that can target Volta SM70, so Volta pins 12.9.
 PROFILE_VOLTA_CUDA_TOOLKIT_VERSION="12.9"
+# NVIDIA's CUDA compatibility contract, plus the execution probe, permits
+# reuse without requiring the exact installer version. No cuda-compat shim.
+# https://docs.nvidia.com/cuda/archive/13.0.0/cuda-toolkit-release-notes/
+# https://docs.nvidia.com/cuda/archive/12.9.2/cuda-toolkit-release-notes/
+PROFILE_DRIVER_MIN="580.65.06"
+PROFILE_DRIVER_MAX_BRANCH=""
 PROFILE_OS_ID="rhel"
 PROFILE_OS_MAJOR_MIN=9
 PROFILE_ARCH="x86_64"
 PROFILE_GLIBC_MIN="2.34"  # vLLM wheel ABI (manylinux_2_34, auto-vllm/setup.sh:38)
+
+detect_profile_os() {
+    OS_ID="unknown"
+    OS_VERSION_ID="0"
+    local os_release="${PROFILE_OS_RELEASE:-/etc/os-release}"
+    if [ -r "$os_release" ]; then
+# shellcheck disable=SC1091,SC1090
+        . "$os_release"
+        OS_ID="${ID:-unknown}"
+        OS_VERSION_ID="${VERSION_ID:-0}"
+    fi
+    OS_ARCH=$(uname -m)
+    GLIBC_VERSION=$(ldd --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+' | head -1)
+    [ -n "${GLIBC_VERSION:-}" ] || GLIBC_VERSION="0"
+}
 
 detect_profile_hardware() {
     if ! command -v nvidia-smi &>/dev/null; then
@@ -41,18 +63,7 @@ detect_profile_hardware() {
     GPU_DRIVER_VERSION=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader \
         | sed '/^[[:space:]]*$/d' | head -1 | xargs)
     NVSWITCH_COUNT=$(lspci 2>/dev/null | grep -ci nvswitch || true)
-    OS_ID="unknown"
-    OS_VERSION_ID="0"
-    local os_release="${PROFILE_OS_RELEASE:-/etc/os-release}"
-    if [ -r "$os_release" ]; then
-# shellcheck disable=SC1091,SC1090
-        . "$os_release"
-        OS_ID="${ID:-unknown}"
-        OS_VERSION_ID="${VERSION_ID:-0}"
-    fi
-    OS_ARCH=$(uname -m)
-    GLIBC_VERSION=$(ldd --version 2>/dev/null | grep -oP '[0-9]+\.[0-9]+' | head -1)
-    [ -n "${GLIBC_VERSION:-}" ] || GLIBC_VERSION="0"
+    detect_profile_os
     return 0
 }
 
@@ -154,6 +165,13 @@ select_runtime_profile() {
     fi
     if [ "$bucket" = "volta" ]; then
         PROFILE_CUDA_TOOLKIT_VERSION="$PROFILE_VOLTA_CUDA_TOOLKIT_VERSION"
+        PROFILE_DRIVER_MIN="575.57.08"
+        # R580 is the last driver branch supporting Volta.
+        PROFILE_DRIVER_MAX_BRANCH="580"
+    else
+        PROFILE_CUDA_TOOLKIT_VERSION="$PROFILE_DEFAULT_CUDA_TOOLKIT_VERSION"
+        PROFILE_DRIVER_MIN="580.65.06"
+        PROFILE_DRIVER_MAX_BRANCH=""
     fi
 
     PROFILE_NAME="${engine}-${bucket}"
@@ -161,6 +179,7 @@ select_runtime_profile() {
     PROFILE_REASON="$reason"
     export PROFILE_NAME PROFILE_BUCKET PROFILE_REASON
     export PROFILE_CUDA_TOOLKIT_VERSION
+    export PROFILE_DRIVER_MIN PROFILE_DRIVER_MAX_BRANCH
     echo "[PROFILE:select:${PROFILE_NAME} (${PROFILE_REASON})]"
     return 0
 }
