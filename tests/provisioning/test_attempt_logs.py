@@ -124,6 +124,82 @@ async def test_selected_generation_survives_lost_activation_acknowledgement(
     assert not list(bundle.rglob("*.pyc"))
 
 
+@pytest.mark.parametrize("metadata", ["recorder_path", "staged_bundle"])
+async def test_logs_and_diagnostics_recover_immutable_recorder_after_gateway_restart(
+    harness: tuple[NodeProvisioner, LocalNodeSSH, AttemptLogStore], metadata: str
+) -> None:
+    provisioner, ssh, store = harness
+    await provisioner._ensure_remote_recorder("host1")
+    provisioner._begin_log("host1", InferenceEngine.VLLM)
+    await provisioner._upload_scripts("host1")
+    attempt = provisioner.log_buffer.attempts["host1"]
+    collector = provisioner._remote_logs
+    assert collector is not None
+    recorder = store.get(attempt)["recorder_path"]
+    if metadata == "staged_bundle":
+        store.update(attempt, recorder_path=None)
+    async for _stream, _line in collector.run(
+        "host1", "echo restart-evidence", stage="setup"
+    ):
+        pass
+    collector.record_failure(attempt, "setup", RuntimeError("fixture failure"))
+    await collector.collect(attempt, finish=True)
+    shutil.rmtree(ssh.root / "common")
+    reopened = AttemptLogStore(store.path)
+    restarted = RemoteLogCollector(
+        ssh, reopened, ProvisioningLogBuffer(store=reopened), provisioner._settings
+    )
+    assert not restarted.recorders
+    await restarted.collect(attempt)
+    await restarted.diagnose(attempt)
+    assert any(
+        "restart-evidence" in record["msg"]
+        for record in reopened.read(attempt)["records"]
+    )
+    assert (
+        reopened.get(attempt)["diagnostics"]["sources"]["os"]["status"] == "collected"
+    )
+    assert (ssh.root / recorder).is_file()
+    assert ssh.launches == 1
+
+
+async def test_malformed_generation_output_does_not_abort_gateway_or_recorder(
+    harness: tuple[NodeProvisioner, LocalNodeSSH, AttemptLogStore],
+) -> None:
+    provisioner, _ssh, store = harness
+    provisioner._begin_log("host1", InferenceEngine.VLLM)
+    attempt = provisioner.log_buffer.attempts["host1"]
+    valid = {"runtime_path": "/opt/fixture-runtime", "generation_id": "fixture"}
+    good = "[GENERATION:" + json.dumps(valid) + "]"
+    provisioner._record_generation("host1", good)
+    malformed = [
+        "[GENERATION:{broken}]",
+        "[GENERATION:null]",
+        "[GENERATION:[]]",
+        "[GENERATION:{}]",
+        "[GENERATION:truncated",
+    ]
+    for line in malformed:
+        provisioner._record_generation("host1", line)
+    assert store.get(attempt)["selected_generation"] == valid
+    collector = provisioner._remote_logs
+    assert collector is not None
+    command = shlex.join(("printf", "%s\n", good, *malformed, "still-running"))
+    output = []
+    async for _stream, line in collector.run("host1", command, stage="setup"):
+        output.append(line)
+    await collector.collect(attempt, finish=True)
+    assert "still-running" in output
+    assert store.get(attempt)["selected_generation"] == valid
+    assert any(
+        "Malformed generation marker" in issue for issue in store.get(attempt)["issues"]
+    )
+    assert all(
+        phase["exit_status"] == 0
+        for phase in store.get(attempt)["remote_phases"].values()
+    )
+
+
 class LocalNodeSSH(SSHClient):
     def __init__(self, root: Path, environment: dict[str, str]) -> None:
         # Startup scans the host's /proc before launching the controlled engine.

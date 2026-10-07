@@ -535,6 +535,12 @@ class NodeProvisioner:
             operation=operation,
             bundle_version="sha256:" + identity,
         )
+        if self._log_buffer.store is not None and self._remote_logs is not None:
+            recorder = self._remote_logs.recorders.get(hostname)
+            if recorder:
+                self._log_buffer.store.update(
+                    self._log_buffer.attempts[hostname], recorder_path=recorder
+                )
 
     async def collect_logs(self, hostname: str, attempt_id: str) -> dict[str, object]:
         store = self._log_buffer.store
@@ -978,7 +984,15 @@ class NodeProvisioner:
     def _record_generation(self, hostname: str, line: str) -> None:
         if not line.startswith("[GENERATION:") or not line.endswith("]"):
             return
-        selected = json.loads(line[len("[GENERATION:") : -1])
+        try:
+            selected = json.loads(line[len("[GENERATION:") : -1])
+            if not isinstance(selected, dict) or not isinstance(
+                selected.get("runtime_path"), str
+            ):
+                raise ValueError("expected generation metadata")
+        except ValueError:
+            logger.warning("invalid_generation_marker", hostname=hostname)
+            return
         if self._log_buffer.store is not None:
             self._log_buffer.store.update(
                 self._log_buffer.attempts[hostname],
@@ -2596,6 +2610,7 @@ class NodeProvisioner:
                 self._log_buffer.attempts[hostname],
                 staged_bundle=bundle.rsplit("/", 1)[1],
                 bundle_version="sha256:" + bundle.rsplit("/", 1)[1],
+                recorder_path=f"{bundle}/common/provision-logs.py",
             )
 
     async def _run_setup(

@@ -490,6 +490,35 @@ def _config(attempt_id: str) -> dict[str, Any]:
     )
 
 
+def test_diagnostics_without_selected_generation_report_absent_runtime(
+    tmp_path: Path,
+) -> None:
+    store = AttemptLogStore(tmp_path / "node.sqlite3")
+    attempt = store.create("host1", engine="vllm")
+    config = _config(attempt)
+    store.update(
+        attempt,
+        diagnostics=dict(
+            sources={
+                name: dict(
+                    status="collected",
+                    window_until=diagnostics.journal_until(config["failure"]),
+                )
+                for name in diagnostics.SOURCE_NAMES
+                if name != "runtime"
+            }
+        ),
+    )
+    assert diagnostics.source_commands(config)["runtime"] == []
+    with patch.object(diagnostics, "capture") as capture:
+        diagnostics.collect(config, store)
+    capture.assert_not_called()
+    runtime = store.get(attempt)["diagnostics"]["sources"]["runtime"]
+    assert runtime["status"] == "unavailable"
+    assert runtime["reason"] == "No generation was selected for this attempt"
+    assert runtime["deferred"] is False
+
+
 @pytest.mark.skipif(
     shutil.which("journalctl") is None, reason="journalctl not installed"
 )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import errno
+import json
 import os
 import shlex
 import shutil
@@ -278,6 +279,9 @@ sleep 2
     env = _script_environment(
         tmp_path, vllm_bin=original_engine, process_log=tmp_path / "engine-events"
     )
+    _write_executable(
+        Path(env["PATH"].split(":")[0]) / "sudo", '#!/bin/bash\nexec "$@"\n'
+    )
     env.pop("AUTOVLLM_COMMAND_PATTERN", None)
     mounts = tmp_path / "mounts"
     mounts.write_text(
@@ -486,3 +490,295 @@ is_vllm_pid 1234
         timeout=5,
     )
     assert result.returncode == expected
+
+
+def test_external_interpreter_update_does_not_corrupt_sealed_runtime(
+    tmp_path: Path,
+) -> None:
+    runtime = _runtime(tmp_path, "runtime")
+    interpreter = tmp_path / "system-python"
+    _write_executable(interpreter, "#!/bin/bash\necho python-before-update\n")
+    (runtime / "bin/python").symlink_to(interpreter)
+    generations.seal_runtime(runtime, "same-version", ["python", "vllm"])
+    manifest = generations.verify_runtime(runtime)
+    assert "bin/python" not in manifest["files"]
+    assert manifest["external_links"] == {"bin/python": str(interpreter)}
+    _write_executable(interpreter, "#!/bin/bash\necho python-after-update\n")
+    assert generations.verify_runtime(runtime, "same-version") == manifest
+    root = tmp_path / "engine"
+    bundle = _bundle(tmp_path, "bundle")
+    _activate(root, bundle, runtime)
+    assert "runtime:runtime" in _launch(root, bundle).stdout
+    interpreter.unlink()
+    with pytest.raises(ValueError, match="external executable"):
+        generations.verify_runtime(runtime)
+
+
+@pytest.mark.parametrize(
+    "engine,script", [("vllm", "stop-vllm.sh"), ("llama_cpp", "stop-llamacpp.sh")]
+)
+@pytest.mark.parametrize("damage", ["binary", "manifest", "runtime"])
+def test_stop_dispatch_remains_available_when_runtime_is_damaged(
+    tmp_path: Path, engine: str, script: str, damage: str
+) -> None:
+    directory = "auto-vllm" if engine == "vllm" else "auto-llamacpp"
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    write_bundle(
+        bundle,
+        {
+            f"{directory}/{script}": b"#!/bin/bash\necho stopped\n",
+            "common/generations.py": TOOL.read_bytes(),
+        },
+    )
+    runtime = _runtime(tmp_path, "runtime")
+    root = tmp_path / "engine"
+    generations.activate(root, bundle, directory, runtime, {"QIIP_ENGINE": engine})
+    if damage == "binary":
+        (runtime / "bin/vllm").write_text("corrupt")
+    elif damage == "manifest":
+        (runtime / "RUNTIME.json").unlink()
+    else:
+        shutil.rmtree(runtime)
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(TOOL),
+            "exec",
+            str(root),
+            str(bundle / directory),
+            script,
+            "--force",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "stopped" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "action,script",
+    [
+        ("exec", "start-vllm.sh"),
+        ("exec-service", "start-vllm.sh"),
+        ("exec-service", "preflight.sh"),
+        ("exec-service", "wait-fabric.sh"),
+    ],
+)
+def test_saved_launch_settings_apply_only_to_every_service_exec(
+    tmp_path: Path, action: str, script: str
+) -> None:
+    bundle = tmp_path / "bundle"
+    bundle.mkdir()
+    write_bundle(
+        bundle,
+        {
+            "common/generations.py": TOOL.read_bytes(),
+            **{
+                f"auto-vllm/{name}": b"#!/bin/bash\nenv\n"
+                for name in ("start-vllm.sh", "preflight.sh", "wait-fabric.sh")
+            },
+        },
+    )
+    root = tmp_path / "engine"
+    selected = _activate(root, bundle, _runtime(tmp_path, "runtime"))
+    saved = {
+        "AUTOVLLM_MODEL": "old/model",
+        "AUTOVLLM_GPU_DEVICES": "1",
+        "AUTOVLLM_TENSOR_PARALLEL": "1",
+        "AUTOVLLM_MAX_MODEL_LEN": "16384",
+        "AUTOVLLM_TOOL_CALL_PARSER": "old-parser",
+        "AUTOVLLM_REASONING_PARSER": "old-reasoning",
+        "AUTOVLLM_EXTRA_ARGS": "--old-arg",
+        "AUTOVLLM_MAX_BATCHED_TOKENS": "1000",
+        "AUTOVLLM_GPU_MEM_UTIL": "0.8",
+        "AUTOVLLM_DTYPE": "float16",
+    }
+    (root / "current/vllm.env").write_text(
+        "\n".join(f"{key}={value}" for key, value in saved.items())
+    )
+    env = {"PATH": os.environ["PATH"]}
+    if action == "exec":
+        env["AUTOVLLM_MODEL"] = "new/model"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(TOOL),
+            action,
+            str(root),
+            str(bundle / "auto-vllm"),
+            script,
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=10,
+    )
+    values = dict(
+        line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+    )
+    if action == "exec":
+        assert values["AUTOVLLM_MODEL"] == "new/model"
+        assert not (saved.keys() - {"AUTOVLLM_MODEL"}) & values.keys()
+    else:
+        assert {key: values[key] for key in saved} == saved
+    unit = (
+        root / "generations" / selected["generation_id"] / "vllm.service"
+    ).read_text()
+    assert unit.count(" exec-service ") == 3
+
+
+def test_setup_reactivation_clears_saved_settings_and_preserves_previous(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "engine"
+    first_bundle = _bundle(tmp_path, "old-bundle")
+    old = _activate(root, first_bundle, _runtime(tmp_path, "old-runtime"))
+    old_env = root / "current/vllm.env"
+    old_env.write_text("AUTOVLLM_MODEL=old/model\n")
+    second_bundle = _bundle(tmp_path, "new-bundle")
+    runtime = _runtime(tmp_path, "new-runtime")
+    new = _activate(root, second_bundle, runtime)
+    assert (root / "previous/vllm.env").read_text() == "AUTOVLLM_MODEL=old/model\n"
+    (root / "current/vllm.env").write_text("AUTOVLLM_MODEL=new/model\n")
+    assert _activate(root, second_bundle, runtime) == new
+    assert not (root / "current/vllm.env").exists()
+    assert (root / "previous").resolve().name == old["generation_id"]
+    assert generations.rollback(root) == old
+    assert (root / "current/vllm.env").read_text() == "AUTOVLLM_MODEL=old/model\n"
+
+
+@pytest.mark.parametrize("recover", ["rollback", "activate"])
+def test_rollback_journal_can_abandon_corrupt_current_generation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, recover: str
+) -> None:
+    root = tmp_path / "engine"
+    prior = _activate(
+        root, _bundle(tmp_path, "old-bundle"), _runtime(tmp_path, "old-runtime")
+    )
+    runtime = _runtime(tmp_path, "broken-runtime")
+    broken = _activate(root, _bundle(tmp_path, "broken-bundle"), runtime)
+    (runtime / "RUNTIME.json").unlink()
+    replace = os.replace
+
+    def interrupt(source: Any, destination: Any) -> None:
+        if Path(destination) == root / "current":
+            raise OSError(errno.EIO, "controlled interrupted rollback")
+        replace(source, destination)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", interrupt)
+        with pytest.raises(OSError):
+            generations.rollback(root)
+    assert json.loads((root / "ROLLBACK.json").read_text())["previous"].endswith(
+        broken["generation_id"]
+    )
+    if recover == "rollback":
+        assert generations.rollback(root) == prior
+    else:
+        replacement = _activate(
+            root,
+            _bundle(tmp_path, "replacement"),
+            _runtime(tmp_path, "replacement-runtime"),
+        )
+        assert (root / "current").resolve().name == replacement["generation_id"]
+        assert (root / "previous").resolve().name == prior["generation_id"]
+    assert not (root / "ROLLBACK.json").exists()
+
+
+@pytest.mark.parametrize("interrupt", [False, True])
+def test_publish_recovers_damaged_completed_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, interrupt: bool
+) -> None:
+    files = {"common/tool.py": b"print('verified')\n"}
+    staged = tmp_path / ".upload-1"
+    staged.mkdir()
+    identity = write_bundle(staged, files)
+    final = tmp_path / identity
+    generations.publish_bundle(staged, final, identity)
+    (final / "common/tool.py").unlink()
+    staged.mkdir()
+    write_bundle(staged, files)
+    rename = os.rename
+
+    def fail_publication(source: Any, destination: Any) -> None:
+        if Path(destination) == final:
+            raise OSError(errno.EIO, "controlled interrupted repair")
+        rename(source, destination)
+
+    if interrupt:
+        with monkeypatch.context() as patch:
+            patch.setattr(os, "rename", fail_publication)
+            with pytest.raises(OSError):
+                generations.publish_bundle(staged, final, identity)
+    generations.publish_bundle(staged, final, identity)
+    generations.verify_bundle(final, identity)
+    assert not staged.exists()
+    assert len(list(tmp_path.glob(".corrupt-*"))) == 1
+
+
+def test_reactivation_through_symlink_preserves_rollback_target(tmp_path: Path) -> None:
+    target = tmp_path / "actual-root"
+    target.mkdir()
+    root = tmp_path / "symlink-root"
+    root.symlink_to(target)
+    prior = _activate(
+        root, _bundle(tmp_path, "old-bundle"), _runtime(tmp_path, "old-runtime")
+    )
+    bundle = _bundle(tmp_path, "new-bundle")
+    runtime = _runtime(tmp_path, "new-runtime")
+    selected = _activate(root, bundle, runtime)
+    assert _activate(root, bundle, runtime) == selected
+    assert (root / "previous").resolve().name == prior["generation_id"]
+    assert generations.rollback(root) == prior
+
+
+def test_standalone_llamacpp_recovers_dangling_first_install_links(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "install-root"
+    runtime = _runtime(root, "installed")
+    links = tmp_path / "links"
+    links.mkdir()
+    for binary in ("llama-server", "llama-fit-params", "llama-quantize"):
+        (links / binary).symlink_to(root / "current/bin" / binary)
+        _write_executable(runtime / "bin" / binary, "#!/bin/bash\nexit 0\n")
+    env = _script_environment(
+        tmp_path, vllm_bin=runtime / "bin/vllm", process_log=tmp_path / "events"
+    )
+    _write_executable(
+        Path(env["PATH"].split(":")[0]) / "sudo", '#!/bin/bash\nexec "$@"\n'
+    )
+    command = f"""
+source {shlex.quote(str(ROOT / "auto-llamacpp/setup.sh"))}
+LLAMACPP_INSTALL_ROOT={shlex.quote(str(root))}
+LLAMACPP_LINK_DIR={shlex.quote(str(links))}
+select_llamacpp_runtime {shlex.quote(str(runtime))}
+"""
+    result = subprocess.run(
+        ["bash", "-c", command], env=env, text=True, capture_output=True, timeout=10
+    )
+    assert result.returncode == 0, result.stderr
+    assert (root / "current").resolve() == runtime
+    assert all(
+        (links / name).is_file()
+        for name in ("llama-server", "llama-fit-params", "llama-quantize")
+    )
+
+
+def test_setup_generation_mutations_use_sudo(tmp_path: Path) -> None:
+    env = _vllm_setup_environment(tmp_path)
+    sudo = Path(env["PATH"].split(":")[0]) / "sudo"
+    operations = tmp_path / "sudo.log"
+    _write_executable(
+        sudo,
+        f'#!/bin/bash\nprintf \'%s\\n\' "$*" >> {shlex.quote(str(operations))}\nexec "$@"\n',
+    )
+    result = _setup(env)
+    assert result.returncode == 0, result.stderr
+    commands = operations.read_text().splitlines()
+    for action in ("seal-runtime", "setup-bundle", "activate"):
+        assert any(f"generations.py {action} " in command for command in commands)

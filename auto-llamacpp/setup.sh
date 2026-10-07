@@ -357,7 +357,8 @@ select_llamacpp_runtime() {
         # Stable compatibility links are installed once, before the commit.
         sudo mkdir -p "$LLAMACPP_LINK_DIR"
         if [ ! -L "${LLAMACPP_INSTALL_ROOT%/}/current" ] \
-            && [ -L "${LLAMACPP_LINK_DIR%/}/llama-server" ]; then
+            && [ -L "${LLAMACPP_LINK_DIR%/}/llama-server" ] \
+            && [ -e "${LLAMACPP_LINK_DIR%/}/llama-server" ]; then
             local old_binary
             old_binary=$(readlink -f "${LLAMACPP_LINK_DIR%/}/llama-server")
             atomic_link "$(dirname "$(dirname "$old_binary")")" \

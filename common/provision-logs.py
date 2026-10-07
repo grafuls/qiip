@@ -174,11 +174,16 @@ def worker(config):
                 and message.startswith("[GENERATION:")
                 and message.endswith("]")
             ):
-                selected = json.loads(message[len("[GENERATION:") : -1])
-                store.update(
-                    attempt,
-                    selected_generation=selected,
-                )
+                try:
+                    selected = json.loads(message[len("[GENERATION:") : -1])
+                    if not isinstance(selected, dict) or not isinstance(
+                        selected.get("runtime_path"), str
+                    ):
+                        raise ValueError("expected generation metadata")
+                except ValueError:
+                    store.issue(attempt, "Malformed generation marker")
+                else:
+                    store.update(attempt, selected_generation=selected)
             reject = re.search(r"\[REJECT:unsupported_hardware:(.*?)\]", message)
             if reject and source.endswith("stderr"):
                 store.issue(attempt, f"unsupported_hardware: {reject.group(1)}")

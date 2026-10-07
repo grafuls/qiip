@@ -177,6 +177,12 @@ class RemoteLogCollector:
             model=attempt["model"],
             bundle_version=attempt["bundle_version"],
             selected_generation=attempt.get("selected_generation"),
+            recorder_path=attempt.get("recorder_path")
+            or (
+                f".qiip/bundles/{attempt['staged_bundle']}/common/provision-logs.py"
+                if attempt.get("staged_bundle")
+                else None
+            ),
             root=self.settings.log_remote_root,
             max_bytes=self.settings.log_remote_max_bytes,
             attempt_max_bytes=self.settings.log_remote_attempt_max_bytes,
@@ -229,7 +235,8 @@ class RemoteLogCollector:
             + shlex.quote(json.dumps(config))
             + " | python3 "
             + shlex.quote(
-                self.recorders.get(config["hostname"], "common/provision-logs.py")
+                config.get("recorder_path")
+                or self.recorders.get(config["hostname"], "common/provision-logs.py")
             )
             + " "
             + action

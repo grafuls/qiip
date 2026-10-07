@@ -322,6 +322,7 @@ def test_vllm_environment_syncs_with_frozen_uv_lock(tmp_path: Path) -> None:
     venv = tmp_path / "venv"
     bin_dir = venv / "bin"
     bin_dir.mkdir(parents=True)
+    _write_executable(bin_dir / "sudo", '#!/bin/bash\nexec "$@"\n')
     operation_log = tmp_path / "operations.log"
     uv_bin = tmp_path / "uv"
 
@@ -358,6 +359,7 @@ chmod +x "$UV_PROJECT_ENVIRONMENT/bin/"*
             "AUTOVLLM_TEST_LOG": str(operation_log),
             "AUTOVLLM_TEST_PYTHON": str(bin_dir / "python"),
             "AUTOVLLM_BOOTSTRAP_PYTHON": sys.executable,
+            "PATH": f"{bin_dir}:{env['PATH']}",
         }
     )
 

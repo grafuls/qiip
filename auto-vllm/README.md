@@ -159,7 +159,10 @@ rejects device indices that are not present, duplicate, or non-numeric. The
 effective device set, tensor-parallel size, and model are written to
 the selected generation's `vllm.env` only after a verified engine start; a failed launch
 leaves the previous file in place, so `vllm.service` keeps the last working
-allocation on a restart. Profiles assume a homogeneous GPU family: with a
+allocation on a restart. These saved settings apply to all service Exec lines,
+including preflight; fresh gateway and manual launches use their supplied
+settings and defaults. Setup clears the selected generation's saved settings,
+including when reactivating the same generation. Profiles assume a homogeneous GPU family: with a
 subset, model, VRAM, and compute-cap detection use the first selected card.
 
 ## Health check

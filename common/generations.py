@@ -83,9 +83,21 @@ def publish_bundle(staged: Path, final: Path, expected: str) -> None:
     with (final.parent / ".publication.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         if final.exists():
-            verify_bundle(final, expected)
-            shutil.rmtree(staged)
-        else:
+            try:
+                verify_bundle(final, expected)
+            except (OSError, ValueError, subprocess.CalledProcessError):
+                # Keep damaged content for inspection, then publish the already
+                # verified upload. A crash between renames is repaired by retry.
+                quarantine = Path(
+                    tempfile.mkdtemp(
+                        prefix=".corrupt-" + expected + "-", dir=final.parent
+                    )
+                )
+                os.rename(final, quarantine)
+                sync_directory(final.parent)
+            else:
+                shutil.rmtree(staged)
+        if staged.exists():
             os.rename(staged, final)
         sync_directory(final.parent)
 
@@ -113,11 +125,17 @@ def setup_bundle(root: Path, engine: Path) -> Path:
 
 def seal_runtime(root: Path, identity: str, binaries: list[str]) -> None:
     files = {}
+    external_links = {}
     for name in binaries:
         path = root / "bin" / name
         if not path.is_file() or not os.access(path, os.X_OK):
             raise ValueError(f"Required executable is missing: {path}")
-        files[f"bin/{name}"] = file_digest(path)
+        if path.is_symlink() and root.resolve() not in path.resolve().parents:
+            # uv uses the RPM-managed interpreter. Validate its link/existence,
+            # without treating an ordinary system update as runtime corruption.
+            external_links[f"bin/{name}"] = os.readlink(path)
+        else:
+            files[f"bin/{name}"] = file_digest(path)
     # Flush installed package data as well as entry points before publishing
     # the completion marker. A durable marker must not outrun its dependencies.
     for path in root.rglob("*"):
@@ -128,7 +146,10 @@ def seal_runtime(root: Path, identity: str, binaries: list[str]) -> None:
         if path.is_dir() and not path.is_symlink():
             sync_directory(path)
     sync_directory(root)
-    write_json(root / "RUNTIME.json", {"identity": identity, "files": files})
+    write_json(
+        root / "RUNTIME.json",
+        {"identity": identity, "files": files, "external_links": external_links},
+    )
 
 
 def verify_runtime(root: Path, identity: str | None = None) -> dict[str, Any]:
@@ -139,6 +160,14 @@ def verify_runtime(root: Path, identity: str | None = None) -> dict[str, Any]:
         path = root / name
         if not os.access(path, os.X_OK) or file_digest(path) != expected:
             raise ValueError(f"Required executable is corrupt: {path}")
+    for name, target in manifest.get("external_links", {}).items():
+        path = root / name
+        if (
+            not path.is_symlink()
+            or os.readlink(path) != target
+            or not os.access(path, os.X_OK)
+        ):
+            raise ValueError(f"Required external executable link is corrupt: {path}")
     return manifest
 
 
@@ -150,7 +179,7 @@ def atomic_link(target: Path, link: Path) -> None:
     sync_directory(link.parent)
 
 
-def evidence(generation: Path) -> dict[str, Any]:
+def evidence(generation: Path, *, runtime_integrity: bool = True) -> dict[str, Any]:
     value: dict[str, Any] = json.loads((generation / "GENERATION.json").read_text())
     if generation.name != digest(value):
         raise ValueError("Generation manifest identity mismatch")
@@ -159,12 +188,15 @@ def evidence(generation: Path) -> dict[str, Any]:
         ("common", Path(value["bundle_path"]) / "common"),
         ("runtime", Path(value["runtime_path"])),
     ):
-        if (generation / name).resolve(strict=True) != expected:
+        if (generation / name).resolve(
+            strict=runtime_integrity or name != "runtime"
+        ) != expected:
             raise ValueError(f"Generation link is corrupt: {name}")
     verify_bundle(Path(value["bundle_path"]), value["bundle_id"])
-    runtime = verify_runtime(Path(value["runtime_path"]), value["runtime_id"])
-    if digest(runtime) != value["runtime_manifest_id"]:
-        raise ValueError("Runtime manifest identity mismatch")
+    if runtime_integrity:
+        runtime = verify_runtime(Path(value["runtime_path"]), value["runtime_id"])
+        if digest(runtime) != value["runtime_manifest_id"]:
+            raise ValueError("Runtime manifest identity mismatch")
     for name, expected in value["files"].items():
         if file_digest(generation / name) != expected:
             raise ValueError(f"Generation configuration is corrupt: {name}")
@@ -185,7 +217,7 @@ def service_unit(root: Path, bundle: Path, engine_dir: str) -> str:
     # The unit always dispatches through current, even if systemd still has
     # the prior unit loaded after an interrupted reload.
     helper = bundle / "common/generations.py"
-    command = f"/usr/bin/python3 {quote(helper)} exec {quote(root.resolve())} {quote(bundle / engine_dir)}"
+    command = f"/usr/bin/python3 {quote(helper)} exec-service {quote(root.resolve())} {quote(bundle / engine_dir)}"
     return (
         "[Unit]\nDescription=vLLM inference server\n"
         "After=network-online.target nvidia-fabricmanager.service\n"
@@ -205,7 +237,6 @@ def finish_rollback(root: Path) -> dict[str, Any]:
     target = Path(change["target"])
     selected = evidence(target)
     previous = Path(change["previous"])
-    evidence(previous)
     atomic_link(previous, root / "previous")
     atomic_link(target, root / "current")
     journal.unlink()
@@ -275,9 +306,14 @@ def activate(
             os.rename(staged, generation)
             sync_directory(generations)
         selected = evidence(generation)
+        if unit:
+            # Setup must reset restart settings even when reusing the same
+            # generation; retained *other* generations keep their own settings.
+            (generation / "vllm.env").unlink(missing_ok=True)
+            sync_directory(generation)
         current = root / "current"
         try:
-            if current.exists() and current.resolve() != generation:
+            if current.exists() and current.resolve() != generation.resolve():
                 # Write the rollback pointer first. If interrupted before the
                 # commit, current is still valid; retries complete that commit.
                 atomic_link(current.resolve(), root / "previous")
@@ -295,18 +331,23 @@ def emit(value: dict[str, Any]) -> None:
     print("[GENERATION:" + json.dumps(value, sort_keys=True) + "]", flush=True)
 
 
-def launch(root: Path, fallback: Path, script: str, args: list[str]) -> None:
+def launch(
+    root: Path, fallback: Path, script: str, args: list[str], *, service: bool = False
+) -> None:
     current = root / "current"
     environment = dict(os.environ)
     if current.is_symlink():
         generation = current.resolve(strict=True)
-        value = evidence(generation)
+        value = evidence(
+            generation,
+            runtime_integrity=script not in {"stop-vllm.sh", "stop-llamacpp.sh"},
+        )
         directory = Path(value["bundle_path"]) / value["engine_dir"]
         runtime = Path(value["runtime_path"])
         environment = {**environment, **value["config"]}
         if value["config"]["QIIP_ENGINE"] == "vllm":
             saved = generation / "vllm.env"
-            if saved.is_file() and script == "start-vllm.sh":
+            if service and saved.is_file():
                 launch_config = dict(
                     line.split("=", 1)
                     for line in saved.read_text().splitlines()
@@ -360,8 +401,14 @@ def main() -> None:
                 json.loads(args[4]),
             )
         )
-    elif action == "exec":
-        launch(Path(args[0]), Path(args[1]), args[2], args[3:])
+    elif action in {"exec", "exec-service"}:
+        launch(
+            Path(args[0]),
+            Path(args[1]),
+            args[2],
+            args[3:],
+            service=action == "exec-service",
+        )
     elif action == "rollback":
         emit(rollback(Path(args[0])))
     else:

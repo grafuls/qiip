@@ -115,7 +115,7 @@ install_vllm() {
 
     local identity runtime marker cli option python_version
     python_version=$("$VLLM_BOOTSTRAP_PYTHON" --version)
-    marker=$(printf 'schema=1\nprofile=%s\ncuda=%s\npython=%s\nuv=%s\n' \
+    marker=$(printf 'schema=2\nprofile=%s\ncuda=%s\npython=%s\nuv=%s\n' \
         "${PROFILE_NAME:-unselected}" "${PROFILE_CUDA_TOOLKIT_VERSION:-unknown}" \
         "$python_version" "$UV_VERSION"; \
         sha256sum "${UV_PROJECT}/pyproject.toml" "${UV_PROJECT}/uv.lock" | awk '{print $1}')

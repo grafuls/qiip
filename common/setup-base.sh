@@ -10,7 +10,11 @@ source "$_qiip_profiles"
 unset _qiip_profiles
 
 qiip_generation_tool() {
-    python3 "${SCRIPT_DIR}/../common/generations.py" "$@"
+    case "$1" in
+        seal-runtime|setup-bundle|activate|rollback)
+            sudo python3 "${SCRIPT_DIR}/../common/generations.py" "$@" ;;
+        *) python3 "${SCRIPT_DIR}/../common/generations.py" "$@" ;;
+    esac
 }
 
 qiip_require_inactive_runtime() {
