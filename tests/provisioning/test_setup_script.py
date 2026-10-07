@@ -758,7 +758,7 @@ echo "$*" >> "$AUTOVLLM_TEST_LOG"
     operations = operation_log.read_text().splitlines()
     assert operations[0] == "dnf -y install wget nfs-utils pciutils gcc-c++"
     assert operations[1] == (
-        "dnf -y install python3.12"
+        "dnf -y install python3.12 python3.12-devel"
         if engine == "vllm"
         else "dnf -y install cmake make gcc"
     )
@@ -767,7 +767,7 @@ echo "$*" >> "$AUTOVLLM_TEST_LOG"
         "gcc make elfutils-libelf-devel"
     )
     assert "dnf -y update" not in "\n".join(operations)
-    assert "python3.12-devel" not in "\n".join(operations)
+    assert ("python3.12-devel" in "\n".join(operations)) is (engine == "vllm")
     assert operations[3] == "dnf -y install dnf-plugins-core"
 
 

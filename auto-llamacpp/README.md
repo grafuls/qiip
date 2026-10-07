@@ -100,7 +100,10 @@ Setup reuses compatible drivers after a real CUDA execution probe and installs
 only missing prerequisites. A working stack does not need kernel headers or
 an OS update. `AUTOVLLM_NVIDIA_DRIVER_VERSION` selects the fallback installer;
 replacement requires checksum verification, node idleness, and matching
-running-kernel build dependencies. Maintenance and reboot requirements stop
+running-kernel build dependencies. Compatible RPM and runfile/DKMS installs can
+rebuild a missing module before replacement. Until hardware can be measured,
+bootstrap drivers must satisfy the Volta recovery limits (575.57.08 through R580).
+Maintenance and reboot requirements stop
 setup with a `[RESUME:...]` marker; resolve the reason and retry setup to
 revalidate the stack before the source build. See the
 [driver maintenance runbook](../UPGRADING.md#13-prepare-for-strict-driver-and-cache-checks).

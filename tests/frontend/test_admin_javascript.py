@@ -1700,6 +1700,7 @@ sandbox.fetch = async function (url) {
     [
         ("maintenance_required", "Maintenance required"),
         ("reboot_required", "Reboot required"),
+        ("future_resume_state", "Setup paused"),
     ],
 )
 def test_dashboard_displays_required_setup_resume_action(
@@ -1734,6 +1735,7 @@ sandbox.fetch = async function (url) {
     [
         ("maintenance_required", "Maintenance required"),
         ("reboot_required", "Reboot required"),
+        ("future_resume_state", "Setup paused"),
     ],
 )
 def test_node_detail_displays_required_setup_resume_action(

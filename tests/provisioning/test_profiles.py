@@ -352,6 +352,7 @@ done
     env = os.environ.copy()
     env["PATH"] = f"{bin_dir}:{env['PATH']}"
     env["CUDA_NVCC"] = str(bin_dir / "nvcc")
+    env["GPU_COMPUTE_CAP"] = "8.0"
     return env
 
 

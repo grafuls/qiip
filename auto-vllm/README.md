@@ -91,7 +91,9 @@ AUTOVLLM_NFS_EXPORT=storage.example.com:/exports/huggingface ./setup.sh
 A compatible installed NVIDIA driver is reused after a CUDA execution probe,
 even when it differs from `AUTOVLLM_NVIDIA_DRIVER_VERSION`. That setting selects
 the fallback installer. Working drivers do not require kernel headers; setup
-installs only missing prerequisites and does not update the OS. Replacement
+installs only missing prerequisites, including `python3.12-devel` for Triton's
+runtime helper compilation, and does not update the OS. The CUDA proof preserves
+`AUTOVLLM_GPU_DEVICES` or the caller's `CUDA_VISIBLE_DEVICES` selection. Replacement
 requires a verified artifact, an idle node, and matching running-kernel build
 dependencies. Custom replacement NVIDIA or LLMFit versions require matching
 SHA-256 values.

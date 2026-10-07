@@ -697,7 +697,7 @@ async function refreshDetail() {
         }
         if (task.resume_state) {
           var rb = document.createElement("span"); rb.className = "badge badge-failed";
-          rb.textContent = task.resume_state === "reboot_required" ? "Reboot required" : "Maintenance required";
+          rb.textContent = formatSetupResumeState(task.resume_state);
           tdStatus.appendChild(rb);
         }
         ttr.appendChild(tdStatus);

@@ -443,7 +443,7 @@ async function refreshDashboard() {
           if (node.resume_state) {
             const resumeBadge = document.createElement("span");
             resumeBadge.className = "badge badge-failed";
-            resumeBadge.textContent = node.resume_state === "reboot_required" ? "Reboot required" : "Maintenance required";
+            resumeBadge.textContent = formatSetupResumeState(node.resume_state);
             detail.appendChild(resumeBadge);
           }
 

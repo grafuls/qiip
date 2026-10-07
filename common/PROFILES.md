@@ -6,8 +6,14 @@ version, OS/ABI and NVSwitch presence, then matches one tested profile. GPU
 marketing names are never used for selection; they appear only in logs and
 the recorded reason. Measurement uses the first SELECTED device when an
 `AUTOVLLM_GPU_DEVICES` subset is pinned (the gateway's subset semantics),
-otherwise physical device 0; queries are physical, so the subset is sized
+or from the caller's `CUDA_VISIBLE_DEVICES` selection, otherwise physical
+device 0; queries are physical, so the subset is sized
 against its own cards.
+
+The CUDA execution proof preserves that selection and targets the selected
+profile's architecture, with PTX for newer selected cards. It does not compile
+for or execute on unselected cards. Driver mutations still require the entire
+NVIDIA stack to be idle.
 
 Status is honest: rows are `candidate` unless validated on a real fleet
 node. The consumer-ada (SM 8.9) row is validated by the matched L4 pilot,
