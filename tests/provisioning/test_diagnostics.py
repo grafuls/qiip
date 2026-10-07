@@ -52,6 +52,7 @@ def _prepare(
     mount_nfs_cache() { :; }
     configure_firewall() { :; }
     install_llmfit() { :; }
+    activate_engine_generation() { :; }
     check_driver_resume() { :; }
     install_missing_packages() { :; }
     installed_driver_compatible() { :; }

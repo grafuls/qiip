@@ -15,6 +15,7 @@ import time
 from collections.abc import Iterator
 from contextlib import suppress
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 LOG_SOURCES = ("setup.stdout", "setup.stderr", "start.stdout", "start.stderr", "engine")
@@ -73,6 +74,10 @@ def source_commands(config: dict[str, Any]) -> dict[str, list[str]]:
             "print('torch=' + torch.__version__); print('CUDA runtime=' + str(torch.version.cuda))",
         ]
     )
+    selected = config.get("selected_generation")
+    if selected:
+        binary = "llama-server" if config["engine"] == "llama_cpp" else "python"
+        runtime[0] = str(Path(selected["runtime_path"]) / "bin" / binary)
     return {
         "nvidia_services": [
             *journal,
@@ -234,7 +239,12 @@ def collect(config: dict[str, Any], store: Any) -> None:
     if phase.get("finished_at"):
         command["finished_at"] = phase["finished_at"]
     failure["command"] = command
-    config = {**config, "failure": failure}
+    config = {
+        **config,
+        "failure": failure,
+        "selected_generation": attempt.get("selected_generation")
+        or config.get("selected_generation"),
+    }
     window_until = journal_until(failure)
     command_pending = bool(command.get("phase_id") and not command.get("finished_at"))
     deadline = time.monotonic() + config["diagnostics_timeout"]
